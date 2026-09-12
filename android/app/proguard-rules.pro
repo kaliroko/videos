@@ -1,7 +1,3 @@
-packageOptimization=true
-minifyEnabled=true
-shrinkResources=true
-
 # Flutter 核心保留规则
 -keep class io.flutter.** { *; }
 -keep class io.flutter.plugins.** { *; }
