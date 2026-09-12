@@ -1,0 +1,4 @@
+storePassword=changeit
+keyPassword=changeit
+keyAlias=upload
+storeFile=../keystore.jks

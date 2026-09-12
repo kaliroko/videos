@@ -1,0 +1,42 @@
+# Flutter/Dart
+build/
+.dart_tool/
+.packages
+.pub-cache/
+.flutter-plugins
+.flutter-plugins-dependencies
+*.iml
+.idea/
+*.dill
+*.coverage
+
+# Android
+android/.gradle/
+android/.idea/
+android/app/build/
+android/local.properties
+android/key.properties
+!android/key.properties.example
+
+# iOS
+ios/Flutter/Generated.xcconfig
+ios/Flutter/generated/
+ios/.xcworkspace/
+
+# macOS
+macos/Flutter/Generated.swift
+macos/Flutter/Flutter-Generated.xcconfig
+macos/.xcworkspace/
+
+# Web
+web/build/
+web/.dart_tool/
+
+# Assets (可选：只保留占位图)
+assets/**
+!.gitkeep
+
+# Other
+*.log
+*.bak
+.DS_Store
