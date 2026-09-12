@@ -1,4 +1,4 @@
-/// 首页 — 竖屏短视频 Feed 风格
+/// 首页 — 直接调用上游 API，自动获取并展示视频
 library;
 
 import 'package:flutter/material.dart';
@@ -71,7 +71,7 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  // ── 顶部栏 ────────────────────────────────────────────────────────────
+  // ── 顶部栏（Logo + 刷新）───────────────────────────────────────────────
   Widget _buildAppBar() {
     return AnimatedContainer(
       duration: const Duration(milliseconds: 200),
@@ -79,7 +79,6 @@ class _HomeScreenState extends State<HomeScreen>
       color: _appBarElevated ? AppTheme.backgroundColor.withOpacity(0.95) : Colors.transparent,
       child: Row(
         children: [
-          // Logo
           Row(
             children: [
               Container(
@@ -91,7 +90,7 @@ class _HomeScreenState extends State<HomeScreen>
                 child: const Icon(Icons.movie, color: Colors.black, size: 16),
               ),
               const SizedBox(width: 6),
-              Text(
+              const Text(
                 '玻璃哔哩',
                 style: TextStyle(
                   color: AppTheme.accentColor,
@@ -105,9 +104,6 @@ class _HomeScreenState extends State<HomeScreen>
           const Spacer(),
           // 刷新按钮
           _iconBtn(Icons.refresh, () => context.read<VideoProvider>().fetchVideos()),
-          const SizedBox(width: 4),
-          // 设置按钮
-          _iconBtn(Icons.settings, _showServerDialog),
         ],
       ),
     );
@@ -127,7 +123,7 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  // ── 视频 Feed（对称双列网格）────────────────────────────────────────
+  // ── 视频网格 ───────────────────────────────────────────────────────────
   Widget _buildVideoFeed() {
     return Consumer<VideoProvider>(
       builder: (context, provider, child) {
@@ -141,10 +137,10 @@ class _HomeScreenState extends State<HomeScreen>
           controller: _scrollController,
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
           gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: 2,       // 两列对称
-            crossAxisSpacing: 8,     // 列间距
-            mainAxisSpacing: 8,      // 行间距
-            childAspectRatio: 9 / 14, // 竖屏卡片比例
+            crossAxisCount:    2,
+            crossAxisSpacing:  8,
+            mainAxisSpacing:   8,
+            childAspectRatio:  9 / 14,
           ),
           itemCount: provider.videos.length,
           itemBuilder: (context, index) {
@@ -159,70 +155,23 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  // ── 视频播放 ─────────────────────────────────────────────────────────
   void _playVideo(BuildContext context, dynamic video) {
     Navigator.push(
       context,
-      MaterialPageRoute(
-        builder: (_) => VideoPlayerScreen(video: video),
-      ),
+      MaterialPageRoute(builder: (_) => VideoPlayerScreen(video: video)),
     );
   }
 
-  // ── 刷新服务器地址对话框 ─────────────────────────────────────────────
-  void _showServerDialog() {
-    final controller = TextEditingController();
-    final provider = context.read<VideoProvider>();
-    controller.text = provider.serverUrl;
-
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppTheme.surfaceColor,
-        title: const Text('服务器地址', style: TextStyle(color: AppTheme.textPrimary)),
-        content: TextField(
-          controller: controller,
-          style: const TextStyle(color: AppTheme.textPrimary),
-          decoration: const InputDecoration(
-            hintText: 'http://192.168.1.100:5000',
-            hintStyle: TextStyle(color: AppTheme.textTertiary),
-            prefixIcon: Icon(Icons.wifi, color: AppTheme.textTertiary),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('取消', style: TextStyle(color: AppTheme.textTertiary)),
-          ),
-          FilledButton(
-            onPressed: () {
-              final url = controller.text.trim();
-              if (url.isNotEmpty) {
-                provider.setServerUrl(url);
-                provider.fetchVideos();
-              }
-              Navigator.pop(ctx);
-            },
-            child: const Text('保存'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ── 加载状态 ─────────────────────────────────────────────────────────
-  Widget _buildLoadingState() {
-    return const Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          CircularProgressIndicator(color: AppTheme.accentColor),
-          SizedBox(height: 16),
-          Text('正在加载视频...', style: TextStyle(color: AppTheme.textTertiary)),
-        ],
-      ),
-    );
-  }
+  Widget _buildLoadingState() => const Center(
+    child: Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        CircularProgressIndicator(color: AppTheme.accentColor),
+        SizedBox(height: 16),
+        Text('正在加载视频...', style: TextStyle(color: AppTheme.textTertiary)),
+      ],
+    ),
+  );
 
   Widget _buildErrorState(String error) {
     return Center(
@@ -233,7 +182,7 @@ class _HomeScreenState extends State<HomeScreen>
           children: [
             const Icon(Icons.cloud_off, size: 56, color: AppTheme.textTertiary),
             const SizedBox(height: 16),
-            Text('连接失败', style: const TextStyle(color: AppTheme.textPrimary, fontSize: 18, fontWeight: FontWeight.w600)),
+            const Text('连接失败', style: TextStyle(color: AppTheme.textPrimary, fontSize: 18, fontWeight: FontWeight.w600)),
             const SizedBox(height: 8),
             Text(error, style: const TextStyle(color: AppTheme.textTertiary, fontSize: 13)),
             const SizedBox(height: 20),
@@ -242,23 +191,16 @@ class _HomeScreenState extends State<HomeScreen>
               icon: const Icon(Icons.refresh, size: 16),
               label: const Text('重试'),
             ),
-            const SizedBox(height: 8),
-            TextButton.icon(
-              onPressed: _showServerDialog,
-              icon: const Icon(Icons.settings, size: 16),
-              label: const Text('设置服务器地址'),
-            ),
           ],
         ),
       ),
     );
   }
 
-  // ── 右下角浮动按钮 ───────────────────────────────────────────────────
   Widget _buildFab() {
     return GlassIconButton(
       quality: GlassQuality.standard,
-      icon: Icons.sync_problem,
+      icon: Icons.refresh,
       size: 48,
       useOwnLayer: true,
       onPressed: () => context.read<VideoProvider>().fetchVideos(),

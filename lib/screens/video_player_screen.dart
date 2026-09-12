@@ -1,12 +1,10 @@
-/// 视频播放页 — 竖屏沉浸式播放
+/// 视频播放页 — 直接调用上游视频 URL（无需 m.py 代理）
 library;
 
 import 'package:chewie/chewie.dart';
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
-import 'package:provider/provider.dart';
 import 'package:bilibili_glass/models/video_model.dart';
-import 'package:bilibili_glass/providers/video_provider.dart';
 import 'package:bilibili_glass/theme/app_theme.dart';
 
 class VideoPlayerScreen extends StatefulWidget {
@@ -30,7 +28,9 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   }
 
   void _startPlayback() {
-    final playUrl = context.read<VideoProvider>().getPlayUrl(widget.video.url);
+    // 直接使用上游视频 URL（m.py 已不需要）
+    final playUrl = widget.video.url;
+
     _playerController = VideoPlayerController.networkUrl(Uri.parse(playUrl));
 
     _playerController!.initialize().then((_) {
@@ -84,9 +84,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
 
   Widget _buildOverlay() {
     return Positioned(
-      top: 0,
-      left: 0,
-      right: 0,
+      top: 0, left: 0, right: 0,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
         decoration: const BoxDecoration(
@@ -132,26 +130,6 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
                   ],
                 ),
               ),
-              if (widget.video.fullCached)
-                Container(
-                  margin: const EdgeInsets.only(left: 8),
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: AppTheme.successColor.withOpacity(0.8),
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                  child: const Text('⚡ 本地', style: TextStyle(color: Colors.white, fontSize: 10)),
-                )
-              else if (widget.video.headCached)
-                Container(
-                  margin: const EdgeInsets.only(left: 8),
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: AppTheme.primaryColor.withOpacity(0.8),
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                  child: const Text('🚀 缓存中', style: TextStyle(color: Colors.white, fontSize: 10)),
-                ),
             ],
           ),
         ),
