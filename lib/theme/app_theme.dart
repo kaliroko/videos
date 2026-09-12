@@ -69,9 +69,8 @@ class AppTheme {
       // 表面 & 背景
       surface: backgroundColor,
       onSurface: textPrimary,
-      surfaceVariant: surfaceColor,
-      onSurfaceVariant: textSecondary,
       surfaceContainerHighest: cardColor,
+      onSurfaceVariant: textSecondary,
 
       // Outline / 边框
       outline: Color(0x4DFFFFFF),

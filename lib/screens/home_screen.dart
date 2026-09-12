@@ -26,20 +26,19 @@ class HomeScreen extends StatelessWidget {
         child: SafeArea(
           child: Column(
             children: [
-              _buildAppBar(),
+              _buildAppBar(context),
               Expanded(child: _buildVideoFeed()),
             ],
           ),
         ),
       ),
       floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
-      // 普通 Material 按钮，无 GPU 模糊/RepaintBoundary 开销
-      floatingActionButton: _buildFab(),
+      floatingActionButton: _buildFab(context),
     );
   }
 
   // ── 顶部栏（Logo + 刷新）───────────────────────────────────────────────
-  Widget _buildAppBar() {
+  Widget _buildAppBar(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
       child: Row(
@@ -95,7 +94,7 @@ class HomeScreen extends StatelessWidget {
           return _buildLoadingState();
         }
         if (provider.error != null && provider.videos.isEmpty) {
-          return _buildErrorState(provider.error!);
+          return _buildErrorState(context, provider.error!);
         }
         return GridView.builder(
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
@@ -138,7 +137,7 @@ class HomeScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildErrorState(String error) {
+  Widget _buildErrorState(BuildContext context, String error) {
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(32),
@@ -163,7 +162,7 @@ class HomeScreen extends StatelessWidget {
   }
 
   // 普通浮动按钮，无 GPU 模糊层开销
-  Widget _buildFab() {
+  Widget _buildFab(BuildContext context) {
     return Container(
       margin: const EdgeInsets.all(16),
       decoration: BoxDecoration(
