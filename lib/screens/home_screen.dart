@@ -1,52 +1,21 @@
-/// 首页 — 直接调用上游 API，自动获取并展示视频
+/// 首页 — 直接调用上游 API，自动获取并展示视频（性能优化版）
 library;
 
 import 'package:flutter/material.dart';
-import 'package:liquid_glass_widgets/liquid_glass_widgets.dart';
 import 'package:provider/provider.dart';
 import 'package:bilibili_glass/providers/video_provider.dart';
 import 'package:bilibili_glass/widgets/video_card.dart';
 import 'package:bilibili_glass/theme/app_theme.dart';
 import 'package:bilibili_glass/screens/video_player_screen.dart';
 
-class HomeScreen extends StatefulWidget {
+class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
 
   @override
-  State<HomeScreen> createState() => _HomeScreenState();
-}
-
-class _HomeScreenState extends State<HomeScreen>
-    with AutomaticKeepAliveClientMixin {
-  final ScrollController _scrollController = ScrollController();
-  bool _appBarElevated = false;
-
-  @override
-  bool get wantKeepAlive => true;
-
-  @override
-  void initState() {
-    super.initState();
-    _scrollController.addListener(_onScroll);
-  }
-
-  @override
-  void dispose() {
-    _scrollController.removeListener(_onScroll);
-    _scrollController.dispose();
-    super.dispose();
-  }
-
-  void _onScroll() {
-    final elevated = _scrollController.offset > 60;
-    if (elevated != _appBarElevated) setState(() => _appBarElevated = elevated);
-  }
-
-  @override
   Widget build(BuildContext context) {
-    super.build(context);
-    return LiquidGlassScope.stack(
-      background: Container(
+    return Scaffold(
+      backgroundColor: const Color(0xFF0a0a1a),
+      body: Container(
         decoration: const BoxDecoration(
           gradient: LinearGradient(
             begin: Alignment.topLeft,
@@ -54,10 +23,7 @@ class _HomeScreenState extends State<HomeScreen>
             colors: [Color(0xFF0a0a1a), Color(0xFF16213e), Color(0xFF0f3460)],
           ),
         ),
-      ),
-      content: Scaffold(
-        backgroundColor: AppTheme.backgroundColor,
-        body: SafeArea(
+        child: SafeArea(
           child: Column(
             children: [
               _buildAppBar(),
@@ -65,18 +31,17 @@ class _HomeScreenState extends State<HomeScreen>
             ],
           ),
         ),
-        floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
-        floatingActionButton: _buildFab(),
       ),
+      floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
+      // 普通 Material 按钮，无 GPU 模糊/RepaintBoundary 开销
+      floatingActionButton: _buildFab(),
     );
   }
 
   // ── 顶部栏（Logo + 刷新）───────────────────────────────────────────────
   Widget _buildAppBar() {
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 200),
+    return Padding(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-      color: _appBarElevated ? AppTheme.backgroundColor.withValues(alpha: 0.95) : Colors.transparent,
       child: Row(
         children: [
           Row(
@@ -102,7 +67,6 @@ class _HomeScreenState extends State<HomeScreen>
             ],
           ),
           const Spacer(),
-          // 刷新按钮
           _iconBtn(Icons.refresh, () => context.read<VideoProvider>().fetchVideos()),
         ],
       ),
@@ -134,7 +98,6 @@ class _HomeScreenState extends State<HomeScreen>
           return _buildErrorState(provider.error!);
         }
         return GridView.builder(
-          controller: _scrollController,
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
           gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
             crossAxisCount:    2,
@@ -199,14 +162,25 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
+  // 普通浮动按钮，无 GPU 模糊层开销
   Widget _buildFab() {
-    return GlassIconButton(
-      quality: GlassQuality.standard,
-      icon: Icons.refresh,
-      size: 48,
-      useOwnLayer: true,
-      onPressed: () => context.read<VideoProvider>().fetchVideos(),
-      glowColor: AppTheme.accentColor,
+    return Container(
+      margin: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppTheme.accentColor,
+        borderRadius: BorderRadius.circular(14),
+        boxShadow: [
+          BoxShadow(
+            color: AppTheme.accentColor.withValues(alpha: 0.4),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: IconButton(
+        icon: const Icon(Icons.refresh, color: Colors.black),
+        onPressed: () => context.read<VideoProvider>().fetchVideos(),
+      ),
     );
   }
 }

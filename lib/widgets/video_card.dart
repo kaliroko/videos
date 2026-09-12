@@ -1,4 +1,4 @@
-/// 竖屏视频卡片 — 对称双列网格布局（9:14 比例）
+/// 竖屏视频卡片 — 对称双列网格布局（9:14 比例，性能优化版）
 library;
 
 import 'package:flutter/material.dart';
@@ -19,7 +19,7 @@ class VideoCard extends StatelessWidget {
       child: InkWell(
         borderRadius: BorderRadius.circular(12),
         onTap: onTap,
-        splashColor: AppTheme.accentColor.withOpacity(0.15),
+        // 移除 splashColor — 节省每次 tap 的离屏渲染
         child: ClipRRect(
           borderRadius: BorderRadius.circular(12),
           child: Container(
@@ -28,9 +28,9 @@ class VideoCard extends StatelessWidget {
               borderRadius: BorderRadius.circular(12),
               border: Border.all(
                 color: video.fullCached
-                    ? AppTheme.successColor.withOpacity(0.35)
+                    ? const Color(0xFF34C759).withValues(alpha: 0.35)
                     : video.headCached
-                        ? AppTheme.primaryColor.withOpacity(0.35)
+                        ? const Color(0xFF00AEEC).withValues(alpha: 0.35)
                         : Colors.transparent,
                 width: 1,
               ),
@@ -38,7 +38,7 @@ class VideoCard extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // ── 封面图（铺满上方区域）──────────────────────
+                // ── 封面图 ─────────────────────────────────────────
                 Expanded(
                   flex: 7,
                   child: Stack(
@@ -61,53 +61,33 @@ class VideoCard extends StatelessWidget {
                           child: const Icon(Icons.movie, color: AppTheme.textTertiary, size: 24),
                         ),
                       ),
-                      // 播放按钮（居中半透明圆）
+                      // 播放按钮
                       Center(
                         child: Container(
                           width: 36, height: 36,
                           decoration: BoxDecoration(
-                            color: Colors.black.withOpacity(0.5),
+                            color: const Color(0x80000000), // 直接写 hex alpha，避免 withOpacity 分配新对象
                             shape: BoxShape.circle,
-                            border: Border.all(color: Colors.white.withOpacity(0.25), width: 1),
+                            border: Border.all(color: const Color(0x40FFFFFF), width: 1),
                           ),
                           child: const Icon(Icons.play_arrow, color: Colors.white, size: 20),
                         ),
                       ),
                       // 缓存徽章
                       if (video.fullCached)
-                        Positioned(
-                          top: 6, left: 6,
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1.5),
-                            decoration: BoxDecoration(
-                              color: AppTheme.successColor,
-                              borderRadius: BorderRadius.circular(3),
-                            ),
-                            child: const Text('⚡', style: TextStyle(fontSize: 8)),
-                          ),
-                        )
+                        _badge(const Color(0xFF34C759), '⚡')
                       else if (video.headCached)
-                        Positioned(
-                          top: 6, left: 6,
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1.5),
-                            decoration: BoxDecoration(
-                              color: AppTheme.primaryColor,
-                              borderRadius: BorderRadius.circular(3),
-                            ),
-                            child: const Text('🚀', style: TextStyle(fontSize: 8)),
-                          ),
-                        ),
-                      // 底部渐变遮罩（让文字区域过渡自然）
+                        _badge(const Color(0xFF00AEEC), '🚀'),
+                      // 底部渐变遮罩（纯颜色叠加，无动画）
                       Positioned(
                         bottom: 0, left: 0, right: 0,
                         child: Container(
                           height: 28,
-                          decoration: BoxDecoration(
+                          decoration: const BoxDecoration(
                             gradient: LinearGradient(
                               begin: Alignment.topCenter,
                               end: Alignment.bottomCenter,
-                              colors: [Colors.transparent, Colors.black.withOpacity(0.55)],
+                              colors: [Colors.transparent, Color(0x8A000000)],
                             ),
                           ),
                         ),
@@ -115,7 +95,7 @@ class VideoCard extends StatelessWidget {
                     ],
                   ),
                 ),
-                // ── 信息区（标题 + 作者）──────────────────────
+                // ── 信息区 ─────────────────────────────────────────
                 Flexible(
                   flex: 3,
                   child: Padding(
@@ -124,11 +104,10 @@ class VideoCard extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        // 标题（最多 2 行）
                         Text(
                           video.title,
                           style: const TextStyle(
-                            color: AppTheme.textPrimary,
+                            color: Color(0xFFFFFFFF),
                             fontSize: 11,
                             fontWeight: FontWeight.w600,
                             height: 1.25,
@@ -137,12 +116,11 @@ class VideoCard extends StatelessWidget {
                           overflow: TextOverflow.ellipsis,
                         ),
                         const SizedBox(height: 3),
-                        // 作者名（单行）
                         Row(
                           children: [
                             CircleAvatar(
                               radius: 8,
-                              backgroundColor: AppTheme.accentColor.withOpacity(0.2),
+                              backgroundColor: const Color(0x3300AEEC),
                               child: Text(
                                 (video.author.isNotEmpty && video.author.length >= 1)
                                     ? video.author[0]
@@ -154,7 +132,7 @@ class VideoCard extends StatelessWidget {
                             Expanded(
                               child: Text(
                                 video.author,
-                                style: const TextStyle(color: AppTheme.textSecondary, fontSize: 10),
+                                style: const TextStyle(color: Color(0xB3FFFFFF), fontSize: 10),
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                               ),
@@ -169,6 +147,20 @@ class VideoCard extends StatelessWidget {
             ),
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _badge(Color color, String icon) {
+    return Positioned(
+      top: 6, left: 6,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1.5),
+        decoration: BoxDecoration(
+          color: color,
+          borderRadius: BorderRadius.circular(3),
+        ),
+        child: Text(icon, style: const TextStyle(fontSize: 8)),
       ),
     );
   }
