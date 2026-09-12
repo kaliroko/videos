@@ -23,7 +23,6 @@ class _HomeScreenState extends State<HomeScreen>
   int _selectedTab = 0;
   int _navIndex = 0;
 
-  // 底部导航标签 & 图标（outline → filled）
   final List<String> _navLabels = const ['首页', '番剧', '直播', '频道', '我的'];
   final List<IconData> _navIconsOut = const [
     Icons.home_outlined, Icons.movie_outlined, Icons.live_tv_outlined,
@@ -37,7 +36,6 @@ class _HomeScreenState extends State<HomeScreen>
     AppTheme.warningColor, Colors.purple,
   ];
 
-  // IndexedStack：当前页保持状态，切换时不重建（except current index page keep alive）
   final List<Widget> _pages = const [
     _HomeTabPage(),
     _PlaceholderPage(label: '番剧', icon: Icons.movie),
@@ -84,7 +82,6 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  // ── 悬浮液态玻璃底部导航 ──────────────────────────────────────────────
   Widget _buildGlassBottomBar() {
     final GlobalKey bgKey = LiquidGlassScope.of(context) ?? GlobalKey();
     return Padding(
@@ -98,7 +95,6 @@ class _HomeScreenState extends State<HomeScreen>
           barHeight: 60,
           iconSize: 24,
           backgroundKey: bgKey,
-          // 纯黑底玻璃效果：低厚度、轻微模糊、半透明白玻璃
           glassSettings: const LiquidGlassSettings(
             thickness: 18,
             blur: 25,
@@ -107,7 +103,7 @@ class _HomeScreenState extends State<HomeScreen>
             saturation: 0.5,
             ambientStrength: 0.8,
             chromaticAberration: 0.1,
-            glassColor: Color(0x22FFFFFF),   // 极淡白玻璃
+            glassColor: Color(0x22FFFFFF),
           ),
           tabs: List.generate(_navLabels.length, (i) {
             return GlassBottomBarTab(
@@ -125,8 +121,6 @@ class _HomeScreenState extends State<HomeScreen>
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// 首页内容页（AutomaticKeepAliveClientMixin — 切换后保留 API 请求状态）
 // ─────────────────────────────────────────────────────────────────────────────
 class _HomeTabPage extends StatefulWidget {
   const _HomeTabPage();
@@ -193,13 +187,11 @@ class _HomeTabPageState extends State<_HomeTabPage>
     );
   }
 
-  // ── 顶部搜索栏 ──────────────────────────────────────────────────────────
   Widget _buildAppBar() {
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 56, 16, 12),
       child: Row(
         children: [
-          // Logo
           Row(
             children: [
               Container(
@@ -219,7 +211,6 @@ class _HomeTabPageState extends State<_HomeTabPage>
             ],
           ),
           const Spacer(),
-          // 搜索框 — MD3 filled
           Expanded(
             flex: 3,
             child: Container(
@@ -244,7 +235,7 @@ class _HomeTabPageState extends State<_HomeTabPage>
             ),
           ),
           const SizedBox(width: 10),
-          // 直播按钮 — MD3 Filled Tonal（带弹簧涟漪）
+          // MD3 Filled Tonal — 弹簧涟漪
           FilledButton.tonal(
             onPressed: () {},
             style: FilledButton.styleFrom(
@@ -268,7 +259,6 @@ class _HomeTabPageState extends State<_HomeTabPage>
     );
   }
 
-  // ── 视频列表 ────────────────────────────────────────────────────────────
   Widget _buildVideoList() {
     return Consumer<VideoProvider>(
       builder: (context, provider, child) {
@@ -288,7 +278,6 @@ class _HomeTabPageState extends State<_HomeTabPage>
                   Text('加载失败: ${provider.error}',
                       style: const TextStyle(color: AppTheme.textTertiary)),
                   const SizedBox(height: 8),
-                  // MD3 Filled 按钮 — 弹簧涟漪动画
                   FilledButton(
                     onPressed: () => provider.fetchVideos(),
                     child: const Text('重试'),
@@ -308,7 +297,6 @@ class _HomeTabPageState extends State<_HomeTabPage>
     );
   }
 
-  // ── 直播角标（透明态时显示） ───────────────────────────────────────────
   Widget _buildLiveChip() {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
@@ -334,7 +322,7 @@ class _HomeTabPageState extends State<_HomeTabPage>
   }
 }
 
-// ── 分类 Tab 持久化头部 ─────────────────────────────────────────────────────
+// ── 分类 Tab — MD3 药丸 Chip 风格 ────────────────────────────────────────────
 class _CategoryBarDelegate extends SliverPersistentHeaderDelegate {
   final List<String> categories;
   final int selectedIndex;
@@ -358,26 +346,13 @@ class _CategoryBarDelegate extends SliverPersistentHeaderDelegate {
       color: AppTheme.backgroundColor,
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        itemBuilder: (ctx, i) {
-          final selected = i == selectedIndex;
-          return GestureDetector(
-            onTap: () => onSelect(i),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14),
-              alignment: Alignment.center,
-              child: Text(
-                categories[i],
-                style: TextStyle(
-                  color: selected ? AppTheme.accentColor : AppTheme.textSecondary,
-                  fontSize: 14,
-                  fontWeight: selected ? FontWeight.bold : FontWeight.w400,
-                ),
-              ),
-            ),
-          );
-        },
-        separatorBuilder: (_, __) => const SizedBox(width: 2),
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        itemBuilder: (ctx, i) => _CategoryChip(
+          label: categories[i],
+          selected: i == selectedIndex,
+          onTap: () => onSelect(i),
+        ),
+        separatorBuilder: (_, __) => const SizedBox(width: 4),
         itemCount: categories.length,
       ),
     );
@@ -386,6 +361,49 @@ class _CategoryBarDelegate extends SliverPersistentHeaderDelegate {
   @override
   bool shouldRebuild(covariant _CategoryBarDelegate old) =>
       categories != old.categories || selectedIndex != old.selectedIndex;
+}
+
+class _CategoryChip extends StatelessWidget {
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+  const _CategoryChip({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      borderRadius: BorderRadius.circular(20),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(20),
+        onTap: onTap,
+        splashColor: selected
+            ? AppTheme.accentColor.withOpacity(0.2)
+            : AppTheme.textSecondary.withOpacity(0.1),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+          decoration: BoxDecoration(
+            color: selected
+                ? AppTheme.accentColor
+                : AppTheme.textTertiary.withOpacity(0.12),
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: Text(
+            label,
+            style: TextStyle(
+              color: selected ? Colors.white : AppTheme.textSecondary,
+              fontSize: 13,
+              fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 // ── 占位页面（番剧/直播/频道/我的） ──────────────────────────────────────────
@@ -400,7 +418,7 @@ class _PlaceholderPage extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // MD3 filled icon button（圆形，带弹簧涟漪）
+          // MD3 圆形 Filled Button — 弹簧涟漪
           FilledButton.icon(
             onPressed: () {},
             icon: Icon(icon, size: 32),

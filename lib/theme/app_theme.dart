@@ -97,19 +97,6 @@ class AppTheme {
       foregroundColor: textPrimary,
       elevation: 0,
       centerTitle: false,
-      toolbarStyle: MaterialStatePropertyAll(
-        ShaderMask(
-          shaderCallback: (bounds) => const LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [Colors.black, Colors.transparent],
-          ).createShader(Rect.fromLTWH(0, 0, bounds.width, bounds.height)),
-          child: Text(
-            'glass',
-            style: TextStyle(color: Colors.white),
-          ),
-        ),
-      ),
     ),
 
     bottomAppBarTheme: const BottomAppBarTheme(
