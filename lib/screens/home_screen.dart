@@ -127,7 +127,7 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  // ── 视频 Feed ────────────────────────────────────────────────────────
+  // ── 视频 Feed（对称双列网格）────────────────────────────────────────
   Widget _buildVideoFeed() {
     return Consumer<VideoProvider>(
       builder: (context, provider, child) {
@@ -137,9 +137,15 @@ class _HomeScreenState extends State<HomeScreen>
         if (provider.error != null && provider.videos.isEmpty) {
           return _buildErrorState(provider.error!);
         }
-        return ListView.builder(
+        return GridView.builder(
           controller: _scrollController,
-          padding: const EdgeInsets.only(top: 4),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: 2,       // 两列对称
+            crossAxisSpacing: 8,     // 列间距
+            mainAxisSpacing: 8,      // 行间距
+            childAspectRatio: 9 / 14, // 竖屏卡片比例
+          ),
           itemCount: provider.videos.length,
           itemBuilder: (context, index) {
             final video = provider.videos[index];
