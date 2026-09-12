@@ -1,0 +1,6 @@
+# 禁用 vendor/example 的静态分析（example 代码来自第三方库，不适用本项目的 lint 规则）
+include: package:flutter_lints/flutter.yaml
+
+analyzer:
+  exclude:
+    - "**/*.dart"
