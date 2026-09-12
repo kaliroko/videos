@@ -122,7 +122,7 @@ class VideoCard extends StatelessWidget {
                               radius: 8,
                               backgroundColor: const Color(0x3300AEEC),
                               child: Text(
-                                (video.author.isNotEmpty && video.author.length >= 1)
+                                (video.author.isNotEmpty)
                                     ? video.author[0]
                                     : '?',
                                 style: const TextStyle(color: AppTheme.accentColor, fontSize: 8, fontWeight: FontWeight.bold),
