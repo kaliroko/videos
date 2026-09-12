@@ -11,6 +11,7 @@
 -dontwarn okhttp3.**
 -dontwarn okio.**
 -dontwarn org.conscrypt.**
+-dontwarn com.google.android.play.core.**
 
 # 保留注解和泛型信息
 -keepattributes Signature, InnerClasses, EnclosingMethod
