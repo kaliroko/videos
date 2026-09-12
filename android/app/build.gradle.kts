@@ -23,17 +23,7 @@ if (keystorePropertiesFile.exists()) {
     keystoreProperties.load(keystorePropertiesFile.inputStream())
 }
 
-val isReleaseRequested = gradle.startParameter.taskNames.any {
-    it.contains("Release", ignoreCase = true)
-}
-if (isReleaseRequested && !keystorePropertiesFile.exists()) {
-    throw GradleException(
-        """
-        |缺少 android/key.properties，release 构建必须使用自定义签名。
-        |请照 android/key.properties.example 创建该文件。
-        """.trimMargin()
-    )
-}
+val hasKeystore = keystorePropertiesFile.exists() && keystoreProperties.getProperty("storeFile")?.isNotEmpty() == true
 
 android {
     namespace = "com.metamorphosis.bilibiliglass"
@@ -77,7 +67,9 @@ android {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
-            signingConfig = signingConfigs.getByName("release")
+            if (hasKeystore) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
 }
