@@ -254,6 +254,7 @@ class _HomeScreenState extends State<HomeScreen>
       quality: GlassQuality.standard,
       icon: Icons.sync_problem,
       size: 48,
+      useOwnLayer: true,
       onPressed: () => context.read<VideoProvider>().fetchVideos(),
       glowColor: AppTheme.accentColor,
     );
