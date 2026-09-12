@@ -2,8 +2,6 @@
 library;
 
 import 'package:flutter/foundation.dart';
-import 'package:http/http.dart' as http;
-import 'dart:convert';
 import 'package:bilibili_glass/models/video_model.dart';
 
 class VideoProvider extends ChangeNotifier {
@@ -45,13 +43,6 @@ class VideoProvider extends ChangeNotifier {
   /// 模拟视频数据（待真实 API 接入后删除）
   List<VideoItem> _generateMockVideos() {
     return List.generate(20, (i) {
-      final colors = [
-        [0xFF1a1a2e, 0xFF16213e],
-        [0xFF0f3460, 0xFF16213e],
-        [0xFF533a1d, 0xFF1a1a2e],
-        [0xFF2d1b4e, 0xFF0f3460],
-      ];
-      final colorPair = colors[i % colors.length];
       return VideoItem(
         id: 'video_$i',
         title: _mockTitles[i % _mockTitles.length],

@@ -1,0 +1,6 @@
+include: package:flutter_lints/flutter.yaml
+
+analyzer:
+  exclude:
+    - vendor/liquid_glass_widgets/test/**
+    - vendor/liquid_glass_widgets/example/**

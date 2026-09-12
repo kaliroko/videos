@@ -72,7 +72,6 @@ class AppTheme {
       surfaceVariant: surfaceColor,
       onSurfaceVariant: textSecondary,
       surfaceContainerHighest: cardColor,
-      onSurfaceVariant: textSecondary,
 
       // Outline / 边框
       outline: Color(0x4DFFFFFF),
@@ -99,7 +98,7 @@ class AppTheme {
       centerTitle: false,
     ),
 
-    bottomAppBarTheme: const BottomAppBarTheme(
+    bottomAppBarTheme: const BottomAppBarThemeData(
       color: Colors.transparent,
       elevation: 0,
       padding: EdgeInsets.zero,
@@ -112,7 +111,6 @@ class AppTheme {
       elevation: 4,
       focusElevation: 6,
       hoverElevation: 6,
-      pressedElevation: 2,
     ),
 
     // 按钮 — MD3 filled 样式（带弹簧涟漪）
@@ -163,7 +161,7 @@ class AppTheme {
     // 分类 Tab（SegmentedControl 风格）
     segmentedButtonTheme: const SegmentedButtonThemeData(
       style: ButtonStyle(
-        padding: MaterialStatePropertyAll(EdgeInsets.zero),
+        padding: WidgetStatePropertyAll(EdgeInsets.zero),
         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
       ),
     ),
@@ -176,7 +174,7 @@ class AppTheme {
     ),
 
     // 卡片 — MD3 elevated / filled
-    cardTheme: CardTheme(
+    cardTheme: CardThemeData(
       color: cardColor,
       elevation: 0,
       surfaceTintColor: Colors.transparent,

@@ -17,10 +17,6 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen>
     with AutomaticKeepAliveClientMixin {
-  final List<String> _tabs = const [
-    '推荐', '动态', '热门', '游戏', '音乐', '知识', '动漫'
-  ];
-  int _selectedTab = 0;
   int _navIndex = 0;
 
   final List<String> _navLabels = const ['首页', '番剧', '直播', '频道', '我的'];
