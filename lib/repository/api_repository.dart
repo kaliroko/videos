@@ -17,22 +17,24 @@ const _perPage   = 30;
 const _maxPages  = 30;
 
 class ApiRepository {
-  // ── AES-CBC 加密（与 m.py aes_enc 完全等价，返回大写 hex 字符串）──────
+  // ── AES-CBC 加密（与 m.py aes_enc 等价，返回大写 hex 字符串）────────
   static String encryptPayload(Map<String, dynamic> payload) {
     final jsonStr   = jsonEncode(payload);
     final key       = enc.Key.fromUtf8(_aesKey);
     final iv        = enc.IV.fromUtf8(_aesIv);
     final encrypter = enc.Encrypter(enc.AES(key, mode: enc.AESMode.cbc));
     final encrypted = encrypter.encrypt(jsonStr, iv: iv);
-    return base16.encode(encrypted.bytes).toUpperCase();
+    // encrypt 包的 Encrypted 类自带 .base16 getter，无需额外 import convert
+    return encrypted.base16.toUpperCase();
   }
 
-  // ── AES-CBC 解密（与 m.py aes_dec 完全等价，接受大写 hex 字符串）──────
+  // ── AES-CBC 解密（与 m.py aes_dec 等价，接受大写 hex 字符串）────────
   static String decryptResponse(String hexCiphertext) {
     final key       = enc.Key.fromUtf8(_aesKey);
     final iv        = enc.IV.fromUtf8(_aesIv);
     final encrypter = enc.Encrypter(enc.AES(key, mode: enc.AESMode.cbc));
-    return encrypter.decrypt(enc.Encrypted(base16.decode(hexCiphertext)), iv: iv);
+    // Encrypted.fromBase16 直接解码 base16 hex 字符串为字节
+    return encrypter.decrypt(enc.Encrypted.fromBase16(hexCiphertext), iv: iv);
   }
 
   // ── 单页请求 ───────────────────────────────────────────────────────────
@@ -94,15 +96,8 @@ class ApiRepository {
       }
       // 按 created 降序排序（与 m.py 一致）
       all.sort((a, b) => b.created.compareTo(a.created));
-      if (mountedForDebug) {
-        debugPrint('📡 第 $page 页 +${items.length}（去重后累计 ${all.length}）');
-      }
-      if (items.isEmpty) break;
     }
 
-    if (mountedForDebug) {
-      debugPrint('✅ 共获取 ${all.length} 条视频');
-    }
     return all;
   }
 
@@ -122,13 +117,13 @@ class ApiRepository {
         .replaceAll(r'\/', '/');
 
     return VideoItem(
-      id:       id,
-      title:    (v['mv_title'] ?? v['title'] ?? '').toString(),
-      url:      playUrl,
-      coverUrl: rawCover,
-      author:   (v['mu_name'] ?? v['user_name'] ?? '').toString(),
-      uid:      (v['mu_id'] ?? v['uid'] ?? '').toString(),
-      created:  (v['mv_created'] ?? v['create_time'] ?? '').toString(),
+      id:         id,
+      title:      (v['mv_title'] ?? v['title'] ?? '').toString(),
+      url:        playUrl,
+      coverUrl:   rawCover,
+      author:     (v['mu_name'] ?? v['user_name'] ?? '').toString(),
+      uid:        (v['mu_id'] ?? v['uid'] ?? '').toString(),
+      created:    (v['mv_created'] ?? v['create_time'] ?? '').toString(),
       fullCached: false,
       headCached: false,
     );
@@ -140,6 +135,3 @@ class ApiRepository {
     return url.replaceAll('http://119.28.204.36', 'https://ksasdawoopss.i5stuw.com');
   }
 }
-
-// 避免 print，用 debugPrint 代替（生产环境会被 flutter 忽略）
-bool mountedForDebug = true;

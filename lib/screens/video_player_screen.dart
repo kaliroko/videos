@@ -3,6 +3,7 @@ library;
 
 import 'package:chewie/chewie.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:video_player/video_player.dart';
 import 'package:bilibili_glass/models/video_model.dart';
 import 'package:bilibili_glass/theme/app_theme.dart';
