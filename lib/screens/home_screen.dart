@@ -22,6 +22,8 @@ class _HomeScreenState extends State<HomeScreen>
   ];
   int _selectedTab = 0;
   int _navIndex = 0;
+
+  // 底部导航标签 & 图标（outline → filled）
   final List<String> _navLabels = const ['首页', '番剧', '直播', '频道', '我的'];
   final List<IconData> _navIconsOut = const [
     Icons.home_outlined, Icons.movie_outlined, Icons.live_tv_outlined,
@@ -31,17 +33,17 @@ class _HomeScreenState extends State<HomeScreen>
     Icons.home, Icons.movie, Icons.live_tv, Icons.grid_view, Icons.person,
   ];
   final List<Color> _navGlows = const [
-    AppTheme.accentColor, AppTheme.primaryColor, AppTheme.liveColor,
+    AppTheme.primaryColor, AppTheme.accentColor, AppTheme.liveColor,
     AppTheme.warningColor, Colors.purple,
   ];
 
-  // 各页独立 StatefulWidget，切换时重建；当前页 keepAlive=true
+  // IndexedStack：当前页保持状态，切换时不重建（except current index page keep alive）
   final List<Widget> _pages = const [
     _HomeTabPage(),
-    _PlaceholderPage(label: '番剧'),
-    _PlaceholderPage(label: '直播'),
-    _PlaceholderPage(label: '频道'),
-    _PlaceholderPage(label: '我的'),
+    _PlaceholderPage(label: '番剧', icon: Icons.movie),
+    _PlaceholderPage(label: '直播', icon: Icons.live_tv),
+    _PlaceholderPage(label: '频道', icon: Icons.grid_view),
+    _PlaceholderPage(label: '我的', icon: Icons.person),
   ];
 
   @override
@@ -54,15 +56,12 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   void _onNavTap(int index) {
-    setState(() {
-      _navIndex = index;
-    });
+    setState(() => _navIndex = index);
   }
 
   @override
   Widget build(BuildContext context) {
     super.build(context);
-    // LiquidGlassScope.stack 提供背景供 GlassBottomBar 折射使用
     return LiquidGlassScope.stack(
       background: Container(
         decoration: const BoxDecoration(
@@ -80,26 +79,36 @@ class _HomeScreenState extends State<HomeScreen>
           children: _pages,
         ),
         extendBodyBehindAppBar: true,
-        // 悬浮液态玻璃底部导航
         bottomNavigationBar: _buildGlassBottomBar(),
       ),
     );
   }
 
+  // ── 悬浮液态玻璃底部导航 ──────────────────────────────────────────────
   Widget _buildGlassBottomBar() {
     final GlobalKey bgKey = LiquidGlassScope.of(context) ?? GlobalKey();
     return Padding(
       padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(22),
+        borderRadius: BorderRadius.circular(24),
         child: GlassBottomBar(
           quality: GlassQuality.standard,
-          // blendAmount 控制玻璃叠加平滑度（Impeller 有效，Skia 忽略）
           blendAmount: 8.0,
           maskingQuality: MaskingQuality.high,
           barHeight: 60,
           iconSize: 24,
           backgroundKey: bgKey,
+          // 纯黑底玻璃效果：低厚度、轻微模糊、半透明白玻璃
+          glassSettings: const LiquidGlassSettings(
+            thickness: 18,
+            blur: 25,
+            lightIntensity: 1.2,
+            refractiveIndex: 1.15,
+            saturation: 0.5,
+            ambientStrength: 0.8,
+            chromaticAberration: 0.1,
+            glassColor: Color(0x22FFFFFF),   // 极淡白玻璃
+          ),
           tabs: List.generate(_navLabels.length, (i) {
             return GlassBottomBarTab(
               label: _navLabels[i],
@@ -117,7 +126,7 @@ class _HomeScreenState extends State<HomeScreen>
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 首页内容页（保持 alive，避免每次返回都重新请求 API）
+// 首页内容页（AutomaticKeepAliveClientMixin — 切换后保留 API 请求状态）
 // ─────────────────────────────────────────────────────────────────────────────
 class _HomeTabPage extends StatefulWidget {
   const _HomeTabPage();
@@ -164,11 +173,7 @@ class _HomeTabPageState extends State<_HomeTabPage>
         CustomScrollView(
           controller: _scrollController,
           slivers: [
-            // 顶部搜索栏
-            SliverToBoxAdapter(
-              child: _buildAppBar(),
-            ),
-            // 分类 Tab（固定）
+            SliverToBoxAdapter(child: _buildAppBar()),
             SliverPersistentHeader(
               pinned: true,
               delegate: _CategoryBarDelegate(
@@ -177,24 +182,18 @@ class _HomeTabPageState extends State<_HomeTabPage>
                 onSelect: (i) => setState(() => _selectedCat = i),
               ),
             ),
-            // 视频列表
             SliverPadding(
               padding: const EdgeInsets.only(top: 4),
               sliver: _buildVideoList(),
             ),
           ],
         ),
-        // 直播 FAB
-        if (_transparent)
-          Positioned(
-            bottom: 88,
-            right: 16,
-            child: _buildLiveFab(),
-          ),
+        if (_transparent) Positioned(bottom: 88, right: 16, child: _buildLiveChip()),
       ],
     );
   }
 
+  // ── 顶部搜索栏 ──────────────────────────────────────────────────────────
   Widget _buildAppBar() {
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 56, 16, 12),
@@ -204,78 +203,63 @@ class _HomeTabPageState extends State<_HomeTabPage>
           Row(
             children: [
               Container(
-                width: 34,
-                height: 34,
+                width: 34, height: 34,
                 decoration: BoxDecoration(
                   color: AppTheme.accentColor,
                   borderRadius: BorderRadius.circular(9),
                 ),
-                child: const Icon(Icons.movie, color: Colors.white, size: 18),
+                child: const Icon(Icons.movie, color: Colors.black, size: 18),
               ),
               const SizedBox(width: 6),
-              Text(
-                '玻璃哔哩',
-                style: TextStyle(
-                  color: AppTheme.accentColor,
-                  fontSize: 17,
-                  fontWeight: FontWeight.bold,
-                  letterSpacing: 0.5,
-                ),
-              ),
+              Text('玻璃哔哩',
+                  style: TextStyle(
+                    color: AppTheme.accentColor,
+                    fontSize: 17, fontWeight: FontWeight.bold, letterSpacing: 0.5,
+                  )),
             ],
           ),
           const Spacer(),
-          // 搜索框
+          // 搜索框 — MD3 filled
           Expanded(
             flex: 3,
             child: Container(
-              height: 36,
+              height: 40,
               decoration: BoxDecoration(
-                color: AppTheme.surfaceColor.withOpacity(0.85),
-                borderRadius: BorderRadius.circular(18),
-                border: Border.all(
-                    color: AppTheme.textTertiary.withOpacity(0.15)),
+                color: AppTheme.surfaceColor,
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: AppTheme.textTertiary.withOpacity(0.15)),
               ),
               child: const TextField(
                 readOnly: true,
-                style: TextStyle(color: AppTheme.textPrimary, fontSize: 13),
+                style: TextStyle(color: AppTheme.textPrimary, fontSize: 14),
                 decoration: InputDecoration(
                   hintText: '搜索视频、UP主...',
-                  hintStyle: TextStyle(color: AppTheme.textTertiary, fontSize: 13),
-                  prefixIcon:
-                      Icon(Icons.search, size: 18, color: AppTheme.textTertiary),
-                  suffixIcon:
-                      Icon(Icons.mic, size: 18, color: AppTheme.textSecondary),
+                  hintStyle: TextStyle(color: AppTheme.textTertiary, fontSize: 14),
+                  prefixIcon: Icon(Icons.search, size: 20, color: AppTheme.textTertiary),
+                  suffixIcon: Icon(Icons.mic, size: 20, color: AppTheme.textSecondary),
                   border: InputBorder.none,
-                  contentPadding:
-                      EdgeInsets.symmetric(horizontal: 14, vertical: 0),
+                  contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 0),
                 ),
               ),
             ),
           ),
           const SizedBox(width: 10),
-          // 直播按钮
-          Container(
-            padding:
-                const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-            decoration: BoxDecoration(
-              color: AppTheme.liveColor.withOpacity(0.15),
-              borderRadius: BorderRadius.circular(14),
-              border:
-                  Border.all(color: AppTheme.liveColor.withOpacity(0.4)),
+          // 直播按钮 — MD3 Filled Tonal（带弹簧涟漪）
+          FilledButton.tonal(
+            onPressed: () {},
+            style: FilledButton.styleFrom(
+              backgroundColor: AppTheme.liveColor.withOpacity(0.15),
+              foregroundColor: AppTheme.liveColor,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              minimumSize: const Size(48, 36),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             ),
-            child: Row(
+            child: const Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Container(
-                  width: 6, height: 6,
-                  decoration: const BoxDecoration(
-                    color: AppTheme.liveColor, shape: BoxShape.circle,
-                  ),
-                ),
-                const SizedBox(width: 4),
-                const Text('直播',
-                    style: TextStyle(color: AppTheme.liveColor, fontSize: 12)),
+                Icon(Icons.videocam, size: 14),
+                SizedBox(width: 4),
+                Text('直播', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
               ],
             ),
           ),
@@ -284,29 +268,31 @@ class _HomeTabPageState extends State<_HomeTabPage>
     );
   }
 
+  // ── 视频列表 ────────────────────────────────────────────────────────────
   Widget _buildVideoList() {
     return Consumer<VideoProvider>(
       builder: (context, provider, child) {
         if (provider.loading && provider.videos.isEmpty) {
           return const SliverFillRemaining(
-            child: Center(
-                child: CircularProgressIndicator(color: AppTheme.primaryColor)),
+            child: Center(child: CircularProgressIndicator()),
           );
         }
         if (provider.error != null) {
           return SliverToBoxAdapter(
-            child: Center(
+            child: Padding(
+              padding: const EdgeInsets.all(32),
               child: Column(
                 children: [
-                  const Icon(Icons.error_outline,
-                      size: 48, color: AppTheme.textTertiary),
+                  const Icon(Icons.error_outline, size: 48, color: AppTheme.textTertiary),
                   const SizedBox(height: 12),
                   Text('加载失败: ${provider.error}',
                       style: const TextStyle(color: AppTheme.textTertiary)),
                   const SizedBox(height: 8),
-                  ElevatedButton(
-                      onPressed: () => provider.fetchVideos(),
-                      child: const Text('重试')),
+                  // MD3 Filled 按钮 — 弹簧涟漪动画
+                  FilledButton(
+                    onPressed: () => provider.fetchVideos(),
+                    child: const Text('重试'),
+                  ),
                 ],
               ),
             ),
@@ -322,17 +308,18 @@ class _HomeTabPageState extends State<_HomeTabPage>
     );
   }
 
-  Widget _buildLiveFab() {
+  // ── 直播角标（透明态时显示） ───────────────────────────────────────────
+  Widget _buildLiveChip() {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: BoxDecoration(
         color: AppTheme.liveColor,
         borderRadius: BorderRadius.circular(24),
         boxShadow: [
           BoxShadow(
-              color: AppTheme.liveColor.withOpacity(0.4),
-              blurRadius: 12,
-              spreadRadius: 2),
+            color: AppTheme.liveColor.withOpacity(0.4),
+            blurRadius: 12, spreadRadius: 2,
+          ),
         ],
       ),
       child: const Row(
@@ -340,16 +327,14 @@ class _HomeTabPageState extends State<_HomeTabPage>
         children: [
           Icon(Icons.videocam, color: Colors.white, size: 14),
           SizedBox(width: 6),
-          Text('直播',
-              style:
-                  TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600)),
+          Text('直播', style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600)),
         ],
       ),
     );
   }
 }
 
-/// 分类 Tab 持久化头部
+// ── 分类 Tab 持久化头部 ─────────────────────────────────────────────────────
 class _CategoryBarDelegate extends SliverPersistentHeaderDelegate {
   final List<String> categories;
   final int selectedIndex;
@@ -362,14 +347,14 @@ class _CategoryBarDelegate extends SliverPersistentHeaderDelegate {
   });
 
   @override
-  double get minExtent => 44;
+  double get minExtent => 48;
   @override
-  double get maxExtent => 44;
+  double get maxExtent => 48;
 
   @override
   Widget build(BuildContext context, double shrinkOffset, bool overlapsContent) {
     return Container(
-      height: 44,
+      height: 48,
       color: AppTheme.backgroundColor,
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
@@ -403,10 +388,11 @@ class _CategoryBarDelegate extends SliverPersistentHeaderDelegate {
       categories != old.categories || selectedIndex != old.selectedIndex;
 }
 
-/// 占位页面（番剧/直播/频道/我的）
+// ── 占位页面（番剧/直播/频道/我的） ──────────────────────────────────────────
 class _PlaceholderPage extends StatelessWidget {
   final String label;
-  const _PlaceholderPage({required this.label});
+  final IconData icon;
+  const _PlaceholderPage({required this.label, required this.icon});
 
   @override
   Widget build(BuildContext context) {
@@ -414,14 +400,25 @@ class _PlaceholderPage extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.layers, size: 64, color: AppTheme.textTertiary),
-          const SizedBox(height: 16),
+          // MD3 filled icon button（圆形，带弹簧涟漪）
+          FilledButton.icon(
+            onPressed: () {},
+            icon: Icon(icon, size: 32),
+            label: const Text(''),
+            style: FilledButton.styleFrom(
+              backgroundColor: AppTheme.surfaceColor,
+              foregroundColor: AppTheme.textTertiary,
+              padding: const EdgeInsets.all(24),
+              minimumSize: const Size(96, 96),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
+            ),
+          ),
+          const SizedBox(height: 20),
           Text(label,
-              style: const TextStyle(
-                  color: AppTheme.textSecondary, fontSize: 18)),
+              style: const TextStyle(color: AppTheme.textPrimary, fontSize: 20, fontWeight: FontWeight.w600)),
           const SizedBox(height: 8),
           Text('敬请期待',
-              style: TextStyle(color: AppTheme.textTertiary, fontSize: 13)),
+              style: TextStyle(color: AppTheme.textTertiary, fontSize: 14)),
         ],
       ),
     );
