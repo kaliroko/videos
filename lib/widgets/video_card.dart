@@ -5,7 +5,6 @@ import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:bilibili_glass/models/video_model.dart';
 import 'package:bilibili_glass/theme/app_theme.dart';
-import 'package:bilibili_glass/utils/format_utils.dart';
 
 class VideoCard extends StatelessWidget {
   final VideoItem video;
