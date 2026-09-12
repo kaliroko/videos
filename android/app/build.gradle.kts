@@ -20,9 +20,7 @@ val flutterVersionName = localProperties.getProperty("flutter.versionName") ?: "
 val keystoreProperties = Properties()
 val keystorePropertiesFile = rootProject.file("key.properties")
 if (keystorePropertiesFile.exists()) {
-    keystorePropertiesFile.reader(Charsets.UTF-8).use { reader ->
-        keystoreProperties.load(reader)
-    }
+    keystoreProperties.load(keystorePropertiesFile.inputStream())
 }
 
 val isReleaseRequested = gradle.startParameter.taskNames.any {
