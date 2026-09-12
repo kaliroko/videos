@@ -28,7 +28,6 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   }
 
   void _startPlayback() {
-    // 直接使用上游视频 URL（m.py 已不需要）
     final playUrl = widget.video.url;
 
     _playerController = VideoPlayerController.networkUrl(Uri.parse(playUrl));

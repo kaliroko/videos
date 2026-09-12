@@ -4,7 +4,6 @@
 library;
 
 import 'dart:convert';
-import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 import 'package:encrypt/encrypt.dart' as enc;
 import 'package:bilibili_glass/models/video_model.dart';
@@ -18,22 +17,22 @@ const _perPage   = 30;
 const _maxPages  = 30;
 
 class ApiRepository {
-  // ── AES-CBC 加密（与 m.py aes_enc 完全等价）───────────────────────────
+  // ── AES-CBC 加密（与 m.py aes_enc 完全等价，返回大写 hex 字符串）──────
   static String encryptPayload(Map<String, dynamic> payload) {
-    final jsonStr = jsonEncode(payload);
-    final key     = enc.Key.fromUtf8(_aesKey);
-    final iv      = enc.IV.fromUtf8(_aesIv);
+    final jsonStr   = jsonEncode(payload);
+    final key       = enc.Key.fromUtf8(_aesKey);
+    final iv        = enc.IV.fromUtf8(_aesIv);
     final encrypter = enc.Encrypter(enc.AES(key, mode: enc.AESMode.cbc));
     final encrypted = encrypter.encrypt(jsonStr, iv: iv);
-    return encrypted.hex.toUpperCase();
+    return base16.encode(encrypted.bytes).toUpperCase();
   }
 
-  // ── AES-CBC 解密（与 m.py aes_dec 完全等价）───────────────────────────
+  // ── AES-CBC 解密（与 m.py aes_dec 完全等价，接受大写 hex 字符串）──────
   static String decryptResponse(String hexCiphertext) {
-    final key     = enc.Key.fromUtf8(_aesKey);
-    final iv      = enc.IV.fromUtf8(_aesIv);
+    final key       = enc.Key.fromUtf8(_aesKey);
+    final iv        = enc.IV.fromUtf8(_aesIv);
     final encrypter = enc.Encrypter(enc.AES(key, mode: enc.AESMode.cbc));
-    return encrypter.decrypt64(hexCiphertext, iv: iv);
+    return encrypter.decrypt(enc.Encrypted(base16.decode(hexCiphertext)), iv: iv);
   }
 
   // ── 单页请求 ───────────────────────────────────────────────────────────
@@ -70,9 +69,8 @@ class ApiRepository {
         items = data;
       }
 
-      final seen = <String>{};
       return items
-          .map((e) => _normalize(e as Map<String, dynamic>, seen))
+          .map((e) => _normalize(e as Map<String, dynamic>))
           .whereType<VideoItem>()
           .toList();
     } catch (_) {
@@ -82,9 +80,8 @@ class ApiRepository {
 
   // ── 逐页累加（与 m.py fetch_all 逻辑一致）────────────────────────────
   static Future<List<VideoItem>> fetchAll() async {
-    final all       = <VideoItem>[];
-    final seen      = <String>{};
-    final idToItem  = <String, VideoItem>{};
+    final all  = <VideoItem>[];
+    final seen = <String>{};
 
     for (int page = 1; page <= _maxPages; page++) {
       final items = await fetchPage(page);
@@ -93,21 +90,24 @@ class ApiRepository {
       for (final item in items) {
         if (seen.add(item.id)) {
           all.add(item);
-          idToItem[item.id] = item;
         }
       }
       // 按 created 降序排序（与 m.py 一致）
-      all.sort((a, b) => (b.created).compareTo(a.created));
-      print('📡 第 $page 页 +${items.length}（去重后累计 ${all.length}）');
+      all.sort((a, b) => b.created.compareTo(a.created));
+      if (mountedForDebug) {
+        debugPrint('📡 第 $page 页 +${items.length}（去重后累计 ${all.length}）');
+      }
       if (items.isEmpty) break;
     }
 
-    print('✅ 共获取 ${all.length} 条视频');
+    if (mountedForDebug) {
+      debugPrint('✅ 共获取 ${all.length} 条视频');
+    }
     return all;
   }
 
   // ── 字段规范化（与 m.py normalize 一致）────────────────────────────────
-  static VideoItem? _normalize(Map<String, dynamic> v, Set<String> seen) {
+  static VideoItem? _normalize(Map<String, dynamic> v) {
     final id = (v['mv_id'] ?? v['id'] ?? v['video_id'] ?? '').toString();
     if (id.isEmpty) return null;
 
@@ -140,3 +140,6 @@ class ApiRepository {
     return url.replaceAll('http://119.28.204.36', 'https://ksasdawoopss.i5stuw.com');
   }
 }
+
+// 避免 print，用 debugPrint 代替（生产环境会被 flutter 忽略）
+bool mountedForDebug = true;

@@ -76,7 +76,7 @@ class _HomeScreenState extends State<HomeScreen>
     return AnimatedContainer(
       duration: const Duration(milliseconds: 200),
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-      color: _appBarElevated ? AppTheme.backgroundColor.withOpacity(0.95) : Colors.transparent,
+      color: _appBarElevated ? AppTheme.backgroundColor.withValues(alpha: 0.95) : Colors.transparent,
       child: Row(
         children: [
           Row(
@@ -128,7 +128,7 @@ class _HomeScreenState extends State<HomeScreen>
     return Consumer<VideoProvider>(
       builder: (context, provider, child) {
         if (provider.loading && provider.videos.isEmpty) {
-          return const _buildLoadingState();
+          return _buildLoadingState();
         }
         if (provider.error != null && provider.videos.isEmpty) {
           return _buildErrorState(provider.error!);
@@ -162,16 +162,18 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  Widget _buildLoadingState() => const Center(
-    child: Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        CircularProgressIndicator(color: AppTheme.accentColor),
-        SizedBox(height: 16),
-        Text('正在加载视频...', style: TextStyle(color: AppTheme.textTertiary)),
-      ],
-    ),
-  );
+  Widget _buildLoadingState() {
+    return const Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          CircularProgressIndicator(color: AppTheme.accentColor),
+          SizedBox(height: 16),
+          Text('正在加载视频...', style: TextStyle(color: AppTheme.textTertiary)),
+        ],
+      ),
+    );
+  }
 
   Widget _buildErrorState(String error) {
     return Center(
