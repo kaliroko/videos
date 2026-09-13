@@ -21,8 +21,8 @@ class VideoCard extends StatelessWidget {
       child: InkWell(
         borderRadius: BorderRadius.circular(12),
         onTap: onTap,
-        splashColor: AppTheme.accentColor.withOpacity(0.15),
-        highlightColor: AppTheme.accentColor.withOpacity(0.08),
+        splashColor: AppTheme.accentColor.withValues(alpha: 0.15),
+        highlightColor: AppTheme.accentColor.withValues(alpha: 0.08),
         child: ClipRRect(
           borderRadius: BorderRadius.circular(12),
           child: Container(
@@ -31,7 +31,7 @@ class VideoCard extends StatelessWidget {
               borderRadius: BorderRadius.circular(12),
               border: Border.all(
                 color: video.isVip
-                    ? AppTheme.warningColor.withOpacity(0.4)
+                    ? AppTheme.warningColor.withValues(alpha: 0.4)
                     : Colors.transparent,
                 width: 1,
               ),
@@ -98,7 +98,7 @@ class VideoCard extends StatelessWidget {
                             padding: const EdgeInsets.symmetric(
                                 horizontal: 4, vertical: 2),
                             decoration: BoxDecoration(
-                              color: Colors.black.withOpacity(0.6),
+                              color: Colors.black.withValues(alpha: 0.6),
                               borderRadius: BorderRadius.circular(3),
                             ),
                             child: Text(
@@ -113,10 +113,10 @@ class VideoCard extends StatelessWidget {
                         child: Container(
                           width: 36, height: 36,
                           decoration: BoxDecoration(
-                            color: Colors.black.withOpacity(0.5),
+                            color: Colors.black.withValues(alpha: 0.5),
                             shape: BoxShape.circle,
                             border: Border.all(
-                                color: Colors.white.withOpacity(0.25),
+                                color: Colors.white.withValues(alpha: 0.25),
                                 width: 1),
                           ),
                           child: const Icon(Icons.play_arrow,
@@ -134,7 +134,7 @@ class VideoCard extends StatelessWidget {
                               end: Alignment.bottomCenter,
                               colors: [
                                 Colors.transparent,
-                                Colors.black.withOpacity(0.55)
+                                Colors.black.withValues(alpha: 0.55)
                               ],
                             ),
                           ),
@@ -171,10 +171,9 @@ class VideoCard extends StatelessWidget {
                             CircleAvatar(
                               radius: 8,
                               backgroundColor:
-                                  AppTheme.accentColor.withOpacity(0.2),
+                                  AppTheme.accentColor.withValues(alpha: 0.2),
                               child: Text(
-                                video.author.nickName.isNotEmpty &&
-                                        video.author.nickName.length >= 1
+                                video.author.nickName.isNotEmpty
                                     ? video.author.nickName[0]
                                     : '?',
                                 style: const TextStyle(

@@ -119,7 +119,7 @@ class VideoStats {
   final int readNumber;
   final double starAvg;
 
-  VideoStats({this.likeNumber = 0, this.readNumber = 0, this.starAvg = 0.0});
+  const VideoStats({this.likeNumber = 0, this.readNumber = 0, this.starAvg = 0.0});
 
   factory VideoStats.fromJson(Map<String, dynamic> json) {
     return VideoStats(
