@@ -3,7 +3,7 @@
 ///   • source == new → 新 JWT CMS API（AES-ECB，移植文档）
 library;
 
-import 'package:flutter/foundation.dart';
+import 'package:flutter/foundation.dart' hide Category;
 import 'package:bilibili_glass/repository/api_repository.dart';
 import 'package:bilibili_glass/repository/api_gateway.dart';
 import 'package:bilibili_glass/models/video_model.dart';

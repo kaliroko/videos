@@ -4,47 +4,14 @@
 library;
 
 import 'dart:convert';
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:http/http.dart' as http;
-import 'package:encrypt/encrypt.dart' as enc;
 import 'package:bilibili_glass/managers/jwt_manager.dart';
 import 'package:bilibili_glass/models/video_model.dart';
 
 // ── 常量 ────────────────────────────────────────────────────────────────────
 const _apiBase = 'https://bkij1.aemtpwbdn3xf7b.xyz/fast-cloud';
-
-// 10 个轮换 AES-ECB 密钥（按秒时间戳 % 10 选取）
-const _aesKeys = [
-  '6eIZ4cxM5pqzUXcF',
-  '84UZNK33cSVylz6Y',
-  'jeSWRcTwHyAKwJDB',
-  'i1hvJx9vuRt5zEBS',
-  '1Yy1KOa75R7cnmkg',
-  '4MVTQQAJlMpUIAiL',
-  'T0RVp7KIPamrtQ33',
-  '8HbPxhX6fjhhhwok',
-  'ugvseZc5Kkj8ecmV',
-  'G7i3OPcfNhBnAYpc',
-];
-
-/// 图片 CDN 域名（用于拼接封面图）
 const _picBaseUrl = 'https://qv1tx2.shoupingxz.com';
-
-// ── AES-ECB 加解密工具 ──────────────────────────────────────────────────────
-
-/// 获取当前时间对应的密钥（秒时间戳 % 10）
-String _getKey() => _aesKeys[(DateTime.now().millisecondsSinceEpoch ~/ 1000) % 10];
-
-/// AES-ECB/PKCS5Padding 加密 → Base64
-String _encryptBase64(String key, String plain) {
-  final aes = enc.AES(enc.AESKey(key), mode: enc.AESMode.ecb);
-  return base64Encode(aes.encrypt(plain).bytes);
-}
-
-/// AES-ECB/PKCS5Padding 解密 ← Base64
-String _decryptBase64(String key, String cipherBase64) {
-  final aes = enc.AES(enc.AESKey(key), mode: enc.AESMode.ecb);
-  return aes.decrypt64(cipherBase64);
-}
 
 // ── API 网关 ────────────────────────────────────────────────────────────────
 

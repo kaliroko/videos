@@ -101,6 +101,11 @@ class ApiRepository {
     return all;
   }
 
+  // ── 单页获取（供 VideoProvider.fetchVideos 调用）──────────────────────
+  static Future<List<VideoItem>> fetchVideos() async {
+    return fetchPage(1);
+  }
+
   // ── 字段规范化（与 m.py normalize 一致）────────────────────────────────
   static VideoItem? _normalize(Map<String, dynamic> v) {
     final id = (v['mv_id'] ?? v['id'] ?? v['video_id'] ?? '').toString();

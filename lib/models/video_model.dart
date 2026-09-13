@@ -3,6 +3,8 @@
 ///   • 新 JWT API（AES-ECB，vod_* 字段）
 library;
 
+import 'dart:convert';
+
 // ─── 旧 API（listHot）数据模型 ──────────────────────────────────────
 
 class VideoItem {
@@ -58,12 +60,8 @@ class VodPicInfo {
   factory VodPicInfo.fromJson(dynamic v) {
     if (v is String) {
       try {
-        final map = (v.isNotEmpty) ? (v as String).isEmpty
-            ? <String, dynamic>{} : (v as dynamic) is Map
-                ? v as Map<String, dynamic>
-                : throw Exception('bad picInfo')
-            : <String, dynamic>{};
-        return VodPicInfo.fromJson(v);
+        final parsed = jsonDecode(v) as Map<String, dynamic>;
+        return VodPicInfo.fromJson(parsed);
       } catch (_) {
         return VodPicInfo();
       }
@@ -153,7 +151,7 @@ class MovieBean {
   final VideoStats stats;
   final int createTime;       // 时间戳
 
-  const MovieBean({
+  MovieBean({
     required this.id,
     required this.title,
     required this.coverUrl,
@@ -178,7 +176,7 @@ class MovieBean {
     final vod   = json['vod']       as Map<String, dynamic>? ?? {};
     final auth  = json['author']    as Map<String, dynamic>? ?? {};
     final stats = json['statistics']as Map<String, dynamic>? ?? {};
-    final rawPicInfo = vod['vodPicInfo'] as dynamic?;
+    final rawPicInfo = vod['vodPicInfo'] as dynamic;
 
     // 解析 vodPicInfo
     VodPicInfo? picInfo;
@@ -204,6 +202,7 @@ class MovieBean {
     return MovieBean(
       id:         (vod['vodId']     ?? json['id']      ?? 0).toString(),
       title:      (vod['vodName']   ?? '').toString(),
+      coverUrl:   (vod['vodPic']    ?? '').toString(),
       vodPic:     (vod['vodPic']    ?? '').toString(),
       picInfo:    picInfo,
       playUrl:    (vod['vodPlayUrl'] ?? '').toString(),
