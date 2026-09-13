@@ -98,6 +98,14 @@ jobs:
           retention-days: 14
           if-no-files-found: ignore
 
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bili-glass-apk
+          path: build/app/outputs/flutter-apk/app-release.apk
+          retention-days: 14
+          if-no-files-found: error
+
       - name: Create Release
         if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
         uses: softprops/action-gh-release@v2
