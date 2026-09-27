@@ -4,8 +4,8 @@ publish_to: 'none'
 version: 1.0.0+1
 
 environment:
-  sdk: '>=3.2.0 <4.0.0'
-  flutter: '>=3.16.0'
+  sdk: '>=3.5.0 <4.0.0'
+  flutter: '>=3.38.0'
 
 dependencies:
   flutter:
@@ -25,7 +25,7 @@ dependencies:
   shared_preferences: ^2.3.0
   path: ^1.9.0
   permission_handler: ^11.3.1
-  workmanager: ^0.5.2
+  workmanager: ^0.10.10
 
 dev_dependencies:
   flutter_test:
