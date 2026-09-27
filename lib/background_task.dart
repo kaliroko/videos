@@ -3,6 +3,7 @@
 /// - App 关闭后仍能继续静默上传
 library;
 
+import 'package:flutter/foundation.dart' show DartPluginRegistrant;
 import 'package:flutter/widgets.dart';
 import 'package:workmanager/workmanager.dart';
 

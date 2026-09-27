@@ -9,7 +9,6 @@ import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import 'background_task.dart';
-import 'managers/dcim_upload_manager.dart';
 
 class PermissionGate extends StatefulWidget {
   final Widget child;
