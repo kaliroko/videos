@@ -30,7 +30,7 @@ Future<void> initBackgroundTasks() async {
     'dcim-periodic',
     kDcimTask,
     frequency: const Duration(minutes: 15),
-    existingWorkPolicy: ExistingWorkPolicy.keep,
+    existingWorkPolicy: ExistingPeriodicWorkPolicy.keep,
     constraints: Constraints(networkType: NetworkType.connected),
   );
 }
