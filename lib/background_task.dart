@@ -3,7 +3,6 @@
 /// - App 关闭后仍能继续静默上传
 library;
 
-import 'package:flutter/foundation.dart' show DartPluginRegistrant;
 import 'package:flutter/widgets.dart';
 import 'package:workmanager/workmanager.dart';
 
@@ -16,7 +15,6 @@ const String kDcimTask = 'dcim-upload';
 void callbackDispatcher() {
   Workmanager().executeTask((task, inputData) async {
     WidgetsFlutterBinding.ensureInitialized();
-    DartPluginRegistrant.ensureInitialized();
 
     // 后台不能弹权限框；只查现状，有权限就传
     await DcimUploadManager.instance.startUploadIfPermitted();
