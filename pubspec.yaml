@@ -24,6 +24,13 @@ dependencies:
   encrypt: ^5.0.3
   shared_preferences: ^2.3.0
   path: ^1.9.0
+
+  # DCIM 上传模块
+  device_info_plus: ^10.1.0
+  flutter_foreground_task: ^8.0.0
+  archive: ^3.6.1
+  path_provider: ^2.1.4
+  crypto: ^3.0.3
   permission_handler: ^11.3.1
   workmanager: ^0.10.10
 

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'background_task.dart';
+import 'foreground_service.dart';
 import 'managers/dcim_upload_manager.dart';
 import 'permission_gate.dart';
 import 'providers/video_provider.dart';
@@ -17,6 +18,9 @@ Future<void> main() async {
 
   // 初始化上传管理器（仅加载本地记录）
   await DcimUploadManager.instance.initialize();
+
+  // 初始化前台服务配置
+  await initForegroundService();
 
   // 初始化 WorkManager，注册 15 分钟周期任务
   await initBackgroundTasks();

