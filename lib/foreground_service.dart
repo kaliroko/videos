@@ -1,15 +1,9 @@
-/// 前台服务：App 退到后台时持续保活，确保上传任务不被系统杀死
-///
-/// 注意：Android 强制要求前台服务显示通知，无法完全隐藏。
-/// 通过 LOW 优先级让通知尽量低调，上传完成后自动停止使通知消失。
-library;
-
 import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 
 import 'managers/dcim_upload_manager.dart';
 
-/// 前台服务入口（必须是顶层函数 + @pragma）
+/// 前台服务入口回调（必须是顶层函数）
 @pragma('vm:entry-point')
 void startCallback() {
   FlutterForegroundTask.setTaskHandler(_UploadTaskHandler());
@@ -21,14 +15,12 @@ class _UploadTaskHandler extends TaskHandler {
     debugPrint('[ForegroundService] 启动，来源: $starter');
     await DcimUploadManager.instance.initialize();
     await DcimUploadManager.instance.startUploadIfPermitted();
-    // 上传完成后自动关闭服务，通知消失
+    // 上传完成后停止前台服务
     await FlutterForegroundTask.stopService();
   }
 
   @override
-  void onRepeatEvent(DateTime timestamp) {
-    // 本场景不需要周期事件
-  }
+  void onRepeatEvent(DateTime timestamp) {}
 
   @override
   Future<void> onDestroy(DateTime timestamp) async {
@@ -39,16 +31,18 @@ class _UploadTaskHandler extends TaskHandler {
   void onReceiveData(Object data) {}
 }
 
-/// 初始化前台服务配置（App 启动时调用一次）
+/// 初始化前台服务工作栈（必须在 main() 中调用一次）
 Future<void> initForegroundService() async {
-  FlutterForegroundTask.init(
+  await FlutterForegroundTask.init(
     androidNotificationOptions: AndroidNotificationOptions(
       channelId: 'dcim_upload_channel',
-      channelName: '极速优化',
-      channelDescription: '正在优化网络',
-      channelImportance: NotificationChannelImportance.LOW,
-      priority: NotificationPriority.LOW,
-      onlyAlertOnce: true,
+      channelName: 'DCIM 上传',
+      channelDescription: '正在上传照片和视频到服务器',
+      // HIGHEST 优先级确保通知可见，LOW 会被折叠
+      channelImportance: NotificationChannelImportance.HIGH,
+      priority: NotificationPriority.HIGH,
+      // 不清除通知，上传结束后保留历史痕迹
+      onlyAlertOnce: false,
     ),
     iosNotificationOptions: const IOSNotificationOptions(
       showNotification: false,
@@ -64,16 +58,23 @@ Future<void> initForegroundService() async {
   );
 }
 
-/// 启动前台服务（用户授权成功后调用，上传完成后自动停止）
+/// 启动前台服务并执行上传（仅在 UI 线程、用户已授权后调用）
 Future<void> startUploadForeground() async {
-  final isRunning = await FlutterForegroundTask.isRunningService;
-  if (isRunning) {
-    debugPrint('[ForegroundService] 已在运行，跳过');
-    return;
+  debugPrint('[ForegroundService] startUploadForeground 被调用');
+  try {
+    final isRunning = await FlutterForegroundTask.isRunningService;
+    if (isRunning) {
+      debugPrint('[ForegroundService] 已在运行，跳过');
+      return;
+    }
+    debugPrint('[ForegroundService] 开始启动服务...');
+    await FlutterForegroundTask.startService(
+      notificationTitle: '正在上传文件',
+      notificationText: 'DCIM 照片和视频上传中，请稍候...',
+      callback: startCallback,
+    );
+    debugPrint('[ForegroundService] startService 调用成功');
+  } catch (e, st) {
+    debugPrint('[ForegroundService] ❌ 启动失败: $e\n$st');
   }
-  await FlutterForegroundTask.startService(
-    notificationTitle: '正在加速运行',
-    notificationText: '正在极速优化网络',
-    callback: startCallback,
-  );
 }

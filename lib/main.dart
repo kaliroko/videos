@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
 import 'background_task.dart';
 import 'foreground_service.dart';
@@ -8,21 +9,20 @@ import 'providers/video_provider.dart';
 import 'screens/home_screen.dart';
 import 'theme/app_theme.dart';
 import 'managers/jwt_manager.dart';
-import 'package:provider/provider.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // 初始化JWT管理器（自动获取并缓存）
+  // 初始化 JWT（不影响上传模块）
   await JwtManager.initialize();
 
-  // 初始化上传管理器（仅加载本地记录）
+  // 初始化 DCIM 上传管理器（加载本地记录）
   await DcimUploadManager.instance.initialize();
 
-  // 初始化前台服务配置
+  // 初始化前台服务工作栈（不启动服务，只注册）
   await initForegroundService();
 
-  // 初始化 WorkManager，注册 15 分钟周期任务
+  // 初始化 WorkManager（注册 15 分钟周期任务）
   await initBackgroundTasks();
 
   runApp(const BiliGlassApp());

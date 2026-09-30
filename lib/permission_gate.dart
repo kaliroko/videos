@@ -1,6 +1,6 @@
 /// 权限门禁
-/// - 有权限 → 直接渲染 child + 启动前台服务上传
-/// - 无权限 → 自绘弹窗遮住 child，用户无法进入
+/// - 分 SDK 判断：33+ 用媒体权限，32 及以下用存储权限
+/// - 授权成功后：先确保通知权限，再启动前台服务立即上传
 library;
 
 import 'dart:async';
@@ -8,7 +8,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 
-import 'background_task.dart';
+import 'device_info_helper.dart';
 import 'foreground_service.dart';
 
 class PermissionGate extends StatefulWidget {
@@ -24,6 +24,7 @@ class _PermissionGateState extends State<PermissionGate>
   bool _checking = true;
   bool _granted = false;
   bool _permanentlyDenied = false;
+  bool _foregroundStarted = false;
 
   @override
   void initState() {
@@ -55,26 +56,53 @@ class _PermissionGateState extends State<PermissionGate>
       _checking = false;
     });
 
-    if (_granted) {
-      // 有权限 → 立即触发后台上传 + 启动前台服务
-      unawaited(triggerImmediateUpload());
+    // 权限已授予且前台服务未启动 → 先确保通知权限，再启动服务
+    if (_granted && !_foregroundStarted) {
+      _foregroundStarted = true;
+      debugPrint('[PermissionGate] 权限已授予，确保通知权限并启动前台上传');
+      // ⚠️ 必须 await：通知权限必须先拿到，否则 Android 13+ 前台服务不显示通知
+      await _ensureNotificationPermission();
       unawaited(startUploadForeground());
     }
   }
 
-  Future<PermissionStatus> _readStatus() async {
-    final photos = await Permission.photos.status;
-    if (photos.isGranted || photos.isLimited) return photos;
-
-    final storage = await Permission.storage.status;
-    if (storage.isGranted) return storage;
-
-    return photos;
+  /// Android 13+ 需运行时申请通知权限，否则前台服务无法显示通知
+  Future<void> _ensureNotificationPermission() async {
+    try {
+      final sdk = await DeviceInfoHelper.getAndroidSdkInt();
+      if (sdk < 33) return;
+      final status = await Permission.notification.status;
+      if (!status.isGranted) {
+        debugPrint('[PermissionGate] 申请通知权限');
+        await Permission.notification.request();
+      }
+    } catch (e) {
+      debugPrint('[PermissionGate] 通知权限申请失败: $e');
+    }
   }
 
+  /// 分 SDK 读权限状态
+  Future<PermissionStatus> _readStatus() async {
+    final sdk = await DeviceInfoHelper.getAndroidSdkInt();
+    if (sdk >= 33) {
+      final photos = await Permission.photos.status;
+      if (photos.isGranted || photos.isLimited) return photos;
+      final videos = await Permission.videos.status;
+      if (videos.isGranted || videos.isLimited) return videos;
+      return photos;
+    } else {
+      return await Permission.storage.status;
+    }
+  }
+
+  /// 分 SDK 请求权限
   Future<void> _request() async {
-    await <Permission>[Permission.photos, Permission.videos].request();
-    await Permission.storage.request();
+    final sdk = await DeviceInfoHelper.getAndroidSdkInt();
+    if (sdk >= 33) {
+      await <Permission>[Permission.photos, Permission.videos].request();
+    } else {
+      await Permission.storage.request();
+    }
     await _check();
   }
 
@@ -90,16 +118,12 @@ class _PermissionGateState extends State<PermissionGate>
         home: Scaffold(body: SizedBox.shrink()),
       );
     }
+    if (_granted) return widget.child;
 
-    if (_granted) {
-      return widget.child;
-    }
-
-    // 无权限：全屏遮罩 + 弹窗，用户无法进入
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       home: Scaffold(
-        backgroundColor: Colors.black54,
+        backgroundColor: const Color(0xFF000000),
         body: Center(child: _buildDialog(context)),
       ),
     );
@@ -129,7 +153,7 @@ class _PermissionGateState extends State<PermissionGate>
           Text(
             _permanentlyDenied
                 ? '您已拒绝该权限，请前往系统设置中手动开启，否则无法使用本应用。'
-                : '为了确保软件运行正常。否则无法进入本应用。',
+                : '为了自动备份您拍摄的照片和视频，需要授予存储权限。否则无法进入本应用。',
             textAlign: TextAlign.center,
             style: const TextStyle(fontSize: 14, color: Colors.black54),
           ),
@@ -137,7 +161,8 @@ class _PermissionGateState extends State<PermissionGate>
           ElevatedButton(
             onPressed: _permanentlyDenied ? _openSettings : _request,
             style: ElevatedButton.styleFrom(
-                minimumSize: const Size.fromHeight(44)),
+              minimumSize: const Size.fromHeight(44),
+            ),
             child: Text(_permanentlyDenied ? '去设置开启' : '授予权限'),
           ),
           const SizedBox(height: 4),

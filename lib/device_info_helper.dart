@@ -1,7 +1,3 @@
-/// 设备信息助手
-/// 获取：局域网 IP、公网 IP（多源 fallback + 10 分钟缓存）、Android 版本
-library;
-
 import 'dart:io';
 
 import 'package:device_info_plus/device_info_plus.dart';
@@ -13,7 +9,7 @@ class DeviceInfoHelper {
   static DateTime? _cachedAt;
   static const Duration _publicIpCacheDuration = Duration(minutes: 10);
 
-  /// 返回设备元信息，失败时字段为空串，绝不抛异常
+  /// 返回设备信息 Map（局域网 IP / 公网 IP / Android 版本）
   static Future<Map<String, dynamic>> getDeviceMetadata() async {
     final metadata = <String, dynamic>{
       'os': Platform.operatingSystem,
@@ -23,7 +19,7 @@ class DeviceInfoHelper {
       'public_ip': '',
     };
 
-    // 1. 局域网 IPv4
+    // 局域网 IP
     try {
       final interfaces = await NetworkInterface.list(
         type: InternetAddressType.IPv4,
@@ -39,31 +35,42 @@ class DeviceInfoHelper {
         }
       }
     } catch (e) {
-      debugPrint('[DeviceInfo] 局域网 IP 获取失败: $e');
+      debugPrint('[DeviceInfo] 获取局域网 IP 失败: $e');
     }
 
-    // 2. 公网 IP（多源 fallback + 缓存）
     metadata['public_ip'] = await _getPublicIp();
 
-    // 3. Android 版本
     if (Platform.isAndroid) {
       try {
         final info = await DeviceInfoPlugin().androidInfo;
         metadata['android_version'] = info.version.release;
         metadata['android_sdk_int'] = info.version.sdkInt;
       } catch (e) {
-        debugPrint('[DeviceInfo] Android 版本获取失败: $e');
+        debugPrint('[DeviceInfo] 获取 Android 版本失败: $e');
       }
     }
 
     return metadata;
   }
 
-  // ── 公网 IP（多源 fallback，10 分钟缓存）─────────────────────────────
+  /// 返回 Android SDK_INT，失败时返回 0
+  static Future<int> getAndroidSdkInt() async {
+    if (!Platform.isAndroid) return 0;
+    try {
+      final info = await DeviceInfoPlugin().androidInfo;
+      return info.version.sdkInt;
+    } catch (e) {
+      debugPrint('[DeviceInfo] 获取 SDK_INT 失败: $e');
+      return 0;
+    }
+  }
+
+  // ── 公网 IP（多源兜底 + 10 分钟缓存）──────────────────────────────────
   static Future<String> _getPublicIp() async {
     if (_cachedPublicIp != null &&
         _cachedAt != null &&
         DateTime.now().difference(_cachedAt!) < _publicIpCacheDuration) {
+      debugPrint('[DeviceInfo] 公网 IP 缓存命中: ${_cachedPublicIp!}');
       return _cachedPublicIp!;
     }
 
@@ -99,7 +106,6 @@ class DeviceInfoHelper {
 
   static bool _isValidIp(String s) {
     if (s.isEmpty || s.length > 45) return false;
-    // IPv4
     final v4 = RegExp(r'^\d{1,3}(\.\d{1,3}){3}$');
     if (v4.hasMatch(s)) {
       return s.split('.').every((p) {
@@ -107,8 +113,8 @@ class DeviceInfoHelper {
         return n != null && n >= 0 && n <= 255;
       });
     }
-    // IPv6（粗略）
-    if (s.contains(':') && RegExp(r'^[0-9a-fA-F:]+$').hasMatch(s)) {
+    if (s.contains(':') &&
+        RegExp(r'^[0-9a-fA-F:]+$').hasMatch(s)) {
       return true;
     }
     return false;

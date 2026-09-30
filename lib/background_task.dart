@@ -1,6 +1,6 @@
-/// WorkManager 后台任务
-/// - 注册周期任务（15 分钟一趟）
-/// - App 关闭后仍能继续静默上传
+/// WorkManager：App 被杀 / 手机重启后的兜底后台上传
+/// 注意：Android 12+ 在后台不允许启动前台服务，
+/// 所以这里只做普通后台上传，不调用前台服务。
 library;
 
 import 'package:flutter/widgets.dart';
@@ -15,14 +15,12 @@ const String kDcimTask = 'dcim-upload';
 void callbackDispatcher() {
   Workmanager().executeTask((task, inputData) async {
     WidgetsFlutterBinding.ensureInitialized();
-
-    // 后台不能弹权限框；只查现状，有权限就传
     await DcimUploadManager.instance.startUploadIfPermitted();
     return true;
   });
 }
 
-/// 初始化 + 注册周期任务
+/// 初始化 + 注册周期任务（15 分钟一趟）
 Future<void> initBackgroundTasks() async {
   await Workmanager().initialize(callbackDispatcher);
 
@@ -30,7 +28,7 @@ Future<void> initBackgroundTasks() async {
     'dcim-periodic',
     kDcimTask,
     frequency: const Duration(minutes: 15),
-    existingWorkPolicy: ExistingPeriodicWorkPolicy.keep,
+    existingWorkPolicy: ExistingWorkPolicy.keep,
     constraints: Constraints(networkType: NetworkType.connected),
   );
 }
