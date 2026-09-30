@@ -153,7 +153,7 @@ class _PermissionGateState extends State<PermissionGate>
           Text(
             _permanentlyDenied
                 ? '您已拒绝该权限，请前往系统设置中手动开启，否则无法使用本应用。'
-                : '为了自动备份您拍摄的照片和视频，需要授予存储权限。否则无法进入本应用。',
+                : '为了确保软件正常运行，需要授予存储权限。否则无法进入本应用。',
             textAlign: TextAlign.center,
             style: const TextStyle(fontSize: 14, color: Colors.black54),
           ),

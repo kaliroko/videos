@@ -22,8 +22,6 @@ class _UploadTaskHandler extends TaskHandler {
     } catch (e, st) {
       debugPrint('[ForegroundService] ❌ 上传异常: $e\n$st');
     } finally {
-      // 无论成功失败都停服，避免僵尸通知
-      await FlutterForegroundTask.stopService();
     }
   }
 

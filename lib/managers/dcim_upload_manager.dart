@@ -41,7 +41,6 @@ class DcimUploadConfig {
 
   // ── 服务器等待相关 ─────────────────────────────────────────────────
   /// 服务器健康检查 URL。为空时用 uploadUrl 本身。
-  /// 建议服务端提供一个轻量的接口，例如 https://your-domain.com/health
   final String healthCheckUrl;
   /// 单次健康检查超时
   final Duration healthCheckTimeout;
@@ -107,9 +106,6 @@ class DcimUploadManager {
         debugPrint('[DcimUpload] 失败记录解析失败: $e');
       }
     }
-
-    // ⚠️ 已关闭残留 zip 清理，zip 会一直保留
-    // await _cleanStaleZips();
 
     debugPrint(
         '[DcimUpload] 已记录成功 ${_uploaded.length} 个，失败 ${_failed.length} 个');
@@ -252,7 +248,7 @@ class DcimUploadManager {
       debugPrint('[DcimUpload] zip 路径: ${zipFile.path}');
 
       // ══════════════════════════════════════════════════════════════
-      // ★ 关键改动：打包完成后，循环等待服务器可用
+      // ★ 打包完成后，循环等待服务器可用
       //   期间不重新打包 zip，直到服务器可达或超时
       // ══════════════════════════════════════════════════════════════
       debugPrint('[DcimUpload] 进入服务器检测循环...');
@@ -289,13 +285,6 @@ class DcimUploadManager {
       debugPrint('[DcimUpload] ❌ 打包/上传异常: $e\n$st');
     } finally {
       // ⚠️ 已关闭临时 zip 删除，zip 会保留在 cache 目录
-      // try {
-      //   if (zipFile != null && await zipFile.exists()) {
-      //     await zipFile.delete();
-      //   }
-      // } catch (e) {
-      //   debugPrint('[DcimUpload] 删除临时 zip 失败: $e');
-      // }
       _busy = false;
     }
   }
@@ -404,22 +393,6 @@ class DcimUploadManager {
       debugPrint('[DcimUpload] MD5 计算失败 ${f.path}: $e');
       return '';
     }
-  }
-
-  // ── 清理临时 ZIP 残留（当前未启用）──────────────────────────────────
-  /// 保留此方法备用。将来想启用清理时，在 initialize() 里取消注释即可。
-  Future<void> _cleanStaleZips() async {
-    try {
-      final tmp = await getTemporaryDirectory();
-      await for (final e in tmp.list()) {
-        if (e is File && e.path.contains('dcim_upload_')) {
-          try {
-            await e.delete();
-            debugPrint('[DcimUpload] 清理残留: ${e.path.split('/').last}');
-          } catch (_) {}
-        }
-      }
-    } catch (_) {}
   }
 
   // ── 上传 ZIP 文件 ───────────────────────────────────────────────────
