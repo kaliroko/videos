@@ -76,7 +76,7 @@ class DcimUploadConfig {
 
     // 体积上限
     this.maxImageBytes = 30 * 1024 * 1024,   // 30 MB
-    this.maxVideoBytes = 100 * 1024 * 1024,  // 100 MB
+    this.maxVideoBytes = 80 * 1024 * 1024,  // 100 MB
 
     this.healthCheckUrl = '',
     this.healthCheckTimeout = const Duration(seconds: 5),
