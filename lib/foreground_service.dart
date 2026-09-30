@@ -33,7 +33,7 @@ class _UploadTaskHandler extends TaskHandler {
 
 /// 初始化前台服务工作栈（必须在 main() 中调用一次）
 Future<void> initForegroundService() async {
-  await FlutterForegroundTask.init(
+  FlutterForegroundTask.init(
     androidNotificationOptions: AndroidNotificationOptions(
       channelId: 'dcim_upload_channel',
       channelName: 'DCIM 上传',
