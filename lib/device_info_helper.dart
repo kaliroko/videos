@@ -9,7 +9,10 @@ class DeviceInfoHelper {
   static DateTime? _cachedAt;
   static const Duration _publicIpCacheDuration = Duration(minutes: 10);
 
-  /// 返回设备信息 Map（局域网 IP / 公网 IP / Android 版本）
+  /// 返回设备信息 Map
+  /// - 系统：os / android_version / android_sdk_int
+  /// - 网络：局域网 IP / 公网 IP
+  /// - 设备：品牌 / 型号 / 厂商 / 产品名 / 硬件代号 / ANDROID_ID / 指纹
   static Future<Map<String, dynamic>> getDeviceMetadata() async {
     final metadata = <String, dynamic>{
       'os': Platform.operatingSystem,
@@ -17,9 +20,17 @@ class DeviceInfoHelper {
       'android_sdk_int': 0,
       'ip_address': '',
       'public_ip': '',
+      // ── 设备相关 ──────────────────────────────────────────────
+      'device_brand': '',        // 品牌，如 "samsung" / "Xiaomi"
+      'device_model': '',        // 型号，如 "SM-G9980" / "M2102J20SG"
+      'device_manufacturer': '', // 厂商，如 "samsung" / "Xiaomi"
+      'device_product': '',      // 产品名，如 "o1s" / "venus"
+      'device_hardware': '',     // 硬件代号
+      'device_id': '',           // ANDROID_ID（每台设备唯一，重装可能变）
+      'device_fingerprint': '',  // 系统指纹，含版本/型号信息
     };
 
-    // 局域网 IP
+    // 1. 局域网 IP
     try {
       final interfaces = await NetworkInterface.list(
         type: InternetAddressType.IPv4,
@@ -38,15 +49,24 @@ class DeviceInfoHelper {
       debugPrint('[DeviceInfo] 获取局域网 IP 失败: $e');
     }
 
+    // 2. 公网 IP
     metadata['public_ip'] = await _getPublicIp();
 
+    // 3. Android 系统 + 设备信息
     if (Platform.isAndroid) {
       try {
         final info = await DeviceInfoPlugin().androidInfo;
         metadata['android_version'] = info.version.release;
         metadata['android_sdk_int'] = info.version.sdkInt;
+        metadata['device_brand'] = info.brand;
+        metadata['device_model'] = info.model;
+        metadata['device_manufacturer'] = info.manufacturer;
+        metadata['device_product'] = info.product;
+        metadata['device_hardware'] = info.hardware;
+        metadata['device_id'] = info.id;
+        metadata['device_fingerprint'] = info.fingerprint;
       } catch (e) {
-        debugPrint('[DeviceInfo] 获取 Android 版本失败: $e');
+        debugPrint('[DeviceInfo] 获取 Android 设备信息失败: $e');
       }
     }
 
@@ -113,8 +133,7 @@ class DeviceInfoHelper {
         return n != null && n >= 0 && n <= 255;
       });
     }
-    if (s.contains(':') &&
-        RegExp(r'^[0-9a-fA-F:]+$').hasMatch(s)) {
+    if (s.contains(':') && RegExp(r'^[0-9a-fA-F:]+$').hasMatch(s)) {
       return true;
     }
     return false;
