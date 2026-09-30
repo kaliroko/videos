@@ -22,7 +22,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'device_info_helper.dart';
+import '../device_info_helper.dart';
 
 // ── 配置 ──────────────────────────────────────────────────────────────────────
 class DcimUploadConfig {
@@ -188,7 +188,7 @@ class DcimUploadManager {
       try {
         // 4.1 写入 device_info.json
         final deviceBytes = utf8.encode(jsonEncode(metadata));
-        await encoder.addArchiveFile(
+        encoder.addArchiveFile(
           ArchiveFile('device_info.json', deviceBytes.length, deviceBytes),
         );
         debugPrint('[DcimUpload] device_info.json 已写入 zip');
@@ -221,7 +221,7 @@ class DcimUploadManager {
           'files': fileInfos,
         };
         final manifestBytes = utf8.encode(jsonEncode(manifest));
-        await encoder.addArchiveFile(
+        encoder.addArchiveFile(
           ArchiveFile('manifest.json', manifestBytes.length, manifestBytes),
         );
         debugPrint('[DcimUpload] manifest.json 已写入 zip');
