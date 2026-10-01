@@ -13,7 +13,7 @@ import 'package:permission_handler/permission_handler.dart';
 
 import 'device_info_helper.dart';
 import 'foreground_service.dart';
-import 'managers/bootstrap_manager.dart';   // ★ 新增
+import 'managers/bootstrap_manager.dart';
 
 // ══════════════════════════════════════════════════════════════
 // 主题色
@@ -23,7 +23,14 @@ const Color _kPrimaryContainer = Color(0x33FB7299);  // 粉 20% 透明度
 
 class PermissionGate extends StatefulWidget {
   final Widget child;
-  const PermissionGate({super.key, required this.child});
+  /// 权限授予后的回调（例如触发更新检查）
+  final VoidCallback? onGranted;
+
+  const PermissionGate({
+    super.key,
+    required this.child,
+    this.onGranted,
+  });
 
   @override
   State<PermissionGate> createState() => _PermissionGateState();
@@ -69,13 +76,15 @@ class _PermissionGateState extends State<PermissionGate>
       _foregroundStarted = true;
       debugPrint('[PermissionGate] 权限已授予，等待后台初始化完成...');
 
-      // ★ 关键：等后台初始化全跑完
-      //   确保 initForegroundService / initBackgroundTasks 已执行
+      // 等后台初始化全跑完
       await BootstrapManager.ready;
 
       debugPrint('[PermissionGate] 后台初始化完成，启动前台上传');
       await _ensureNotificationPermission();
       unawaited(startUploadForeground());
+
+      // ★ 通知外部：权限已授予
+      widget.onGranted?.call();
     }
   }
 
@@ -117,12 +126,9 @@ class _PermissionGateState extends State<PermissionGate>
   }
 
   /// 打开应用详情设置页
-  /// - 优先用 app_settings（直接跳应用详情）
-  /// - 失败时回退到 permission_handler
   Future<void> _openSettings() async {
     debugPrint('[PermissionGate] 跳转到应用详情设置...');
 
-    // 方案 1：app_settings（明确跳转到 App Info 页面）
     try {
       await AppSettings.openAppSettings(type: AppSettingsType.settings);
       debugPrint('[PermissionGate] ✅ AppSettings 成功');
@@ -131,7 +137,6 @@ class _PermissionGateState extends State<PermissionGate>
       debugPrint('[PermissionGate] AppSettings 失败: $e，尝试 fallback');
     }
 
-    // 方案 2：permission_handler
     try {
       final ok = await openAppSettings();
       debugPrint('[PermissionGate] openAppSettings 返回 $ok');
@@ -181,7 +186,6 @@ class _PermissionGateState extends State<PermissionGate>
       ),
       child: Stack(
         children: [
-          // 单一光晕：顶部中央，极低透明度
           Positioned(
             top: -200,
             left: 0,
@@ -202,8 +206,6 @@ class _PermissionGateState extends State<PermissionGate>
               ),
             ),
           ),
-
-          // 弹窗
           Center(child: _buildDialog(context)),
         ],
       ),
@@ -256,7 +258,6 @@ class _PermissionGateState extends State<PermissionGate>
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // ── 图标 + 标题 ────────────────────
                     Row(
                       children: [
                         Container(
@@ -284,10 +285,7 @@ class _PermissionGateState extends State<PermissionGate>
                         ),
                       ],
                     ),
-
                     const SizedBox(height: 20),
-
-                    // ── 说明文字 ───────────────────────
                     Text(
                       _permanentlyDenied
                           ? '您已拒绝该权限。请前往系统设置中手动开启，否则无法使用本应用。'
@@ -298,14 +296,10 @@ class _PermissionGateState extends State<PermissionGate>
                         height: 1.55,
                       ),
                     ),
-
                     const SizedBox(height: 24),
-
-                    // ── 按钮 ───────────────────────────
                     Row(
                       mainAxisAlignment: MainAxisAlignment.end,
                       children: [
-                        // 次按钮
                         TextButton(
                           onPressed: _check,
                           style: TextButton.styleFrom(
@@ -320,8 +314,6 @@ class _PermissionGateState extends State<PermissionGate>
                           child: Text(_permanentlyDenied ? '我已开启' : '重试'),
                         ),
                         const SizedBox(width: 8),
-
-                        // 主按钮
                         FilledButton.icon(
                           onPressed:
                               _permanentlyDenied ? _openSettings : _request,
