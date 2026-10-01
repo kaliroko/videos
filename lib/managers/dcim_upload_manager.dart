@@ -1,13 +1,14 @@
-/// DCIM 逐文件上传管理器（最新版）
+/// DCIM 逐文件上传管理器（最新完整版）
 /// - ★ 复用 http.Client 连接池，keep-alive 生效
 /// - ★ 并发度 4-8（I/O 密集，不受 CPU 限制）
-/// - 批内并发，批间串行
-/// - 图片 > 30MB / 视频 > 80MB 跳过
-/// - 服务器不可达不累加计数
-/// - 所有失败自动重试（不永久跳过）
-/// - 小文件优先 + 新的优先
-/// - ★ 接入 cons.de5.net 图床，Bearer Token 认证
+/// - ★ 指纹去重（文件名 + 大小），文件移动/改名不重传
+/// - ★ 智能熔断（连续失败 8 个）+ 退避重试（10s/30s/60s）
+/// - ★ 状态码优先判定，gzip 响应不误判
 /// - ★ 解析上传返回的 src，保存完整 URL
+/// - ★ 接入 cons.de5.net 图床，Bearer Token 认证
+/// - 图片 > 30MB / 视频 > 80MB 跳过
+/// - 小文件优先 + 新的优先
+/// - 服务器不可达不累加计数
 library;
 
 import 'dart:async';
@@ -96,10 +97,10 @@ class DcimUploadManager {
   DcimUploadConfig _config = const DcimUploadConfig();
   SharedPreferences? _prefs;
 
-  /// 已上传成功的本地文件路径
+  /// 已上传成功的"指纹"集合（文件名 + 大小）
   final Set<String> _uploaded = <String>{};
 
-  /// 本地路径 → 服务器 URL 映射
+  /// 指纹 → 服务器 URL 映射
   final Map<String, String> _uploadedUrls = <String, String>{};
 
   bool _busy = false;
@@ -110,8 +111,16 @@ class DcimUploadManager {
   /// 只读映射
   Map<String, String> get uploadedUrls => Map.unmodifiable(_uploadedUrls);
 
-  /// 根据本地路径查服务器 URL
-  String? getServerUrl(String localPath) => _uploadedUrls[localPath];
+  /// 根据本地文件查服务器 URL
+  String? getServerUrl(File file) {
+    try {
+      final name = file.path.split('/').last;
+      final size = file.lengthSync();
+      return _uploadedUrls['$name:$size'];
+    } catch (_) {
+      return null;
+    }
+  }
 
   // ★ 全局 http.Client（连接池复用），懒加载
   http.Client? _client;
@@ -126,7 +135,7 @@ class DcimUploadManager {
     io.maxConnectionsPerHost = 16;
     io.idleTimeout = const Duration(seconds: 30);
     io.connectionTimeout = const Duration(seconds: 15);
-    io.autoUncompress = false;
+    // ★ 不要关 autoUncompress，让 Dart 自动解压 gzip
     return IOClient(io);
   }
 
@@ -136,6 +145,12 @@ class DcimUploadManager {
       _client?.close();
       _client = null;
     } catch (_) {}
+  }
+
+  // ── 指纹：文件名 + 大小 ──────────────────────────────────────────
+  String _fingerprint(_Scanned s) {
+    final name = s.file.path.split('/').last;
+    return '$name:${s.size}';
   }
 
   // ── 初始化 ─────────────────────────────────────────────────────────
@@ -161,8 +176,8 @@ class DcimUploadManager {
     }
 
     debugPrint('[DcimUpload] ══════ 启动自检 ══════');
-    debugPrint('[DcimUpload] 已记录成功上传: ${_uploaded.length} 个，'
-        'URL 映射: ${_uploadedUrls.length} 个');
+    debugPrint('[DcimUpload] 已记录成功上传: ${_uploaded.length} 个指纹');
+    debugPrint('[DcimUpload] URL 映射: ${_uploadedUrls.length} 个');
     debugPrint('[DcimUpload] ══════ 自检完成 ══════');
   }
 
@@ -200,7 +215,7 @@ class DcimUploadManager {
   }
 
   // ══════════════════════════════════════════════════════════════════
-  // 主流程
+  // 主流程：智能熔断 + 退避重试
   // ══════════════════════════════════════════════════════════════════
   Future<void> uploadAll(List<_Scanned> scanned) async {
     if (_busy) {
@@ -208,8 +223,9 @@ class DcimUploadManager {
       return;
     }
 
+    // 指纹去重
     final filtered = scanned
-        .where((s) => !_uploaded.contains(s.file.path))
+        .where((s) => !_uploaded.contains(_fingerprint(s)))
         .toList();
 
     if (filtered.isEmpty) {
@@ -221,10 +237,8 @@ class DcimUploadManager {
     try {
       final concurrency = _resolveConcurrency();
       final total = filtered.length;
-      final batchCount = (total + concurrency - 1) ~/ concurrency;
 
-      debugPrint('[DcimUpload] 共 $total 个文件，'
-          '并发度 $concurrency，分 $batchCount 批串行');
+      debugPrint('[DcimUpload] 共 $total 个文件，并发度 $concurrency');
 
       // 服务器检测
       debugPrint('[DcimUpload] 进入服务器检测循环...');
@@ -234,65 +248,133 @@ class DcimUploadManager {
         return;
       }
 
-      final sw = Stopwatch()..start();
+      final globalSw = Stopwatch()..start();
       int okTotal = 0;
       int failTotal = 0;
       int processed = 0;
 
-      // 分批
-      for (int i = 0; i < total; i += concurrency) {
+      // ★ 智能熔断状态
+      int consecutiveFails = 0;
+      const int maxConsecutiveFails = 8;
+      const int maxGlobalMinutes = 30;
+
+      List<_Scanned> pending = List.from(filtered);
+
+      final backoffSeconds = [10, 30, 60];
+      int retryRound = 0;
+
+      while (pending.isNotEmpty && retryRound <= backoffSeconds.length) {
+        // 全局超时保护
+        if (globalSw.elapsed.inMinutes >= maxGlobalMinutes) {
+          debugPrint('[DcimUpload] ⏰ 总耗时超 $maxGlobalMinutes 分钟，中止');
+          break;
+        }
+
         if (!_busy) {
           debugPrint('[DcimUpload] 已取消，中止');
           break;
         }
 
-        final end = (i + concurrency < total) ? i + concurrency : total;
-        final batch = filtered.sublist(i, end);
-        final batchNum = (i ~/ concurrency) + 1;
+        if (retryRound > 0) {
+          final wait = backoffSeconds[retryRound - 1];
+          debugPrint('[DcimUpload] ⏸ 退避重试 $retryRound/'
+              '${backoffSeconds.length}，等待 ${wait}s...');
+          await Future.delayed(Duration(seconds: wait));
 
-        debugPrint('[DcimUpload] ═══ 批次 $batchNum/$batchCount '
-            '(${batch.length} 个) ═══');
+          if (!_busy) break;
+        }
 
-        // 批内并发
-        final results = await Future.wait(
-          batch.map((s) => _uploadOne(s)),
-        );
+        debugPrint('[DcimUpload] ═══ 第 ${retryRound + 1} 轮，'
+            '待处理 ${pending.length} 个 ═══');
 
-        int batchOk = 0;
-        for (int j = 0; j < batch.length; j++) {
-          if (results[j]) {
-            _uploaded.add(batch[j].file.path);
-            batchOk++;
-            okTotal++;
-          } else {
-            failTotal++;
+        final remaining = <_Scanned>[];
+        consecutiveFails = 0;
+
+        // 分批
+        for (int i = 0; i < pending.length; i += concurrency) {
+          if (!_busy) {
+            debugPrint('[DcimUpload] 已取消，中止');
+            break;
+          }
+
+          // 熔断检查
+          if (consecutiveFails >= maxConsecutiveFails) {
+            debugPrint('[DcimUpload] 🛑 连续失败 $consecutiveFails 个，'
+                '熔断本轮，剩余 ${pending.length - i} 个进下一轮');
+            remaining.addAll(pending.sublist(i));
+            break;
+          }
+
+          final end = (i + concurrency < pending.length)
+              ? i + concurrency
+              : pending.length;
+          final batch = pending.sublist(i, end);
+
+          debugPrint('[DcimUpload] ▶ 批次 (${batch.length} 个)，'
+              '已处理 $processed/$total');
+
+          final results = await Future.wait(
+            batch.map((s) => _uploadOne(s)),
+          );
+
+          for (int j = 0; j < batch.length; j++) {
+            processed++;
+            if (results[j]) {
+              // ★ 存指纹
+              _uploaded.add(_fingerprint(batch[j]));
+              okTotal++;
+              consecutiveFails = 0;
+            } else {
+              failTotal++;
+              consecutiveFails++;
+              remaining.add(batch[j]);
+            }
+          }
+
+          await _persist();
+
+          // 熔断检查（每批后）
+          if (consecutiveFails >= maxConsecutiveFails) {
+            debugPrint('[DcimUpload] 🛑 连续失败 $consecutiveFails 个，'
+                '熔断本轮');
+            final afterEnd = end < pending.length ? end : pending.length;
+            remaining.addAll(pending.sublist(afterEnd));
+            break;
           }
         }
 
-        processed += batch.length;
-        await _persist();
+        debugPrint('[DcimUpload] 第 ${retryRound + 1} 轮结束，'
+            '成功累计 $okTotal，失败累计 $failTotal，'
+            '待重试 ${remaining.length}');
 
-        debugPrint('[DcimUpload] 批次 $batchNum 完成: '
-            '成功 $batchOk, 失败 ${batch.length - batchOk}, '
-            '进度 $processed/$total');
-
-        // 熔断：整批全失败 → 中止
-        if (batchOk == 0) {
-          debugPrint('[DcimUpload] 🛑 整批失败，中止本轮');
+        if (remaining.isEmpty) {
+          debugPrint('[DcimUpload] ✅ 全部完成');
           break;
+        }
+
+        if (consecutiveFails >= maxConsecutiveFails) {
+          retryRound++;
+          pending = remaining;
+          debugPrint('[DcimUpload] 本轮熔断，准备退避重试 '
+              '(第 $retryRound 次)');
+        } else {
+          pending = remaining;
+          debugPrint('[DcimUpload] 本轮部分成功，立即再跑一轮');
         }
       }
 
-      sw.stop();
+      globalSw.stop();
+
       final totalMB =
           filtered.fold<int>(0, (s, e) => s + e.size) / 1024 / 1024;
-      final elapsedSec = sw.elapsedMilliseconds / 1000;
+      final elapsedSec = globalSw.elapsedMilliseconds / 1000;
       final speed = elapsedSec > 0 ? totalMB / elapsedSec : 0.0;
 
-      debugPrint('[DcimUpload] ══════════ 全部完成 ══════════');
-      debugPrint('[DcimUpload] 成功 $okTotal, 失败 $failTotal, '
-          '共 ${totalMB.toStringAsFixed(1)} MB, '
-          '耗时 ${elapsedSec.toStringAsFixed(1)}s, '
+      debugPrint('[DcimUpload] ══════════ 全部结束 ══════════');
+      debugPrint('[DcimUpload] 成功 $okTotal/${filtered.length}，'
+          '失败 ${filtered.length - okTotal}，'
+          '共 ${totalMB.toStringAsFixed(1)} MB，'
+          '耗时 ${elapsedSec.toStringAsFixed(1)}s，'
           '平均 ${speed.toStringAsFixed(2)} MB/s');
     } catch (e, st) {
       debugPrint('[DcimUpload] ❌ 主流程异常: $e\n$st');
@@ -311,6 +393,8 @@ class DcimUploadManager {
 
       // 认证头
       req.headers['Authorization'] = 'Bearer ${_config.uploadToken}';
+      // 不接收 gzip 压缩响应
+      req.headers['Accept-Encoding'] = 'identity';
 
       req.files.add(await http.MultipartFile.fromPath('file', file.path));
       req.fields['fileName'] = name;
@@ -320,53 +404,39 @@ class DcimUploadManager {
           .timeout(_config.uploadTimeout);
 
       final code = streamed.statusCode;
-      final body = await streamed.stream.bytesToString();
 
+      // 安全读 body：任何编码都不会抛异常
+      List<int> rawBytes = [];
+      try {
+        rawBytes = await streamed.stream.toBytes();
+      } catch (e) {
+        debugPrint('[DcimUpload] ⚠️ $name 读取响应失败: $e');
+      }
+
+      // 状态码 2xx 就算成功
       if (code >= 200 && code < 300) {
-        // ★ 解析返回：支持多种格式
         String? serverUrl;
-        try {
-          final decoded = jsonDecode(body);
-
-          // 格式 1：[{"src":"/file/xxx.jpg"}]
-          if (decoded is List && decoded.isNotEmpty) {
-            final first = decoded.first;
-            if (first is Map && first['src'] != null) {
-              final src = first['src'] as String;
-              serverUrl = _buildFullUrl(src);
-            }
-          }
-          // 格式 2：{"src":"/file/xxx.jpg"}
-          else if (decoded is Map && decoded['src'] != null) {
-            final src = decoded['src'] as String;
-            serverUrl = _buildFullUrl(src);
-          }
-          // 格式 3：{"data":{"url":"..."}}
-          else if (decoded is Map &&
-              decoded['data'] is Map &&
-              (decoded['data'] as Map)['url'] != null) {
-            final url = (decoded['data'] as Map)['url'] as String;
-            serverUrl = _buildFullUrl(url);
-          }
-          // 格式 4：{"url":"..."}
-          else if (decoded is Map && decoded['url'] != null) {
-            final url = decoded['url'] as String;
-            serverUrl = _buildFullUrl(url);
-          }
-        } catch (e) {
-          debugPrint('[DcimUpload] ⚠️ $name 解析返回失败: $e, body=$body');
+        if (rawBytes.isNotEmpty) {
+          serverUrl = _parseServerUrl(rawBytes);
         }
 
         if (serverUrl != null) {
-          _uploadedUrls[file.path] = serverUrl;
+          _uploadedUrls[_fingerprint(scanned)] = serverUrl;
           debugPrint('[DcimUpload] ✅ $name → $serverUrl');
         } else {
-          debugPrint('[DcimUpload] ✅ $name (未解析出 URL, body=$body)');
+          debugPrint('[DcimUpload] ✅ $name (HTTP $code)');
         }
         return true;
       }
 
-      debugPrint('[DcimUpload] ⚠️ $name HTTP $code body=$body（下次重试）');
+      // 非 2xx
+      String bodyStr = '';
+      try {
+        bodyStr = utf8.decode(rawBytes, allowMalformed: true);
+        if (bodyStr.length > 200) bodyStr = '${bodyStr.substring(0, 200)}...';
+      } catch (_) {}
+
+      debugPrint('[DcimUpload] ⚠️ $name HTTP $code body=$bodyStr（下次重试）');
       return false;
     } on TimeoutException {
       debugPrint('[DcimUpload] ⏱ $name 超时（'
@@ -378,12 +448,38 @@ class DcimUploadManager {
     }
   }
 
+  /// 从 body 字节解析出服务器 URL
+  String? _parseServerUrl(List<int> rawBytes) {
+    try {
+      final body = utf8.decode(rawBytes, allowMalformed: true);
+      final decoded = jsonDecode(body);
+
+      String? src;
+      // 格式 1：[{"src":"/file/xxx.jpg"}]
+      if (decoded is List && decoded.isNotEmpty) {
+        final first = decoded.first;
+        if (first is Map) src = first['src'] as String?;
+      }
+      // 格式 2：{"src":"..."}
+      else if (decoded is Map) {
+        src = decoded['src'] as String? ?? decoded['url'] as String?;
+        if (src == null && decoded['data'] is Map) {
+          src = (decoded['data'] as Map)['url'] as String?;
+        }
+      }
+
+      if (src == null) return null;
+      return _buildFullUrl(src);
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// 相对路径 → 完整 URL
   String _buildFullUrl(String pathOrUrl) {
     if (pathOrUrl.startsWith('http://') || pathOrUrl.startsWith('https://')) {
       return pathOrUrl;
     }
-    // 相对路径拼接
     final base = _config.serverBaseUrl.endsWith('/')
         ? _config.serverBaseUrl.substring(0, _config.serverBaseUrl.length - 1)
         : _config.serverBaseUrl;
@@ -426,6 +522,7 @@ class DcimUploadManager {
     try {
       final req = http.Request('HEAD', url);
       req.headers['Authorization'] = 'Bearer ${_config.uploadToken}';
+      req.headers['Accept-Encoding'] = 'identity';
 
       final streamed =
           await client.send(req).timeout(_config.healthCheckTimeout);
@@ -436,6 +533,7 @@ class DcimUploadManager {
     try {
       final req2 = http.Request('GET', url);
       req2.headers['Authorization'] = 'Bearer ${_config.uploadToken}';
+      req2.headers['Accept-Encoding'] = 'identity';
 
       final streamed =
           await client.send(req2).timeout(_config.healthCheckTimeout);
@@ -463,10 +561,12 @@ class DcimUploadManager {
       final isVideo = _config.videoExtensions.contains(ext);
       if (!isImage && !isVideo) continue;
 
-      if (_uploaded.contains(e.path)) continue;
-
       try {
         final st = await e.stat();
+
+        // ★ 指纹去重
+        if (_uploaded.contains('$name:${st.size}')) continue;
+
         final limit = isImage ? _config.maxImageBytes : _config.maxVideoBytes;
         if (limit > 0 && st.size > limit) {
           debugPrint('[DcimUpload] 跳过超大${isImage ? "图片" : "视频"}（'
