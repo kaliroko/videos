@@ -1,7 +1,9 @@
 /// 用户行为统计管理器（Supabase）
 /// - 上报 App 打开记录（含设备信息 + 公网 IP + 地理位置）
+/// - reportAppOpen 会等待 init 完成再上报，避免丢失
 library;
 
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:device_info_plus/device_info_plus.dart';
@@ -47,6 +49,9 @@ class AnalyticsManager {
 
   bool _initialized = false;
 
+  /// ★ 初始化完成门闩：reportAppOpen 会等它
+  static final Completer<void> _initCompleter = Completer<void>();
+
   // IP 信息缓存（10 分钟）
   IpInfo? _cachedIpInfo;
   DateTime? _cachedAt;
@@ -54,11 +59,15 @@ class AnalyticsManager {
 
   /// 初始化 Supabase（在 main 里调用一次）
   Future<void> init() async {
-    if (_initialized) return;
+    if (_initialized) {
+      if (!_initCompleter.isCompleted) _initCompleter.complete();
+      return;
+    }
+
     try {
       await Supabase.initialize(
         url: _supabaseUrl,
-        anonKey: _supabaseAnonKey,
+        publishableKey: _supabaseAnonKey,   // ★ 用新 API
       );
 
       final info = await DeviceInfoPlugin().androidInfo;
@@ -68,13 +77,22 @@ class AnalyticsManager {
       debugPrint('[Analytics] ✅ 初始化完成, deviceId=$_deviceId');
     } catch (e) {
       debugPrint('[Analytics] ❌ 初始化失败: $e');
+    } finally {
+      // ★ 无论成败都打开门闩，避免 reportAppOpen 永远卡住
+      if (!_initCompleter.isCompleted) {
+        _initCompleter.complete();
+      }
     }
   }
 
   /// 上报"打开 App"
   Future<void> reportAppOpen() async {
+    // ★ 关键：先等初始化完成
+    debugPrint('[Analytics] 等待初始化完成...');
+    await _initCompleter.future;
+
     if (!_initialized) {
-      debugPrint('[Analytics] 未初始化，跳过上报');
+      debugPrint('[Analytics] 初始化失败，跳过上报');
       return;
     }
 
