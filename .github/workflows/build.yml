@@ -72,9 +72,14 @@ jobs:
       - name: Get dependencies
         run: flutter pub get
 
-      
+      - name: Run tests
+        run: |
+          if [ -d "test" ]; then
+            flutter test
+          else
+            echo "No test directory, skipping"
+          fi
 
-      # ★ 构建 APK（加混淆 + symbols）
       - name: Build APK (release, obfuscated)
         run: |
           flutter clean
@@ -86,7 +91,6 @@ jobs:
             --split-debug-info=symbols/android-arm64 \
             --dart-define=FLUTTER_BUILD_MODE=release
 
-      # ★ 构建 AAB（同样加混淆）
       - name: Build App Bundle (release, obfuscated)
         run: |
           flutter build appbundle \
@@ -96,7 +100,6 @@ jobs:
             --split-debug-info=symbols/aab \
             --dart-define=FLUTTER_BUILD_MODE=release
 
-      # ★ 验证签名（关键：确认不是 debug 签名）
       - name: Verify APK signature
         run: |
           APK=build/app/outputs/flutter-apk/app-release.apk
@@ -104,7 +107,6 @@ jobs:
           echo "Using: $APKSIGNER"
           $APKSIGNER verify --print-certs $APK
 
-      # 上传混淆符号表（线上崩溃还原必须，保留 90 天）
       - name: Upload symbols
         uses: actions/upload-artifact@v4
         with:
@@ -128,12 +130,43 @@ jobs:
           retention-days: 14
           if-no-files-found: error
 
+      # ══════════════════════════════════════════════════════
+      # ★ 新增：从 pubspec.yaml 提取版本号
+      # ══════════════════════════════════════════════════════
+      - name: Extract version from pubspec
+        id: ver
+        run: |
+          VERSION=$(grep '^version:' pubspec.yaml | awk '{print $2}' | cut -d'+' -f1)
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Extracted version: $VERSION"
+
+      # ══════════════════════════════════════════════════════
+      # ★ 新增：检查这个版本的 tag 是否已存在
+      # ══════════════════════════════════════════════════════
+      - name: Check if tag exists
+        id: tag_check
+        run: |
+          VERSION=${{ steps.ver.outputs.version }}
+          if git ls-remote --tags origin "refs/tags/v$VERSION" | grep -q "v$VERSION"; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "Tag v$VERSION already exists, will skip release creation"
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "Tag v$VERSION does not exist, will create release"
+          fi
+
+      # ══════════════════════════════════════════════════════
+      # ★ 修改：Create Release（用真实版本号 + tag 存在性判断）
+      # ══════════════════════════════════════════════════════
       - name: Create Release
-        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+        if: |
+          github.event_name == 'push' &&
+          (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master') &&
+          steps.tag_check.outputs.exists == 'false'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ github.run_number }}-${{ github.sha }}
-          name: Release ${{ github.run_number }}
+          tag_name: v${{ steps.ver.outputs.version }}
+          name: Release v${{ steps.ver.outputs.version }}
           files: |
             build/app/outputs/flutter-apk/app-release.apk
             build/app/outputs/bundle/release/app-release.aab

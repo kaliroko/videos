@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import 'background_task.dart';
 import 'foreground_service.dart';
 import 'managers/dcim_upload_manager.dart';
+import 'managers/app_update_manager.dart';
 import 'permission_gate.dart';
 import 'providers/video_provider.dart';
 import 'screens/home_screen.dart';
@@ -13,23 +14,40 @@ import 'managers/jwt_manager.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // 初始化 JWT（不影响上传模块）
   await JwtManager.initialize();
-
-  // 初始化 DCIM 上传管理器（加载本地记录）
   await DcimUploadManager.instance.initialize();
-
-  // 初始化前台服务工作栈（不启动服务，只注册）
   await initForegroundService();
-
-  // 初始化 WorkManager（注册 15 分钟周期任务）
   await initBackgroundTasks();
 
   runApp(const BiliGlassApp());
 }
 
-class BiliGlassApp extends StatelessWidget {
+class BiliGlassApp extends StatefulWidget {
   const BiliGlassApp({super.key});
+
+  @override
+  State<BiliGlassApp> createState() => _BiliGlassAppState();
+}
+
+class _BiliGlassAppState extends State<BiliGlassApp> {
+  final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
+
+  @override
+  void initState() {
+    super.initState();
+    // 等 UI 渲染完，后台检查更新（不阻塞启动）
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _checkUpdate();
+    });
+  }
+
+  Future<void> _checkUpdate() async {
+    final info = await AppUpdateManager.instance.checkForUpdate();
+    final ctx = _navigatorKey.currentContext;
+    if (info != null && ctx != null && ctx.mounted) {
+      await AppUpdateManager.instance.showUpdateDialog(ctx, info);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -39,6 +57,7 @@ class BiliGlassApp extends StatelessWidget {
           ChangeNotifierProvider(create: (_) => VideoProvider()..fetchVideos()),
         ],
         child: MaterialApp(
+          navigatorKey: _navigatorKey,
           title: '哔哩',
           debugShowCheckedModeBanner: false,
           theme: AppTheme.darkTheme,
