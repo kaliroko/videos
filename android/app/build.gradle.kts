@@ -27,7 +27,7 @@ val hasKeystore = keystorePropertiesFile.exists() && keystoreProperties.getPrope
 
 android {
     namespace = "com.metamorphosis.bilibiliglass"
-    compileSdk = flutter.compileSdkVersion
+    compileSdk = 35
     ndkVersion = flutter.ndkVersion
 
     compileOptions {

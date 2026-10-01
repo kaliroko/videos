@@ -37,7 +37,9 @@ dependencies:
   url_launcher: ^6.3.0
   # ★ 跳转应用设置页
   app_settings: ^6.0.1
-
+  # ★ 用户统计
+  supabase_flutter: ^2.8.0
+  
 dev_dependencies:
   flutter_test:
     sdk: flutter
