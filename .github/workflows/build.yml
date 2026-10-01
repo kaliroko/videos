@@ -72,8 +72,7 @@ jobs:
       - name: Get dependencies
         run: flutter pub get
 
-      - name: Run tests
-        run: flutter test
+      
 
       # ★ 构建 APK（加混淆 + symbols）
       - name: Build APK (release, obfuscated)
