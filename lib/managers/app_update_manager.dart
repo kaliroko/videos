@@ -111,11 +111,13 @@ class AppUpdateManager {
   }
 
   /// 语义版本比较：remote > local 返回 true
+  /// 支持任意段数，如 "2.1.0.42" vs "2.1.0.41"
   bool _isNewerVersion(String remote, String local) {
     try {
       final r = remote.split('.').map(int.parse).toList();
       final l = local.split('.').map(int.parse).toList();
-      for (int i = 0; i < 3; i++) {
+      final maxLen = r.length > l.length ? r.length : l.length;
+      for (int i = 0; i < maxLen; i++) {
         final rv = i < r.length ? r[i] : 0;
         final lv = i < l.length ? l[i] : 0;
         if (rv > lv) return true;
