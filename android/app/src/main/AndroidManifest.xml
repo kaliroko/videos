@@ -10,8 +10,6 @@
     <uses-permission
         android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
-    <!-- Android 14+ 部分授权 -->
-    <uses-permission android:name="android.permission.READ_MEDIA_VISUAL_USER_SELECTED" />
 
     <!-- WorkManager 后台任务 -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
@@ -22,14 +20,10 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
-    <!-- 电池优化白名单（可选） -->
-    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
-
     <application
         android:label="Bilibili Glass"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
-        android:requestLegacyExternalStorage="true"
         android:allowBackup="false"
         android:supportsRtl="true">
         <activity
@@ -50,11 +44,12 @@
             </intent-filter>
         </activity>
 
-        <!-- 前台服务声明（Android 14+ 必须声明 foregroundServiceType）-->
+        <!-- ★ 前台服务声明：加了 stopWithTask="false" -->
         <service
             android:name="com.pravera.flutter_foreground_task.service.ForegroundService"
             android:foregroundServiceType="dataSync"
-            android:exported="false" />
+            android:exported="false"
+            android:stopWithTask="false" />
 
         <meta-data
             android:name="flutterEmbedding"
