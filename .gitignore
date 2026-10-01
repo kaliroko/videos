@@ -15,8 +15,15 @@ android/.gradle/
 android/.idea/
 android/app/build/
 android/local.properties
-android/key.properties
+
+# ★ 移除下面这行（放行 key.properties）
+# android/key.properties
 !android/key.properties.example
+
+# ★ 新增：只忽略 keystore 的常见别名，但放行我们用的那个
+*.jks
+*.keystore
+!android/app/upload-keystore.jks
 
 # iOS
 ios/Flutter/Generated.xcconfig
