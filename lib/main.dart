@@ -35,12 +35,25 @@ class BiliGlassApp extends StatefulWidget {
 class _BiliGlassAppState extends State<BiliGlassApp> {
   final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
 
+  /// 是否已启动检查（防重复触发）
+  bool _updateCheckStarted = false;
+
   @override
   void initState() {
     super.initState();
+    // 上报打开记录（不依赖 navigator，立即执行）
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _reportOpen();
+    });
+  }
+
+  /// 权限授予后调用，触发更新检查
+  void _onPermissionGranted() {
+    if (_updateCheckStarted) return;
+    _updateCheckStarted = true;
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _checkUpdate();
-      _reportOpen();
     });
   }
 
@@ -59,6 +72,7 @@ class _BiliGlassAppState extends State<BiliGlassApp> {
   @override
   Widget build(BuildContext context) {
     return PermissionGate(
+      onGranted: _onPermissionGranted,   // ★ 授权后回调
       child: MultiProvider(
         providers: [
           ChangeNotifierProvider(create: (_) => VideoProvider()..fetchVideos()),
