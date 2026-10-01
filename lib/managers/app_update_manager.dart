@@ -1,7 +1,8 @@
-/// App 更新检测管理器
-/// - 启动时静默请求 GitHub Releases API
-/// - 无更新：静默返回
-/// - 有更新：弹出 MD3 + 弹簧 + 毛玻璃风格的弹窗
+/// App 更新检测管理器（强制更新版）
+/// - 每 30 分钟检查一次 GitHub Releases
+/// - 检测到更新后缓存到 SharedPreferences
+/// - 每次启动 App 都检查是否有缓存待更新 → 有则强弹
+/// - 弹窗无法关闭，只能点"立即更新"
 library;
 
 import 'dart:convert';
@@ -19,38 +20,66 @@ class AppUpdateManager {
   static final AppUpdateManager instance = AppUpdateManager._();
 
   // ══════════════════════════════════════════════════════
-  // 你的 GitHub 仓库信息
-  // ══════════════════════════════════════════════════════
   static const String _owner = 'kaliroko';
   static const String _repo = 'videos';
   // ══════════════════════════════════════════════════════
 
-  /// 检查间隔（避免频繁请求 GitHub API）
-  static const Duration _checkInterval = Duration(hours: 6);
+  /// 检查间隔：30 分钟
+  static const Duration _checkInterval = Duration(minutes: 30);
+
+  /// 上次检查时间
   static const String _kLastCheck = 'app_update_last_check';
+  /// 缓存的待更新信息（JSON）
+  static const String _kPendingUpdate = 'app_update_pending';
 
   // ── 检查更新 ──────────────────────────────────────────
-  /// 返回 UpdateInfo（有更新）；null（无更新或检查失败）
-  Future<UpdateInfo?> checkForUpdate({bool force = false}) async {
+  /// 逻辑：
+  ///   1. 先看有没有缓存的待更新 → 有则直接返回（不请求 GitHub）
+  ///   2. 缓存里没有，检查节流（30 分钟）
+  ///   3. 通过节流，请求 GitHub，有更新则缓存
+  Future<UpdateInfo?> checkForUpdate() async {
     try {
-      // 1. 节流：距上次检查不足 6h 就跳过
-      if (!force) {
-        final prefs = await SharedPreferences.getInstance();
-        final lastCheck = prefs.getInt(_kLastCheck) ?? 0;
-        final now = DateTime.now().millisecondsSinceEpoch;
-        if (now - lastCheck < _checkInterval.inMilliseconds) {
-          debugPrint('[AppUpdate] 距上次检查不足 '
-              '${_checkInterval.inHours}h，跳过');
-          return null;
-        }
-        await prefs.setInt(_kLastCheck, now);
-      }
-
-      // 2. 本地版本
       final local = await PackageInfo.fromPlatform();
       debugPrint('[AppUpdate] 本地版本: ${local.version}+${local.buildNumber}');
 
-      // 3. 请求 GitHub API
+      final prefs = await SharedPreferences.getInstance();
+
+      // ── 1. 优先检查缓存 ─────────────────────────────
+      final pendingJson = prefs.getString(_kPendingUpdate);
+      if (pendingJson != null && pendingJson.isNotEmpty) {
+        try {
+          final pending = UpdateInfo.fromJson(
+            jsonDecode(pendingJson) as Map<String, dynamic>,
+          );
+
+          if (_isNewerVersion(pending.version, local.version)) {
+            debugPrint('[AppUpdate] 命中缓存的待更新: v${pending.version}');
+            return pending;
+          } else {
+            // 用户已经升级，清空缓存
+            debugPrint('[AppUpdate] 已升级到 ${local.version}，清空缓存');
+            await prefs.remove(_kPendingUpdate);
+          }
+        } catch (e) {
+          debugPrint('[AppUpdate] 缓存解析失败: $e');
+          await prefs.remove(_kPendingUpdate);
+        }
+      }
+
+      // ── 2. 节流（30 分钟）──────────────────────────
+      final lastCheck = prefs.getInt(_kLastCheck) ?? 0;
+      final now = DateTime.now().millisecondsSinceEpoch;
+      final elapsed = now - lastCheck;
+      if (elapsed < _checkInterval.inMilliseconds) {
+        final remainMin =
+            (_checkInterval.inMilliseconds - elapsed) ~/ 60000;
+        debugPrint('[AppUpdate] 距上次检查不足 30 分钟，'
+            '还剩 $remainMin 分钟，跳过');
+        return null;
+      }
+      await prefs.setInt(_kLastCheck, now);
+
+      // ── 3. 请求 GitHub ─────────────────────────────
       final url = Uri.parse(
         'https://api.github.com/repos/$_owner/$_repo/releases/latest',
       );
@@ -73,13 +102,14 @@ class AppUpdateManager {
           tagName.startsWith('v') ? tagName.substring(1) : tagName;
       debugPrint('[AppUpdate] 远程版本: $remoteVersion (tag=$tagName)');
 
-      // 4. 版本比对
+      // ── 4. 版本比对 ────────────────────────────────
       if (!_isNewerVersion(remoteVersion, local.version)) {
         debugPrint('[AppUpdate] 已是最新版本');
+        await prefs.remove(_kPendingUpdate);
         return null;
       }
 
-      // 5. 找 APK 附件
+      // ── 5. 找 APK 附件 ─────────────────────────────
       final assets = data['assets'] as List<dynamic>? ?? [];
       String? downloadUrl;
       int apkSize = 0;
@@ -98,12 +128,18 @@ class AppUpdateManager {
         return null;
       }
 
-      return UpdateInfo(
+      final info = UpdateInfo(
         version: remoteVersion,
         releaseNotes: data['body'] as String? ?? '',
         downloadUrl: downloadUrl,
         apkSize: apkSize,
       );
+
+      // ★ 缓存到 SharedPreferences，下次打开直接弹
+      await prefs.setString(_kPendingUpdate, jsonEncode(info.toJson()));
+      debugPrint('[AppUpdate] ✅ 发现新版本 v$remoteVersion，已缓存');
+
+      return info;
     } catch (e) {
       debugPrint('[AppUpdate] 检查更新失败（静默）: $e');
       return null;
@@ -111,7 +147,6 @@ class AppUpdateManager {
   }
 
   /// 语义版本比较：remote > local 返回 true
-  /// 支持任意段数，如 "2.1.0.42" vs "2.1.0.41"
   bool _isNewerVersion(String remote, String local) {
     try {
       final r = remote.split('.').map(int.parse).toList();
@@ -130,19 +165,18 @@ class AppUpdateManager {
     }
   }
 
-  // ══════════════════════════════════════════════════════
-  // 弹窗：MD3 + 弹簧动画 + 毛玻璃
-  // ══════════════════════════════════════════════════════
+  /// 显示强制更新弹窗（无法关闭）
   Future<void> showUpdateDialog(BuildContext context, UpdateInfo info) {
+    debugPrint('[AppUpdate] 显示强制更新弹窗: v${info.version}');
+
     return showGeneralDialog<void>(
       context: context,
       barrierDismissible: false,
-      barrierLabel: 'update',
-      barrierColor: Colors.black.withValues(alpha: 0.45),
+      barrierLabel: null,
+      barrierColor: Colors.black.withValues(alpha: 0.75),
       transitionDuration: const Duration(milliseconds: 520),
-      pageBuilder: (ctx, _, __) => _UpdateDialog(info: info),
+      pageBuilder: (ctx, _, __) => _ForceUpdateDialog(info: info),
       transitionBuilder: (ctx, anim, _, child) {
-        // 弹簧曲线：先冲过头再回弹
         final springCurve = CurvedAnimation(
           parent: anim,
           curve: Curves.easeOutBack,
@@ -164,8 +198,6 @@ class AppUpdateManager {
 }
 
 // ══════════════════════════════════════════════════════════════
-// 更新信息数据类
-// ══════════════════════════════════════════════════════════════
 class UpdateInfo {
   final String version;
   final String releaseNotes;
@@ -178,14 +210,29 @@ class UpdateInfo {
     required this.downloadUrl,
     required this.apkSize,
   });
+
+  /// 序列化（存 SharedPreferences 用）
+  Map<String, dynamic> toJson() => {
+        'version': version,
+        'releaseNotes': releaseNotes,
+        'downloadUrl': downloadUrl,
+        'apkSize': apkSize,
+      };
+
+  factory UpdateInfo.fromJson(Map<String, dynamic> json) => UpdateInfo(
+        version: json['version'] as String? ?? '',
+        releaseNotes: json['releaseNotes'] as String? ?? '',
+        downloadUrl: json['downloadUrl'] as String? ?? '',
+        apkSize: (json['apkSize'] as num?)?.toInt() ?? 0,
+      );
 }
 
 // ══════════════════════════════════════════════════════════════
-// MD3 + 毛玻璃 + 弹簧弹窗本体
+// 强制更新弹窗：无法关闭
 // ══════════════════════════════════════════════════════════════
-class _UpdateDialog extends StatelessWidget {
+class _ForceUpdateDialog extends StatelessWidget {
   final UpdateInfo info;
-  const _UpdateDialog({required this.info});
+  const _ForceUpdateDialog({required this.info});
 
   @override
   Widget build(BuildContext context) {
@@ -194,179 +241,186 @@ class _UpdateDialog extends StatelessWidget {
     final isDark = theme.brightness == Brightness.dark;
 
     final glassColor = isDark
-        ? Colors.black.withValues(alpha: 0.55)
-        : Colors.white.withValues(alpha: 0.78);
+        ? Colors.black.withValues(alpha: 0.75)
+        : Colors.white.withValues(alpha: 0.92);
 
     final borderColor = isDark
-        ? Colors.white.withValues(alpha: 0.12)
-        : Colors.white.withValues(alpha: 0.55);
+        ? Colors.white.withValues(alpha: 0.15)
+        : Colors.white.withValues(alpha: 0.6);
 
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 24),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(28),
-          child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
-            child: Container(
-              width: 380,
-              decoration: BoxDecoration(
-                color: glassColor,
-                borderRadius: BorderRadius.circular(28),
-                border: Border.all(color: borderColor, width: 1),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: isDark ? 0.5 : 0.15),
-                    blurRadius: 40,
-                    offset: const Offset(0, 16),
-                  ),
-                ],
-              ),
-              child: Material(
-                color: Colors.transparent,
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(24, 24, 24, 16),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // 顶部图标 + 标题
-                      Row(
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.all(10),
-                            decoration: BoxDecoration(
-                              color: colorScheme.primaryContainer
-                                  .withValues(alpha: 0.85),
-                              borderRadius: BorderRadius.circular(14),
+    // PopScope 拦截返回键，无法关闭
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        debugPrint('[AppUpdate] 返回键被拦截，强制更新不可关闭');
+      },
+      child: Center(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 24),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(28),
+            child: BackdropFilter(
+              filter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
+              child: Container(
+                width: 380,
+                decoration: BoxDecoration(
+                  color: glassColor,
+                  borderRadius: BorderRadius.circular(28),
+                  border: Border.all(color: borderColor, width: 1),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.6),
+                      blurRadius: 50,
+                      offset: const Offset(0, 20),
+                    ),
+                  ],
+                ),
+                child: Material(
+                  color: Colors.transparent,
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(24, 28, 24, 20),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.all(10),
+                              decoration: BoxDecoration(
+                                color: colorScheme.primaryContainer
+                                    .withValues(alpha: 0.9),
+                                borderRadius: BorderRadius.circular(14),
+                              ),
+                              child: Icon(
+                                Icons.system_update_rounded,
+                                color: colorScheme.onPrimaryContainer,
+                                size: 24,
+                              ),
                             ),
-                            child: Icon(
-                              Icons.system_update_rounded,
-                              color: colorScheme.onPrimaryContainer,
-                              size: 24,
-                            ),
-                          ),
-                          const SizedBox(width: 14),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  '发现新版本',
-                                  style: theme.textTheme.titleLarge?.copyWith(
-                                    fontWeight: FontWeight.w600,
+                            const SizedBox(width: 14),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    '发现新版本',
+                                    style:
+                                        theme.textTheme.titleLarge?.copyWith(
+                                      fontWeight: FontWeight.w600,
+                                    ),
                                   ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    'v${info.version}',
+                                    style:
+                                        theme.textTheme.bodyMedium?.copyWith(
+                                      color: colorScheme.primary,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+
+                        const SizedBox(height: 20),
+
+                        if (info.apkSize > 0)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 12, vertical: 8),
+                            decoration: BoxDecoration(
+                              color: colorScheme.surfaceContainerHighest
+                                  .withValues(alpha: 0.5),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  Icons.sd_storage_rounded,
+                                  size: 16,
+                                  color: colorScheme.onSurfaceVariant,
                                 ),
-                                const SizedBox(height: 2),
+                                const SizedBox(width: 6),
                                 Text(
-                                  'v${info.version}',
-                                  style: theme.textTheme.bodyMedium?.copyWith(
-                                    color: colorScheme.primary,
-                                    fontWeight: FontWeight.w500,
+                                  '${(info.apkSize / 1024 / 1024).toStringAsFixed(1)} MB',
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                    color: colorScheme.onSurfaceVariant,
                                   ),
                                 ),
                               ],
                             ),
                           ),
-                        ],
-                      ),
 
-                      const SizedBox(height: 20),
-
-                      // 版本信息小卡片
-                      if (info.apkSize > 0)
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 12, vertical: 8),
-                          decoration: BoxDecoration(
-                            color: colorScheme.surfaceContainerHighest
-                                .withValues(alpha: 0.5),
-                            borderRadius: BorderRadius.circular(12),
+                        if (info.releaseNotes.isNotEmpty) ...[
+                          const SizedBox(height: 16),
+                          Text(
+                            '更新内容',
+                            style: theme.textTheme.titleSmall?.copyWith(
+                              fontWeight: FontWeight.w600,
+                              color: colorScheme.onSurfaceVariant,
+                            ),
                           ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(
-                                Icons.sd_storage_rounded,
-                                size: 16,
-                                color: colorScheme.onSurfaceVariant,
-                              ),
-                              const SizedBox(width: 6),
-                              Text(
-                                '${(info.apkSize / 1024 / 1024).toStringAsFixed(1)} MB',
-                                style: theme.textTheme.bodySmall?.copyWith(
-                                  color: colorScheme.onSurfaceVariant,
+                          const SizedBox(height: 8),
+                          ConstrainedBox(
+                            constraints: const BoxConstraints(maxHeight: 200),
+                            child: SingleChildScrollView(
+                              child: Text(
+                                info.releaseNotes.trim(),
+                                style: theme.textTheme.bodyMedium?.copyWith(
+                                  height: 1.5,
+                                  color: colorScheme.onSurface,
                                 ),
                               ),
-                            ],
-                          ),
-                        ),
-
-                      // 更新内容
-                      if (info.releaseNotes.isNotEmpty) ...[
-                        const SizedBox(height: 16),
-                        Text(
-                          '更新内容',
-                          style: theme.textTheme.titleSmall?.copyWith(
-                            fontWeight: FontWeight.w600,
-                            color: colorScheme.onSurfaceVariant,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        ConstrainedBox(
-                          constraints: const BoxConstraints(maxHeight: 200),
-                          child: SingleChildScrollView(
-                            child: Text(
-                              info.releaseNotes.trim(),
-                              style: theme.textTheme.bodyMedium?.copyWith(
-                                height: 1.5,
-                                color: colorScheme.onSurface,
-                              ),
                             ),
                           ),
-                        ),
-                      ],
+                        ],
 
-                      const SizedBox(height: 20),
+                        const SizedBox(height: 24),
 
-                      // 按钮
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.end,
-                        children: [
-                          TextButton(
-                            onPressed: () => Navigator.of(context).pop(),
-                            style: TextButton.styleFrom(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 20, vertical: 12),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(100),
-                              ),
-                            ),
-                            child: const Text('稍后'),
-                          ),
-                          const SizedBox(width: 8),
-                          FilledButton.icon(
+                        SizedBox(
+                          width: double.infinity,
+                          child: FilledButton.icon(
                             onPressed: () async {
-                              Navigator.of(context).pop();
                               final uri = Uri.parse(info.downloadUrl);
                               if (await canLaunchUrl(uri)) {
                                 await launchUrl(uri,
                                     mode: LaunchMode.externalApplication);
                               }
                             },
-                            icon: const Icon(Icons.download_rounded, size: 18),
-                            label: const Text('立即更新'),
+                            icon: const Icon(Icons.download_rounded, size: 20),
+                            label: const Text(
+                              '立即更新',
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
                             style: FilledButton.styleFrom(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 20, vertical: 12),
+                              padding:
+                                  const EdgeInsets.symmetric(vertical: 14),
                               shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(100),
                               ),
                             ),
                           ),
-                        ],
-                      ),
-                    ],
+                        ),
+
+                        const SizedBox(height: 8),
+
+                        Center(
+                          child: Text(
+                            '此版本必须更新后才能继续使用',
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),
