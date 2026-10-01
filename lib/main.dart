@@ -1,9 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import 'background_task.dart';
-import 'foreground_service.dart';
-import 'managers/dcim_upload_manager.dart';
+import 'managers/bootstrap_manager.dart';
 import 'managers/app_update_manager.dart';
 import 'managers/analytics_manager.dart';
 import 'permission_gate.dart';
@@ -15,15 +15,14 @@ import 'managers/jwt_manager.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
+  // ① 只阻塞 JWT（首屏请求需要，其他全部后台）
   await JwtManager.initialize();
-  await DcimUploadManager.instance.initialize();
-  await initForegroundService();
-  await initBackgroundTasks();
 
-  // 初始化统计（失败也不影响启动）
-  await AnalyticsManager.instance.init();
-
+  // ② 立即渲染 UI（用户此刻就能看到首屏）
   runApp(const BiliGlassApp());
+
+  // ③ 后台初始化（不阻塞 UI）
+  unawaited(BootstrapManager.init());
 }
 
 class BiliGlassApp extends StatefulWidget {
@@ -39,7 +38,6 @@ class _BiliGlassAppState extends State<BiliGlassApp> {
   @override
   void initState() {
     super.initState();
-    // 等 UI 渲染完，后台检查更新 + 上报打开记录（不阻塞启动）
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _checkUpdate();
       _reportOpen();

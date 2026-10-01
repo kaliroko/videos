@@ -13,6 +13,7 @@ import 'package:permission_handler/permission_handler.dart';
 
 import 'device_info_helper.dart';
 import 'foreground_service.dart';
+import 'managers/bootstrap_manager.dart';   // ★ 新增
 
 // ══════════════════════════════════════════════════════════════
 // 主题色
@@ -66,7 +67,13 @@ class _PermissionGateState extends State<PermissionGate>
 
     if (_granted && !_foregroundStarted) {
       _foregroundStarted = true;
-      debugPrint('[PermissionGate] 权限已授予，确保通知权限并启动前台上传');
+      debugPrint('[PermissionGate] 权限已授予，等待后台初始化完成...');
+
+      // ★ 关键：等后台初始化全跑完
+      //   确保 initForegroundService / initBackgroundTasks 已执行
+      await BootstrapManager.ready;
+
+      debugPrint('[PermissionGate] 后台初始化完成，启动前台上传');
       await _ensureNotificationPermission();
       unawaited(startUploadForeground());
     }

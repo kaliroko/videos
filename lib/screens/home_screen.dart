@@ -1,8 +1,8 @@
 /// 首页 — LiquidGlass 悬浮液态玻璃导航 + 分类筛选
 ///
 /// 底部悬浮导航两个 Tab：
-///   1.「新API」→ JWT认证CMS接口（动态分类）
-///   2.「老API」→ m.py Flask listHot 接口
+///   1.「老API」→ m.py Flask listHot 接口
+///   2.「新API」→ JWT认证CMS接口（动态分类）
 library;
 
 import 'package:flutter/material.dart';
@@ -22,7 +22,7 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
-  int _bottomTab = 0; // 0=新API, 1=老API
+  int _bottomTab = 0; // ★ 0=老API, 1=新API
   int _activeCatIndex = 0;
   final ScrollController _scrollController = ScrollController();
   bool _appBarElevated = false;
@@ -75,7 +75,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           child: Column(
             children: [
               _buildAppBar(),
-              if (_bottomTab == 0) _buildCategoryBar(),
+              // ★ 只有新API（index 1）才显示分类栏
+              if (_bottomTab == 1) _buildCategoryBar(),
               Expanded(child: _buildVideoFeed()),
             ],
           ),
@@ -121,18 +122,19 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             ],
           ),
           const Spacer(),
+          // ★ 徽章：index 1 才是 JWT CMS
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
             decoration: BoxDecoration(
-              color: _bottomTab == 0
+              color: _bottomTab == 1
                   ? AppTheme.accentColor.withValues(alpha: 0.2)
                   : AppTheme.primaryColor.withValues(alpha: 0.15),
               borderRadius: BorderRadius.circular(10),
             ),
             child: Text(
-              _bottomTab == 0 ? 'JWT CMS' : 'Flask',
+              _bottomTab == 1 ? 'JWT CMS' : 'Flask',
               style: TextStyle(
-                color: _bottomTab == 0
+                color: _bottomTab == 1
                     ? AppTheme.accentColor
                     : AppTheme.primaryColor,
                 fontSize: 10,
@@ -268,27 +270,31 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
       child: GlassBottomBar(
         selectedIndex: _bottomTab,
+        // ★ 交换：index 0 = 老API，index 1 = 新API
         onTabSelected: (i) {
           setState(() => _bottomTab = i);
           if (i == 0) {
+            // 老API
+            context.read<VideoProvider>().setSource(VideoSource.oldApi);
+          } else {
+            // 新API
             context.read<VideoProvider>().setSource(VideoSource.newApi);
             setState(() => _activeCatIndex = 0);
-          } else {
-            context.read<VideoProvider>().setSource(VideoSource.oldApi);
           }
         },
+        // ★ tabs 顺序交换：老API 在前
         tabs: [
-          GlassBottomBarTab(
-            label: '新API',
-            icon: Icons.auto_awesome,
-            selectedIcon: Icons.auto_awesome_outlined,
-            glowColor: AppTheme.accentColor,
-          ),
           GlassBottomBarTab(
             label: '老API',
             icon: Icons.cloud,
             selectedIcon: Icons.cloud_outlined,
             glowColor: AppTheme.primaryColor,
+          ),
+          GlassBottomBarTab(
+            label: '新API',
+            icon: Icons.auto_awesome,
+            selectedIcon: Icons.auto_awesome_outlined,
+            glowColor: AppTheme.accentColor,
           ),
         ],
         barHeight: 60,

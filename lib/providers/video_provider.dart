@@ -15,7 +15,7 @@ class VideoProvider extends ChangeNotifier {
   List<MovieBean> _videos = [];
   String? _error;
   bool _loading = false;
-  VideoSource _source = VideoSource.newApi;
+  VideoSource _source = VideoSource.oldApi;   // ★ 默认老API
   Category _activeCategory = ApiService.catRecommend;
   int _currentPage = 1;
   bool _hasMore = true;
