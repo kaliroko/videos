@@ -9,6 +9,7 @@ import 'package:bilibili_glass/models/video_model.dart';
 import 'package:bilibili_glass/widgets/video_card.dart';
 import 'package:bilibili_glass/theme/app_theme.dart';
 import 'package:bilibili_glass/screens/video_player_screen.dart';
+import 'package:bilibili_glass/screens/tiktok_feed_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -35,7 +36,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         backgroundColor: Colors.transparent,
         body: SafeArea(
           child: Column(
-            children: [_buildAppBar(), Expanded(child: _buildVideoFeed())],
+            children: [_buildAppBar(), Expanded(child: _buildBody())],
           ),
         ),
         extendBody: true,
@@ -115,8 +116,24 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     );
   }
 
-  // ── 视频网格 ──────────────────────────────────────────────────────────────
-  Widget _buildVideoFeed() {
+  // ── 主体内容 ──────────────────────────────────────────────────────────────
+  Widget _buildBody() {
+    // 新API → TikTok 全屏滑动模式
+    if (_bottomTab == 1) {
+      return Consumer<VideoProvider>(
+        builder: (context, provider, child) {
+          if (provider.loading && provider.videos.isEmpty) {
+            return _buildLoadingState();
+          }
+          if (provider.error != null && provider.videos.isEmpty) {
+            return _buildErrorState(provider.error!);
+          }
+          return TiktokFeedScreen(videos: provider.videos);
+        },
+      );
+    }
+
+    // 老API → 原有网格视图
     return Consumer<VideoProvider>(
       builder: (context, provider, child) {
         if (provider.loading && provider.videos.isEmpty) {
