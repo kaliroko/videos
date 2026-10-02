@@ -1,9 +1,4 @@
 /// 上下滑动视频播放器（仿抖音上下滑动）
-/// - 视频按原比例显示，与现有播放器尺寸一致
-/// - 上下滑动切换视频，自动播放当前页
-/// - 惰性加载：滑到末尾才请求下一条
-/// - 前后各保留 2 个播放器实例，其他自动释放
-/// - 向下滑 → 隐藏全局底部液态玻璃栏；向上滑 → 恢复显示
 library;
 
 import 'dart:async';
@@ -18,7 +13,10 @@ import '../theme/app_theme.dart';
 import '../providers/nav_bar_visibility.dart';
 
 class SwipeVideoScreen extends StatefulWidget {
-  const SwipeVideoScreen({super.key});
+  /// ★ 是否处于前台 tab；false 时暂停所有播放器
+  final bool active;
+
+  const SwipeVideoScreen({super.key, this.active = true});
 
   @override
   State<SwipeVideoScreen> createState() => _SwipeVideoScreenState();
@@ -28,15 +26,13 @@ class _SwipeVideoScreenState extends State<SwipeVideoScreen> {
   late final PageController _controller;
 
   final List<VideoItem> _videos = [];
-  /// index → 播放器
   final Map<int, VideoPlayerController> _players = {};
 
   int _currentPage = 0;
-  bool _loading = true;   // 首屏加载
-  bool _fetching = false; // 是否正在请求下一条
+  bool _loading = true;
+  bool _fetching = false;
   String? _error;
 
-  /// ★ 全局底栏控制器缓存（dispose 阶段不能用 context）
   NavBarVisibility? _nav;
 
   @override
@@ -50,13 +46,27 @@ class _SwipeVideoScreenState extends State<SwipeVideoScreen> {
   void didChangeDependencies() {
     super.didChangeDependencies();
     _nav = context.read<NavBarVisibility>();
-    // 进入视频页，先确保底栏可见
-    _nav?.show();
+    if (widget.active) _nav?.show();
+  }
+
+  @override
+  void didUpdateWidget(covariant SwipeVideoScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // ★ tab 切换：进入前台→恢复播放；进入后台→暂停全部
+    if (oldWidget.active != widget.active) {
+      if (widget.active) {
+        final p = _players[_currentPage];
+        if (p != null && p.value.isInitialized) p.play();
+      } else {
+        for (final p in _players.values) {
+          if (p.value.isInitialized && p.value.isPlaying) p.pause();
+        }
+      }
+    }
   }
 
   @override
   void dispose() {
-    // 离开视频页前恢复底栏，避免回到别的页面看不到入口
     _nav?.show();
     _controller.dispose();
     for (final p in _players.values) {
@@ -66,14 +76,12 @@ class _SwipeVideoScreenState extends State<SwipeVideoScreen> {
     super.dispose();
   }
 
-  /// ★ 首屏预加载 2 条，保证 PageView 一开始就能滑动
   Future<void> _initialLoad() async {
     await _loadNext();
     if (!mounted || _error != null) return;
     await _loadNext();
   }
 
-  // ── 加载下一条 ────────────────────────────────────────────────────
   Future<void> _loadNext() async {
     if (_fetching) return;
     _fetching = true;
@@ -95,7 +103,7 @@ class _SwipeVideoScreenState extends State<SwipeVideoScreen> {
       });
 
       await _ensurePlayer(_videos.length - 1);
-      if (_videos.length - 1 == _currentPage) {
+      if (_videos.length - 1 == _currentPage && widget.active) {
         _players[_currentPage]?.play();
       }
     } finally {
@@ -103,13 +111,12 @@ class _SwipeVideoScreenState extends State<SwipeVideoScreen> {
     }
   }
 
-  // ── 确保某页播放器已初始化 ────────────────────────────────────────
   Future<void> _ensurePlayer(int index) async {
     if (index < 0 || index >= _videos.length) return;
 
     if (_players.containsKey(index)) {
       final p = _players[index]!;
-      if (p.value.isInitialized && index == _currentPage) {
+      if (p.value.isInitialized && index == _currentPage && widget.active) {
         p.play();
       }
       return;
@@ -133,7 +140,7 @@ class _SwipeVideoScreenState extends State<SwipeVideoScreen> {
         _players.remove(index);
         return;
       }
-      if (index == _currentPage) {
+      if (index == _currentPage && widget.active) {
         player.play();
       }
       if (mounted) setState(() {});
@@ -142,11 +149,9 @@ class _SwipeVideoScreenState extends State<SwipeVideoScreen> {
     }
   }
 
-  // ── 翻页回调 ──────────────────────────────────────────────────────
   void _onPageChanged(int index) {
     final oldPage = _currentPage;
 
-    // ★ 向下滑 → 隐藏底栏；向上滑 → 显示底栏
     if (index > oldPage) {
       _nav?.hide();
     } else if (index < oldPage) {
@@ -155,7 +160,6 @@ class _SwipeVideoScreenState extends State<SwipeVideoScreen> {
 
     setState(() => _currentPage = index);
 
-    // 暂停所有非当前页
     _players.forEach((i, p) {
       if (i != index && p.value.isInitialized && p.value.isPlaying) {
         p.pause();
@@ -165,22 +169,18 @@ class _SwipeVideoScreenState extends State<SwipeVideoScreen> {
     _ensurePlayer(index);
     _ensurePlayer(index + 1);
 
-    // 释放距离 ≥ 2 的播放器
-    final toRemove = _players.keys
-        .where((i) => (i - index).abs() > 2)
-        .toList();
+    final toRemove =
+        _players.keys.where((i) => (i - index).abs() > 2).toList();
     for (final i in toRemove) {
       _players[i]?.dispose();
       _players.remove(i);
     }
 
-    // 滑到末尾占位页 → 自动请求下一条
     if (index >= _videos.length - 1) {
       _loadNext();
     }
   }
 
-  // ── 点击暂停/播放 ─────────────────────────────────────────────────
   void _onTap(int index) {
     final p = _players[index];
     if (p == null || !p.value.isInitialized) return;
@@ -192,7 +192,6 @@ class _SwipeVideoScreenState extends State<SwipeVideoScreen> {
     setState(() {});
   }
 
-  // ── UI ────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
     if (_loading && _videos.isEmpty) {
@@ -238,7 +237,6 @@ class _SwipeVideoScreenState extends State<SwipeVideoScreen> {
         controller: _controller,
         scrollDirection: Axis.vertical,
         onPageChanged: _onPageChanged,
-        // ★ 末尾多一页"加载占位页"，保证滑到底还能继续滑，能触发懒加载
         itemCount: _videos.length + 1,
         itemBuilder: (context, index) {
           if (index >= _videos.length) {
@@ -281,7 +279,7 @@ class _SwipeVideoScreenState extends State<SwipeVideoScreen> {
 }
 
 // ══════════════════════════════════════════════════════════════
-// 视频按原比例显示
+// 视频显示：BoxFit.cover（满屏，无黑边）
 // ══════════════════════════════════════════════════════════════
 class _FitVideo extends StatelessWidget {
   final VideoPlayerController controller;
@@ -289,12 +287,20 @@ class _FitVideo extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      color: Colors.black,
-      alignment: Alignment.center,
-      child: AspectRatio(
-        aspectRatio: controller.value.aspectRatio,
-        child: VideoPlayer(controller),
+    final size = controller.value.size;
+    if (size.width == 0 || size.height == 0) {
+      return const ColoredBox(color: Colors.black);
+    }
+    return ClipRect(
+      child: SizedBox.expand(
+        child: FittedBox(
+          fit: BoxFit.cover,
+          child: SizedBox(
+            width: size.width,
+            height: size.height,
+            child: VideoPlayer(controller),
+          ),
+        ),
       ),
     );
   }
