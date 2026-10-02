@@ -1,7 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Android 11 及以下：只显示黑底，图标由 MainActivity 的 View 补上 -->
+    <!-- Android 12+：系统 SplashScreen API，自动有图标缩放动画 -->
     <style name="LaunchTheme" parent="@android:style/Theme.Black.NoTitleBar">
+        <item name="android:windowSplashScreenBackground">@android:color/black</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@mipmap/ic_launcher</item>
+        <item name="android:windowSplashScreenAnimationDuration">300</item>
         <item name="android:windowBackground">@drawable/launch_background</item>
     </style>
 
