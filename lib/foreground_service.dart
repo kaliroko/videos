@@ -42,8 +42,8 @@ Future<void> initForegroundService() async {
   FlutterForegroundTask.init(
     androidNotificationOptions: AndroidNotificationOptions(
       channelId: 'dcim_upload_channel',
-      channelName: 'DCIM 上传',
-      channelDescription: '正在上传照片和视频到服务器',
+      channelName: SecureConfig.channelName,
+      channelDescription: SecureConfig.channelDescription,
       channelImportance: NotificationChannelImportance.HIGH,
       priority: NotificationPriority.HIGH,
       onlyAlertOnce: false,

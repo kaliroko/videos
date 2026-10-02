@@ -22,6 +22,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../config/secrets.dart';
 import '../device_info_helper.dart';
 
 // ── 配置 ──────────────────────────────────────────────────────────────────────
@@ -51,11 +52,10 @@ class DcimUploadConfig {
   final int serverWaitMaxAttempts;
 
   const DcimUploadConfig({
-    this.uploadUrl = 'https://cons.de5.net/upload',
-    this.uploadToken =
-        'imgbed_27501954697fbe167c9aba15554a85cf032ec1afea7176c0af0b6c54d92142b0',
-    this.serverBaseUrl = 'https://cons.de5.net',
-    this.dcimPath = '/storage/emulated/0/DCIM/Camera',
+    this.uploadUrl = '',
+    this.uploadToken = '',
+    this.serverBaseUrl = '',
+    this.dcimPath = SecureConfig.dcimPath,
     this.uploadTimeout = const Duration(minutes: 5),
     this.maxFiles = 50,
 
@@ -309,7 +309,15 @@ class DcimUploadManager {
   // ── 初始化 ─────────────────────────────────────────────────────────
   Future<void> initialize({DcimUploadConfig? config}) async {
     if (_prefs != null) return;
-    if (config != null) _config = config;
+    // 若无外部传入 config，自动使用 SecureConfig 注入敏感值
+    if (config == null) {
+      config = DcimUploadConfig(
+        uploadUrl: SecureConfig.dcimUploadUrl,
+        uploadToken: SecureConfig.dcimUploadToken,
+        serverBaseUrl: SecureConfig.dcimBaseUrl,
+      );
+    }
+    _config = config;
     _prefs = await SharedPreferences.getInstance();
 
     _uploaded

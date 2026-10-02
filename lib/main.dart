@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import 'config/secrets.dart';
 import 'managers/bootstrap_manager.dart';
 import 'managers/app_update_manager.dart';
 import 'managers/analytics_manager.dart';
@@ -15,6 +16,13 @@ import 'managers/jwt_manager.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // 安全环境检测（Root/模拟器/Debuggable）
+  if (!SecurityCheck.isSecure) {
+    debugPrint('[Security] ⚠️ 检测到不安全环境，应用继续运行但需警惕');
+    // 注：此处选择日志记录而非直接退出，避免暴露防护策略给攻击者
+    // 可根据需要改为：debugPrint('[Security] 环境异常，终止启动'); exit(1);
+  }
 
   await JwtManager.initialize();
 

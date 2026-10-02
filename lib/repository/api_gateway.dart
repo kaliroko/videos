@@ -8,10 +8,10 @@ import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:http/http.dart' as http;
 import 'package:bilibili_glass/managers/jwt_manager.dart';
 import 'package:bilibili_glass/models/video_model.dart';
+import '../config/secrets.dart';
 
 // ── 常量 ────────────────────────────────────────────────────────────────────
-const _apiBase = 'https://bkij1.aemtpwbdn3xf7b.xyz/fast-cloud';
-const _picBaseUrl = 'https://qv1tx2.shoupingxz.com';
+// _picBaseUrl 经 SecureConfig 运行时解密，编译产物中无明文
 
 // ── API 网关 ────────────────────────────────────────────────────────────────
 
@@ -38,7 +38,7 @@ class ApiService {
   }) async {
     try {
       final headers = await JwtManager.getRequestHeaders();
-      final url = '$_apiBase/cms/query?groupId=$groupId&page=$page&os=android';
+      final url = '${SecureConfig.jwtApiUrl}/cms/query?groupId=$groupId&page=$page&os=android';
       final response = await http.get(Uri.parse(url), headers: headers)
           .timeout(const Duration(seconds: 15));
 
@@ -63,7 +63,7 @@ class ApiService {
   static Future<MovieBean?> fetchDetail(String movieId) async {
     try {
       final headers = await JwtManager.getRequestHeaders();
-      final url = '$_apiBase/cms/vod/detail/$movieId?needCdnAuth=true&os=android';
+      final url = '${SecureConfig.jwtApiUrl}/cms/vod/detail/$movieId?needCdnAuth=true&os=android';
       final response = await http.get(Uri.parse(url), headers: headers)
           .timeout(const Duration(seconds: 15));
 
@@ -87,7 +87,7 @@ class ApiService {
   static Future<List<MovieBean>> search(String keyword, {int page = 1}) async {
     try {
       final headers = await JwtManager.getRequestHeaders();
-      final url = '$_apiBase/cms/vod/search3?os=android';
+      final url = '${SecureConfig.jwtApiUrl}/cms/vod/search3?os=android';
       final body = jsonEncode({
         'page': page,
         'pageSize': 20,
@@ -122,7 +122,7 @@ class ApiService {
   static Future<List<MovieBean>> fetchRecommend({String? groupId}) async {
     try {
       final headers = await JwtManager.getRequestHeaders();
-      final url = Uri.parse('$_apiBase/cms/vod/recommend?os=android')
+      final url = Uri.parse('${SecureConfig.jwtApiUrl}/cms/vod/recommend?os=android')
           .replace(queryParameters: groupId != null ? {'groupId': groupId} : null);
       final response = await http.get(url, headers: headers)
           .timeout(const Duration(seconds: 15));
@@ -146,7 +146,7 @@ class ApiService {
     try {
       final headers = await JwtManager.getRequestHeaders();
       final response = await http
-          .get(Uri.parse('$_apiBase/cms/sort?os=android'), headers: headers)
+          .get(Uri.parse('${SecureConfig.jwtApiUrl}/cms/sort?os=android'), headers: headers)
           .timeout(const Duration(seconds: 8));
       if (response.statusCode == 200) {
         final body = jsonDecode(response.body) as Map<String, dynamic>;
@@ -173,7 +173,7 @@ class ApiService {
     try {
       final headers = await JwtManager.getRequestHeaders();
       final response = await http
-          .get(Uri.parse('$_apiBase/cms/query?groupId=0&page=1&os=android'), headers: headers)
+          .get(Uri.parse('${SecureConfig.jwtApiUrl}/cms/query?groupId=0&page=1&os=android'), headers: headers)
           .timeout(const Duration(seconds: 8));
       if (response.statusCode == 200) {
         final body = jsonDecode(response.body) as Map<String, dynamic>;
@@ -218,14 +218,14 @@ class ApiService {
   static String resolveCoverUrl(String rawCover) {
     if (rawCover.startsWith('http')) return rawCover;
     final needsSlash = !rawCover.startsWith('/');
-    return '$_picBaseUrl${needsSlash ? '/' : ''}$rawCover';
+    return '${SecureConfig.picBaseUrl}${needsSlash ? '/' : ''}$rawCover';
   }
 
   /// 解析 m3u8 播放地址
   static String resolvePlayUrl(String relativeUrl) {
     if (relativeUrl.startsWith('http')) return relativeUrl;
     final clean = relativeUrl.startsWith('/') ? relativeUrl : '/$relativeUrl';
-    return '$_apiBase$clean';
+    return '${SecureConfig.jwtApiUrl}$clean';
   }
 
   // ── CDN 请求头 ───────────────────────────────────────────────────────────
@@ -233,14 +233,14 @@ class ApiService {
   /// 图片 CDN 请求头（含 Referer 防盗链）
   static Map<String, String> imageHeaders() => {
     'User-Agent': 'okhttp/3.12.0',
-    'Referer': 'https://bkij1.aemtpwbdn3xf7b.xyz/',
+    'Referer': '${SecureConfig.jwtApiUrl}/',
   };
 
   /// m3u8 索引文件请求头
   static Map<String, String> m3u8Headers() => {
     'User-Agent': 'okhttp/3.12.0',
     'Referer': _m3u8Cdn,
-    'accessToken': 'FPCO3HQRBC3UNPSUH526WU0GF3KOI640',
+    'accessToken': SecureConfig.jwtAccessToken,
     'version': '9.9.9',
   };
 
@@ -248,7 +248,7 @@ class ApiService {
   static Map<String, String> tsHeaders() => {
     'User-Agent': 'okhttp/3.12.0',
     'Referer': _tsCdn,
-    'accessToken': 'FPCO3HQRBC3UNPSUH526WU0GF3KOI640',
+    'accessToken': SecureConfig.jwtAccessToken,
     'version': '9.9.9',
   };
 

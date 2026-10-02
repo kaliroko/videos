@@ -7,21 +7,20 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:encrypt/encrypt.dart' as enc;
 import 'package:bilibili_glass/models/video_model.dart';
+import '../config/secrets.dart';
 
-// ── 上游 API 常量（与 m.py 完全一致）──────────────────────────────────────
-const _apiUrl    = 'http://18.167.17.100:8099/api/videos/listHot';
-const _aesKey    = '625202f9149maomi';
-const _aesIv     = '5efd3f6060emaomi';
-const _uid       = '104226911';
-const _perPage   = 30;
-const _maxPages  = 30;
+// ── 上游 API 加密请求（AES-CBC，与 m.py aes_enc 等价）───────────────────
+// 所有敏感常量（key/iv/uid/url）均通过 SecureConfig 运行时解密，编译产物中无明文
+// 非敏感业务常量保留为 const
+const _perPage = 30;
+const _maxPages = 30;
 
 class ApiRepository {
   // ── AES-CBC 加密（与 m.py aes_enc 等价，返回大写 hex 字符串）────────
   static String encryptPayload(Map<String, dynamic> payload) {
     final jsonStr   = jsonEncode(payload);
-    final key       = enc.Key.fromUtf8(_aesKey);
-    final iv        = enc.IV.fromUtf8(_aesIv);
+    final key       = enc.Key.fromUtf8(SecureConfig.apiAesKey);
+    final iv        = enc.IV.fromUtf8(SecureConfig.apiAesIv);
     final encrypter = enc.Encrypter(enc.AES(key, mode: enc.AESMode.cbc));
     final encrypted = encrypter.encrypt(jsonStr, iv: iv);
     // encrypt 包的 Encrypted 类自带 .base16 getter，无需额外 import convert
@@ -30,8 +29,8 @@ class ApiRepository {
 
   // ── AES-CBC 解密（与 m.py aes_dec 等价，接受大写 hex 字符串）────────
   static String decryptResponse(String hexCiphertext) {
-    final key       = enc.Key.fromUtf8(_aesKey);
-    final iv        = enc.IV.fromUtf8(_aesIv);
+    final key       = enc.Key.fromUtf8(SecureConfig.apiAesKey);
+    final iv        = enc.IV.fromUtf8(SecureConfig.apiAesIv);
     final encrypter = enc.Encrypter(enc.AES(key, mode: enc.AESMode.cbc));
     // Encrypted.fromBase16 直接解码 base16 hex 字符串为字节
     return encrypter.decrypt(enc.Encrypted.fromBase16(hexCiphertext), iv: iv);
@@ -43,12 +42,12 @@ class ApiRepository {
       final encrypted = encryptPayload({
         'page':    page,
         'perPage': _perPage,
-        'uId':     _uid,
+        'uId':     SecureConfig.apiUid,
       });
 
       final response = await http
           .post(
-            Uri.parse(_apiUrl),
+            Uri.parse(SecureConfig.apiUrl),
             headers: {
               'User-Agent':    'okhttp/3.12.0',
               'Content-Type':  'application/x-www-form-urlencoded',
@@ -137,6 +136,6 @@ class ApiRepository {
   // ── URL 重写（与 m.py URL_REWRITE 一致）───────────────────────────────
   static String _rewriteUrl(String url) {
     if (url.isEmpty) return url;
-    return url.replaceAll('http://119.28.204.36', 'https://ksasdawoopss.i5stuw.com');
+    return url.replaceAll('http://119.28.204.36', SecureConfig.apiRewriteHost);
   }
 }

@@ -26,11 +26,11 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 
+import '../config/secrets.dart';
+
 class JwtManager {
-  // ── 常量 ────────────────────────────────────────────────────────────────
-  static const String _apiKey = 'FPCO3HQRBC3UNPSUH526WU0GF3KOI640';
+  // ── 常量（运行时从 SecureConfig 获取，编译产物中无明文）────────────────
   static const String _apiVersion = '9.9.9';
-  static const String _baseUrl = 'https://bkij1.aemtpwbdn3xf7b.xyz/fast-cloud';
   
   // SharedPreferences keys
   static const String _keyJwtToken = 'jwtToken';
@@ -168,7 +168,7 @@ class JwtManager {
       debugPrint('[JwtManager] 请求新JWT...');
       
       final response = await http
-          .get(Uri.parse('$_baseUrl/app/jwt-token?os=android'))
+          .get(Uri.parse('${SecureConfig.jwtApiUrl}/app/jwt-token?os=android'))
           .timeout(_requestTimeout);
       
       if (response.statusCode != 200) {
@@ -258,7 +258,7 @@ class JwtManager {
     final jwt = await getJwt();
     return {
       'User-Agent': 'okhttp/3.12.0',
-      'accessToken': _apiKey,
+      'accessToken': SecureConfig.jwtApiKey,
       'version': _apiVersion,
       if (jwt != null) 'jwtToken': jwt,
     };
@@ -266,7 +266,7 @@ class JwtManager {
 
   /// 构建带完整参数的API URL
   static String buildApiUrl(String path) {
-    return '$_baseUrl$path?os=android';
+    return '${SecureConfig.jwtApiUrl}$path?os=android';
   }
 
   // ── 资源清理 ────────────────────────────────────────────────────────────
