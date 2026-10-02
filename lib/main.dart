@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';   // ★ 新增
 import 'package:provider/provider.dart';
 
 import 'config/secrets.dart';
@@ -10,12 +11,25 @@ import 'managers/app_update_manager.dart';
 import 'managers/analytics_manager.dart';
 import 'permission_gate.dart';
 import 'providers/video_provider.dart';
-import 'providers/nav_bar_visibility.dart';   // ★ 新增
+import 'providers/nav_bar_visibility.dart';
 import 'screens/home_screen.dart';
 import 'theme/app_theme.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // ★ 让内容延伸到系统栏后面（沉浸式 / Edge-to-Edge）
+  await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+
+  // ★ 状态栏、导航栏都变透明，图标用浅色（适配深色主题）
+  SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
+    statusBarColor: Colors.transparent,             // 状态栏透明 → 黑边消失
+    statusBarIconBrightness: Brightness.light,      // Android：浅色图标
+    statusBarBrightness: Brightness.dark,           // iOS：深色背景
+    systemNavigationBarColor: Colors.transparent,   // 底部导航栏也透明
+    systemNavigationBarIconBrightness: Brightness.light,
+    systemNavigationBarDividerColor: Colors.transparent,
+  ));
 
   // 安全环境检测（Root/模拟器/Debuggable）
   if (!SecurityCheck.isSecure) {
@@ -87,7 +101,6 @@ class _BiliGlassAppState extends State<BiliGlassApp> {
       child: MultiProvider(
         providers: [
           ChangeNotifierProvider(create: (_) => VideoProvider()..fetchVideos()),
-          // ★ 新增：全局底栏显隐控制器（必须在 MaterialApp 之上）
           ChangeNotifierProvider(create: (_) => NavBarVisibility()),
         ],
         child: MaterialApp(

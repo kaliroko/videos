@@ -23,6 +23,13 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   int _bottomTab = 0;
   final ScrollController _scrollController = ScrollController();
 
+  /// ★ 触发底栏显隐的滑动阈值（像素）。
+  /// 设小 → 灵敏；设大 → 需要更长的滑动距离。
+  static const double _kNavTriggerDelta = 0.5;
+
+  /// 靠近顶部多少像素内强制显示底栏
+  static const double _kTopZone = 8.0;
+
   @override
   void dispose() {
     _scrollController.dispose();
@@ -33,6 +40,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   Widget build(BuildContext context) {
     final isSwipeMode = _bottomTab == 1;
     final nav = context.watch<NavBarVisibility>();
+    final topInset = MediaQuery.of(context).padding.top;
 
     return LiquidGlassScope.stack(
       background: Container(
@@ -40,22 +48,17 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       ),
       content: Scaffold(
         backgroundColor: isSwipeMode ? Colors.black : Colors.transparent,
-        body: SafeArea(
-          // ★ 视频模式不避开底部安全区，让视频铺到屏幕最下方
-          bottom: !isSwipeMode,
-          child: Column(
-            children: [
-              _buildAppBar(),
-              Expanded(
-                child: isSwipeMode
-                    ? const SwipeVideoScreen()
-                    : _buildVideoFeed(),
-              ),
-            ],
-          ),
+        body: Column(
+          children: [
+            if (!isSwipeMode) _buildAppBar(topInset: topInset),
+            Expanded(
+              child: isSwipeMode
+                  ? const SwipeVideoScreen()
+                  : _buildVideoFeed(),
+            ),
+          ],
         ),
         extendBody: true,
-        // ★ 底部玻璃栏随全局 NavBarVisibility 上下滑出/滑入
         bottomNavigationBar: AnimatedSlide(
           offset: nav.visible ? Offset.zero : const Offset(0, 1.3),
           duration: const Duration(milliseconds: 260),
@@ -68,10 +71,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     );
   }
 
-  // ── 顶部栏 ────────────────────────────────────────────────────────────────
-  Widget _buildAppBar() {
+  // ── 顶部栏（手动加状态栏高度 padding）───────────────────────────────────
+  Widget _buildAppBar({required double topInset}) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(14, 10, 14, 8),
+      padding: EdgeInsets.fromLTRB(14, topInset + 10, 14, 8),
       child: Row(
         children: [
           Row(
@@ -149,6 +152,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         }
         return NotificationListener<ScrollNotification>(
           onNotification: (notification) {
+            // ① 触底自动加载下一页（保留原逻辑）
             if (notification is ScrollEndNotification &&
                 provider.hasMore &&
                 !provider.loading) {
@@ -158,6 +162,30 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 provider.fetchVideos();
               }
             }
+
+            // ② ★ 底栏显隐：高灵敏度（阈值 0.5px）
+            if (notification is ScrollUpdateNotification) {
+              final offset = _scrollController.offset;
+              final delta = notification.scrollDelta ?? 0;
+              final nav = context.read<NavBarVisibility>();
+
+              if (offset <= _kTopZone) {
+                // 顶部附近 → 强制显示
+                nav.show();
+              } else if (delta > _kNavTriggerDelta) {
+                // 手指往上滑（看下面内容）→ 隐藏底栏
+                nav.hide();
+              } else if (delta < -_kNavTriggerDelta) {
+                // 手指往下滑（看上面内容）→ 显示底栏
+                nav.show();
+              }
+            } else if (notification is ScrollEndNotification) {
+              // 滑动停止时，若已在顶部附近 → 强制显示
+              if (_scrollController.offset <= _kTopZone) {
+                context.read<NavBarVisibility>().show();
+              }
+            }
+
             return false;
           },
           child: GridView.builder(
@@ -199,13 +227,14 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
   // ── 底部导航（液态玻璃）──────────────────────────────────────────────────
   Widget _buildBottomNav() {
+    final bottomInset = MediaQuery.of(context).padding.bottom;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+      padding: EdgeInsets.fromLTRB(16, 0, 16, 16 + bottomInset),
       child: GlassBottomBar(
         selectedIndex: _bottomTab,
         onTabSelected: (i) {
           setState(() => _bottomTab = i);
-          // 切换 tab 时先恢复底栏可见
+          // 切换 tab 时恢复底栏可见
           context.read<NavBarVisibility>().show();
           final source = i == 0 ? VideoSource.oldApi : VideoSource.newApi;
           context.read<VideoProvider>().setSource(source);
