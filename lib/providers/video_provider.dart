@@ -40,9 +40,12 @@ class VideoProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      _videos = _source == VideoSource.oldApi
-          ? await ApiRepository.fetchVideos()
-          : await SimpleApiRepository.fetchVideos();
+      if (_source == VideoSource.oldApi) {
+        _videos = await ApiRepository.fetchVideos();
+      } else {
+        // 新API：一次拉 1 条，由 TiktokFeedScreen 自己管理加载
+        _videos = await SimpleApiRepository.fetchVideos(count: 1);
+      }
       _hasMore = false;
       _error = null;
     } catch (e) {

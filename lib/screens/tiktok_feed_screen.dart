@@ -3,101 +3,73 @@
 /// 使用 MD3 真实物理弹簧动画：惯性滑动 + 弹跳归位
 library;
 
-import 'dart:math' show pow;
-
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:chewie/chewie.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/animation.dart';
+import 'package:flutter/physics.dart';
 import 'package:flutter/services.dart';
 import 'package:video_player/video_player.dart';
 import 'package:bilibili_glass/models/video_model.dart';
 import 'package:bilibili_glass/repository/simple_api.dart';
 import 'package:bilibili_glass/theme/app_theme.dart';
 
-/// 抖音式 MD3 物理弹簧翻页
-/// 继承 PageScrollPhysics，调高弹簧刚度与衰减，加入真实阻尼回弹
-class TiktokPageScrollPhysics extends PageScrollPhysics {
-  const TiktokPageScrollPhysics({ScrollPhysics? parent}) : super(parent: parent);
+// ══════════════════════════════════════════════════════════════
+// 抖音式弹簧翻页 Physics
+// ══════════════════════════════════════════════════════════════
+class TiktokPageScrollPhysics extends ScrollPhysics {
+  const TiktokPageScrollPhysics({super.parent});
 
   @override
   TiktokPageScrollPhysics applyTo(ScrollPhysics? ancestor) {
     return TiktokPageScrollPhysics(parent: buildParent(ancestor));
   }
 
-  // 更快的弹簧衰减 → 类似抖音那种"嗖"一下到位的感觉
   @override
-  double get springDecay => -pow(0.001, 1.0 / (TiktokPageScrollPhysics._springsPerSecond * 2));
+  Simulation? createBallisticSimulation(
+      ScrollMetrics position, double velocity) {
+    final tolerance = toleranceFor(position);
 
-  // 更高的刚度 → 页面 snap 更果断
-  @override
-  double get springStiffness => 600.0;
+    // 速度太小 → 不动
+    if (velocity.abs() < tolerance.velocity) return null;
 
-  // 减小小球模拟阻尼 → 滚动惯性更强
-  @override
-  double get decayRate => 0.005;
+    // 当前页 & 目标页
+    final page = position.pixels / position.viewportDimension;
+    final currentPage = page.round();
+    final maxPage =
+        (position.maxScrollExtent / position.viewportDimension).round();
 
-  @override
-  Simulation? createBallisticSimulation(ScrollMetrics position, double velocity) {
-    final bearing = _getBearing(position, velocity);
-    // 快速减速模拟（比默认 2500 dp/s² 更灵敏）
-    const deceleration = 3500.0;
-    // 速度阈值：低于此值触发 snap
-    if (abs(velocity) > 0.001) {
-      final double stoppingDistance = _speedAtDeceleration(abs(velocity), deceleration);
-      if (stoppingDistance.abs() > position.dimensions * 0.25) {
-        // 超出四分之一屏，强制 snap 到目标页
-        final int targetPage = _pageAfter(position.pixels + bearing * stoppingDistance, position.viewportDimension);
-        final double targetPixels = _pixelsAfterSnap(targetPage, position);
-        return TweenAnimationSimulation(
-          SpringSimulation(
-            SpringDescription.withDampingRatio(
-              mass: 1.0,
-              stiffness: springStiffness,
-              ratio: 0.9, // 接近临界阻尼，快速归位无过冲
-            ),
-            position.pixels,
-            targetPixels,
-            0.0,
-          ),
-          deceleration,
-          bearing,
-        );
-      }
-    }
-    // 默认 PageSnap（低速滑）
-    return super.createBallisticSimulation(position, velocity);
-  }
-
-  /// 根据速度和位置计算方向（+1 向下，-1 向上）
-  double _getBearing(ScrollMetrics position, double velocity) {
-    if (position.pixels == 0.0 && velocity < 0.0) return -1.0;
-    if (position.maxScrollExtent == position.pixels && velocity > 0.0) return 1.0;
-    return -velocity.sign;
-  }
-
-  /// 计算以给定减速度完全停止所需的距离
-  double _speedAtDeceleration(double speed, double rate) {
-    return sqrt(speed * speed / (2.0 * rate));
-  }
-
-  /// 计算 snap 后的目标像素位置
-  double _pixelsAfterSnap(int page, ScrollMetrics position) {
-    return page * position.viewportDimension + position.viewportDimension / 2.0 - position.extentAfter;
-  }
-
-  /// 判断滑动后应该进入哪一页
-  int _pageAfter(double afterPixels, double viewportDimension) {
-    if (afterPixels >= 0.0) {
-      return (afterPixels / viewportDimension).ceil();
+    int targetPage;
+    if (velocity > tolerance.velocity) {
+      // 向下滑
+      targetPage = (currentPage + 1).clamp(0, maxPage);
+    } else if (velocity < -tolerance.velocity) {
+      // 向上滑
+      targetPage = (currentPage - 1).clamp(0, maxPage);
     } else {
-      return (afterPixels / viewportDimension).floor();
+      targetPage = currentPage.clamp(0, maxPage);
     }
-  }
 
-  static const double _springsPerSecond = 6.0;
+    final targetPixels = targetPage * position.viewportDimension;
+
+    // 已经在目标位置 → 不需要动画
+    if ((targetPixels - position.pixels).abs() < tolerance.distance) {
+      return null;
+    }
+
+    // ★ 弹簧模拟：使用父类提供的 spring 参数
+    return ScrollSpringSimulation(
+      spring,
+      position.pixels,
+      targetPixels,
+      velocity,
+      tolerance: tolerance,
+    );
+  }
 }
 
+// ══════════════════════════════════════════════════════════════
+// 页面
+// ══════════════════════════════════════════════════════════════
 class TiktokFeedScreen extends StatefulWidget {
   const TiktokFeedScreen({super.key});
 
@@ -128,7 +100,7 @@ class _TiktokFeedScreenState extends State<TiktokFeedScreen>
     _fetchNext();
   }
 
-  // ── 数据加载 ────────────────────────────────────────────────────────────
+  // ── 数据加载 ──────────────────────────────────────────────────────
   Future<void> _fetchNext() async {
     final video = await SimpleApiRepository.fetchOne();
     if (!mounted) return;
@@ -143,20 +115,41 @@ class _TiktokFeedScreenState extends State<TiktokFeedScreen>
       _videos.add(video);
       _loading = false;
     });
+    // 自动初始化并播放刚加载的视频
+    await _initVideoAt(_videos.length - 1);
+    if (_videos.length - 1 == _currentPage) {
+      _playCurrent();
+    }
   }
 
-  // ── 播放器 ────────────────────────────────────────────────────────────
+  // ── 播放器初始化 ──────────────────────────────────────────────────
   Future<void> _initVideoAt(int index) async {
     if (index < 0 || index >= _videos.length) return;
-    if (_controllers[index] != null) return;
+    if (_controllers.length > index && _controllers[index] != null) return;
+
+    // 补位到 index
+    while (_controllers.length <= index) {
+      _controllers.add(null);
+      _chewieControllers.add(null);
+    }
 
     final video = _videos[index];
-    final controller = VideoPlayerController.networkUrl(Uri.parse(video.url));
+    final controller = VideoPlayerController.networkUrl(
+      Uri.parse(video.url),
+      httpHeaders: {
+        'User-Agent': 'Mozilla/5.0 (Linux; Android 13)',
+        'Referer': 'https://www.kuaishou.com/',
+      },
+    );
     _controllers[index] = controller;
 
     try {
       await controller.initialize();
-      if (!mounted) return;
+      await controller.setLooping(true);
+      if (!mounted) {
+        controller.dispose();
+        return;
+      }
 
       _chewieControllers[index] = ChewieController(
         videoPlayerController: controller,
@@ -166,11 +159,14 @@ class _TiktokFeedScreenState extends State<TiktokFeedScreen>
         placeholder: Container(color: Colors.black),
         showControls: false,
       );
+
+      if (mounted) setState(() {});
     } catch (e) {
       debugPrint('[TiktokFeed] init video $index failed: $e');
     }
   }
 
+  // ── 翻页回调 ──────────────────────────────────────────────────────
   void _onPageChanged(int index) {
     setState(() => _currentPage = index);
     _pauseAllExcept(index);
@@ -193,13 +189,17 @@ class _TiktokFeedScreenState extends State<TiktokFeedScreen>
   }
 
   void _playCurrent() {
+    if (_currentPage >= _chewieControllers.length) return;
     final chewie = _chewieControllers[_currentPage];
-    if (chewie != null && chewie.videoPlayerController.value.isInitialized) {
+    if (chewie == null) return;
+    final v = chewie.videoPlayerController.value;
+    if (v.isInitialized) {
       chewie.play();
     }
   }
 
   void _onVideoTap(int index) {
+    if (index >= _chewieControllers.length) return;
     final chewie = _chewieControllers[index];
     if (chewie == null) return;
     if (chewie.isPlaying) {
@@ -212,26 +212,26 @@ class _TiktokFeedScreenState extends State<TiktokFeedScreen>
   @override
   void dispose() {
     _pageController.dispose();
-    for (final c in _controllers) c?.dispose();
-    for (final c in _chewieControllers) c?.dispose();
+    for (final c in _controllers) {
+      c?.dispose();
+    }
+    for (final c in _chewieControllers) {
+      c?.dispose();
+    }
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     // 加载中
-    if (_loading && _videos.isEmpty) {
-      return _loadingView();
-    }
+    if (_loading && _videos.isEmpty) return _loadingView();
 
     // 初始加载失败且无视频
-    if (_error != null && _videos.isEmpty) {
-      return _errorView(_error!);
-    }
+    if (_error != null && _videos.isEmpty) return _errorView(_error!);
 
     return PopScope(
       canPop: true,
-      onPopInvoked: (didPop) async {
+      onPopInvokedWithResult: (didPop, result) async {
         if (!didPop) {
           SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
           SystemChrome.setPreferredOrientations([
@@ -252,7 +252,10 @@ class _TiktokFeedScreenState extends State<TiktokFeedScreen>
               itemBuilder: (context, index) {
                 return _TiktokVideoCard(
                   video: _videos[index],
-                  chewieController: _chewieControllers[index],
+                  chewieController:
+                      index < _chewieControllers.length
+                          ? _chewieControllers[index]
+                          : null,
                   onTap: () => _onVideoTap(index),
                 );
               },
@@ -325,7 +328,9 @@ class _TiktokFeedScreenState extends State<TiktokFeedScreen>
   }
 }
 
-// ── 单个抖音视频卡片 ──────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════
+// 单个抖音视频卡片
+// ══════════════════════════════════════════════════════════════
 class _TiktokVideoCard extends StatelessWidget {
   final VideoItem video;
   final ChewieController? chewieController;
@@ -339,16 +344,18 @@ class _TiktokVideoCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // ★ 局部变量，便于空安全提升
+    final ctrl = chewieController;
+    final bool ready =
+        ctrl != null && ctrl.videoPlayerController.value.isInitialized;
+
     return GestureDetector(
       onTap: onTap,
       child: Stack(
         fit: StackFit.expand,
         children: [
           // 视频播放器或封面占位
-          chewieController != null &&
-                  chewieController.videoPlayerController.value.isInitialized
-              ? Chewie(controller: chewieController!)
-              : _buildPlaceholder(),
+          ready ? Chewie(controller: ctrl) : _buildPlaceholder(),
 
           // 顶部导航栏
           Positioned(
@@ -369,8 +376,7 @@ class _TiktokVideoCard extends StatelessWidget {
                 child: Row(
                   children: [
                     IconButton(
-                      icon:
-                          const Icon(Icons.arrow_back, color: Colors.white),
+                      icon: const Icon(Icons.arrow_back, color: Colors.white),
                       onPressed: () => Navigator.pop(context),
                     ),
                     const Spacer(),
@@ -496,8 +502,7 @@ class _TiktokVideoCard extends StatelessWidget {
     return Container(
       color: AppTheme.surfaceColor,
       child: const Center(
-        child:
-            Icon(Icons.movie, color: AppTheme.textTertiary, size: 48),
+        child: Icon(Icons.movie, color: AppTheme.textTertiary, size: 48),
       ),
     );
   }
