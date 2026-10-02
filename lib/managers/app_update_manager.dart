@@ -1,8 +1,9 @@
 /// App 更新检测管理器（强制更新版）
-/// - 每 30 分钟检查一次 GitHub Releases
+/// - 每 3 分钟检查一次 GitHub Releases
 /// - 检测到更新后缓存到 SharedPreferences
 /// - 每次启动 App 都检查是否有缓存待更新 → 有则强弹
 /// - 弹窗无法关闭，只能点"立即更新"
+/// - ★ GitHub owner/repo 用独立 XOR 加密（不共用 secrets.dart 的 AES）
 library;
 
 import 'dart:convert';
@@ -15,16 +16,40 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+// ══════════════════════════════════════════════════════════════════
+// ★ 独立 XOR 加密（与 secrets.dart 完全无关）
+//   - 密钥 0x3C（不同于 secrets.dart 的 0xA7）
+//   - 硬编码字节数组，编译产物中无明文
+// ══════════════════════════════════════════════════════════════════
+const int _kXorKey = 0x3C;
+
+/// 加密后的 "kaliroko"（每字节 XOR 0x3C）
+const List<int> _kOwnerEnc = [
+  0x57, 0x5D, 0x50, 0x55, 0x4E, 0x53, 0x57, 0x53,
+];
+
+/// 加密后的 "videos"（每字节 XOR 0x3C）
+const List<int> _kRepoEnc = [
+  0x4A, 0x55, 0x58, 0x59, 0x53, 0x4F,
+];
+
+/// 运行时解密
+String _xorDecode(List<int> bytes) =>
+    String.fromCharCodes(bytes.map((b) => b ^ _kXorKey));
+
+// 缓存（避免每次拼 URL 都重新解码）
+String? _ownerCache;
+String? _repoCache;
+
+String get _owner => _ownerCache ??= _xorDecode(_kOwnerEnc);
+String get _repo => _repoCache ??= _xorDecode(_kRepoEnc);
+
+// ══════════════════════════════════════════════════════════════════
 class AppUpdateManager {
   AppUpdateManager._();
   static final AppUpdateManager instance = AppUpdateManager._();
 
-  // ══════════════════════════════════════════════════════
-  static const String _owner = 'kaliroko';
-  static const String _repo = 'videos';
-  // ══════════════════════════════════════════════════════
-
-  /// 检查间隔：30 分钟
+  /// 检查间隔：3 分钟
   static const Duration _checkInterval = Duration(minutes: 3);
 
   /// 上次检查时间
@@ -35,7 +60,7 @@ class AppUpdateManager {
   // ── 检查更新 ──────────────────────────────────────────
   /// 逻辑：
   ///   1. 先看有没有缓存的待更新 → 有则直接返回（不请求 GitHub）
-  ///   2. 缓存里没有，检查节流（30 分钟）
+  ///   2. 缓存里没有，检查节流（3 分钟）
   ///   3. 通过节流，请求 GitHub，有更新则缓存
   Future<UpdateInfo?> checkForUpdate() async {
     try {
@@ -66,15 +91,15 @@ class AppUpdateManager {
         }
       }
 
-      // ── 2. 节流（30 分钟）──────────────────────────
+      // ── 2. 节流（3 分钟）───────────────────────────
       final lastCheck = prefs.getInt(_kLastCheck) ?? 0;
       final now = DateTime.now().millisecondsSinceEpoch;
       final elapsed = now - lastCheck;
       if (elapsed < _checkInterval.inMilliseconds) {
-        final remainMin =
-            (_checkInterval.inMilliseconds - elapsed) ~/ 60000;
-        debugPrint('[AppUpdate] 距上次检查不足 30 分钟，'
-            '还剩 $remainMin 分钟，跳过');
+        final remainSec =
+            (_checkInterval.inMilliseconds - elapsed) ~/ 1000;
+        debugPrint('[AppUpdate] 距上次检查不足 3 分钟，'
+            '还剩 $remainSec 秒，跳过');
         return null;
       }
       await prefs.setInt(_kLastCheck, now);
@@ -87,7 +112,7 @@ class AppUpdateManager {
         url,
         headers: {
           'Accept': 'application/vnd.github+json',
-          'User-Agent': 'bilibili-glass',
+          'User-Agent': 'github',
         },
       ).timeout(const Duration(seconds: 10));
 
