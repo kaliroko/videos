@@ -25,7 +25,7 @@ class AppUpdateManager {
   // ══════════════════════════════════════════════════════
 
   /// 检查间隔：30 分钟
-  static const Duration _checkInterval = Duration(minutes: 30);
+  static const Duration _checkInterval = Duration(minutes: 3);
 
   /// 上次检查时间
   static const String _kLastCheck = 'app_update_last_check';
