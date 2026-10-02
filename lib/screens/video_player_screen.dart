@@ -1,4 +1,4 @@
-/// 视频播放页 — 直接播放新 API 返回的视频直链
+/// 视频播放页 — 直接播放视频直链
 library;
 
 import 'package:chewie/chewie.dart';
@@ -29,13 +29,17 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     _startPlayback();
   }
 
-  void _startPlayback() {
+  Future<void> _startPlayback() async {
+    debugPrint('[VideoPlayer] playing: ${widget.video.url}');
+
     _playerController = VideoPlayerController.networkUrl(
       Uri.parse(widget.video.url),
     );
 
-    _playerController!.initialize().then((_) {
+    try {
+      await _playerController!.initialize();
       if (!mounted) return;
+
       setState(() => _initialized = true);
       _playerController!.play();
       _chewieController = ChewieController(
@@ -43,16 +47,17 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
         autoPlay: true,
         looping: false,
         aspectRatio: _playerController!.value.aspectRatio,
-        deviceOrientationsAfterFullScreen: const [DeviceOrientation.portraitUp],
+        deviceOrientationsAfterFullScreen:
+            const [DeviceOrientation.portraitUp],
         allowedScreenSleep: false,
         hideControlsTimer: const Duration(seconds: 5),
         placeholder: Container(color: Colors.black),
       );
       setState(() {});
-    }).catchError((e) {
-      if (!mounted) return;
+    } catch (e) {
+      debugPrint('[VideoPlayer] 初始化失败: $e');
       setState(() => _playError = e.toString());
-    });
+    }
   }
 
   @override
@@ -76,7 +81,8 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
                   ],
                 )
               : Center(
-                  child: CircularProgressIndicator(color: AppTheme.accentColor),
+                  child:
+                      CircularProgressIndicator(color: AppTheme.accentColor),
                 ),
     );
   }
@@ -90,9 +96,11 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
           children: [
             const Icon(Icons.error_outline, size: 48, color: AppTheme.liveColor),
             const SizedBox(height: 16),
-            const Text('播放失败', style: TextStyle(color: Colors.white, fontSize: 16)),
+            const Text('播放失败',
+                style: TextStyle(color: AppTheme.textPrimary, fontSize: 16)),
             const SizedBox(height: 8),
-            Text(_playError ?? '', style: const TextStyle(color: AppTheme.textTertiary, fontSize: 12)),
+            Text(_playError ?? '',
+                style: const TextStyle(color: AppTheme.textTertiary, fontSize: 12)),
             const SizedBox(height: 20),
             FilledButton.icon(
               onPressed: () => Navigator.pop(context),
@@ -107,7 +115,9 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
 
   Widget _buildOverlay() {
     return Positioned(
-      top: 0, left: 0, right: 0,
+      top: 0,
+      left: 0,
+      right: 0,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
         decoration: const BoxDecoration(
@@ -126,11 +136,33 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
               ),
               const SizedBox(width: 4),
               Expanded(
-                child: Text(
-                  widget.video.title,
-                  style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      widget.video.title,
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 2),
+                    if (widget.video.author.isNotEmpty)
+                      Row(
+                        children: [
+                          const Icon(Icons.person,
+                              size: 12, color: Colors.white70),
+                          const SizedBox(width: 4),
+                          Text(
+                            widget.video.author,
+                            style: const TextStyle(
+                                color: Colors.white70, fontSize: 12),
+                          ),
+                        ],
+                      ),
+                  ],
                 ),
               ),
             ],

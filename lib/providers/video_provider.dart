@@ -1,6 +1,6 @@
 /// 视频数据提供者 — 支持两个 API 源
-///   • 旧API (VideoSource.old) → api_repository.dart（AES-CBC，m.py 原逻辑）
-///   • 新API (VideoSource.new) → simple_api.dart（GET https://api.kuleu.com/api/sjxjj）
+///   • 旧API (VideoSource.oldApi) → api_repository.dart（AES-CBC，m.py 原逻辑）
+///   • 新API (VideoSource.newApi) → simple_api.dart（GET https://api.kuleu.com/api/sjxjj）
 library;
 
 import 'package:flutter/foundation.dart';
@@ -14,17 +14,20 @@ class VideoProvider extends ChangeNotifier {
   List<VideoItem> _videos = [];
   bool _loading = false;
   String? _error;
+  bool _hasMore = false;
   VideoSource _source = VideoSource.oldApi;
 
-  List<VideoItem> get videos        => _videos;
-  bool        get loading           => _loading;
-  String?     get error             => _error;
-  VideoSource get source            => _source;
+  List<VideoItem> get videos     => _videos;
+  bool            get loading    => _loading;
+  String?         get error      => _error;
+  bool            get hasMore    => _hasMore;
+  VideoSource     get source     => _source;
 
   void setSource(VideoSource source) {
     if (_source == source) return;
     _source = source;
     _videos.clear();
+    _hasMore = false;
     _error = null;
     notifyListeners();
     fetchVideos();
@@ -40,6 +43,7 @@ class VideoProvider extends ChangeNotifier {
       _videos = _source == VideoSource.oldApi
           ? await ApiRepository.fetchVideos()
           : await SimpleApiRepository.fetchVideos();
+      _hasMore = false;
       _error = null;
     } catch (e) {
       _error = e.toString();
