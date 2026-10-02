@@ -5,6 +5,7 @@ import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import 'managers/dcim_upload_manager.dart';
+import 'config/secrets.dart';
 
 /// 前台服务入口回调（必须是顶层函数）
 @pragma('vm:entry-point')

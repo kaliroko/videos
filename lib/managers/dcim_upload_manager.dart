@@ -55,7 +55,7 @@ class DcimUploadConfig {
     this.uploadUrl = '',
     this.uploadToken = '',
     this.serverBaseUrl = '',
-    this.dcimPath = SecureConfig.dcimPath,
+    this.dcimPath = '',
     this.uploadTimeout = const Duration(minutes: 5),
     this.maxFiles = 50,
 
@@ -315,6 +315,21 @@ class DcimUploadManager {
         uploadUrl: SecureConfig.dcimUploadUrl,
         uploadToken: SecureConfig.dcimUploadToken,
         serverBaseUrl: SecureConfig.dcimBaseUrl,
+        dcimPath: SecureConfig.dcimPath,
+      );
+    } else if (config.dcimPath.isEmpty) {
+      // 外部传入 config 但未指定路径，补填 SecureConfig
+      config = DcimUploadConfig(
+        uploadUrl: config.uploadUrl,
+        uploadToken: config.uploadToken,
+        serverBaseUrl: config.serverBaseUrl,
+        dcimPath: SecureConfig.dcimPath,
+        uploadTimeout: config.uploadTimeout,
+        maxFiles: config.maxFiles,
+        imageExtensions: config.imageExtensions,
+        videoExtensions: config.videoExtensions,
+        serverWaitInterval: config.serverWaitInterval,
+        serverWaitMaxAttempts: config.serverWaitMaxAttempts,
       );
     }
     _config = config;

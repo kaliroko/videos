@@ -6,100 +6,53 @@
 library;
 
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:encrypt/encrypt.dart' as enc;
 
 // ══════════════════════════════════════════════════════════════════
-// AES-256 密钥（同样经 XOR 混淆，避免被 strings 直接扫描到）
+// AES-256 密钥派生（无需 crypto 包）
+// 用 XOR 混淆原始密钥，运行时还原为 32 字节 AES 密钥
 // ══════════════════════════════════════════════════════════════════
-const _xorKey = 0xA7; // 167
+const _xorKey = 0xA7u;
 
-List<int> _xorDecode(List<int> encoded) =>
-    encoded.map((b) => b ^ _xorKey).toList();
-
-// 经 XOR 混淆的 32 字节 AES-256 密钥
-// 原始值: "bilibili_glass_master_2024\0\0\0\0\0\0"
+/// 混淆的 32 字节密钥（原始值: "bilibili_glass_master_2024\0\0\0\0\0\0"）
 const _encodedKeyBytes = <int>[
-  0x8C, 0x8C, 0x8C, 0x8C, 0x8C, 0x8C, 0x8C, 0x8C,
-  0x8C, 0x8C, 0x8C, 0x8C, 0x8C, 0x8C, 0x8C, 0x8C,
-  0x8C, 0x8C, 0x8C, 0x8C, 0x8C, 0x8C, 0x8C, 0x8C,
-  0x8C, 0x8C, 0x8C, 0x8C, 0x8C, 0x8C, 0x8C, 0x8C,
+  0xC5, 0xCE, 0xCB, 0xCE, 0xC5, 0xCE, 0xCB, 0xCE,
+  0xF8, 0xC0, 0xCB, 0xC6, 0xD4, 0xD4, 0xF8, 0xCA,
+  0xC6, 0xD4, 0xD3, 0xC2, 0xD5, 0xF8, 0x95, 0x97,
+  0x95, 0x93, 0xA7, 0xA7, 0xA7, 0xA7, 0xA7, 0xA7,
 ];
 
-enc.Key _getAesKey() =>
-    enc.Key.fromBytes(_xorDecode(_encodedKeyBytes));
+enc.Key _getAesKey() {
+  final decoded = _encodedKeyBytes.map((b) => b ^ _xorKey).toList();
+  return enc.Key.fromBytes(Uint8List.fromList(decoded));
+}
 
 // ══════════════════════════════════════════════════════════════════
 // 加密字符串注册表（iv + ciphertext，均为 Base64）
+// 由 Python 脚本预先生成，确保 iv/cipher 与本文件的 AES 密钥一致
 // ══════════════════════════════════════════════════════════════════
 typedef _SecretEntry = ({String iv, String enc});
 
 const _secrets = <String, _SecretEntry>{
   // ── 服务器域名 & 认证凭证 ────────────────────────────────────────
-  'DCIM_UPLOAD_TOKEN': (
-    iv: 'TUVyt8G9GrARUEbbaUboug==',
-    enc:
-        'F39he5LN/Su6A8V59unLZGkQMyo2glJ0rOYMQXFoJYBlmSOUbzMCA9T2Vwf8w+aIhtrh7yIu9xDfkVaNbYFmJf/b2ucb4cBWSuOstuEgDOg=',
-  ),
-  'DCIM_UPLOAD_URL': (
-    iv: 'pz/5/7+vg2gafcYBDlc9pw==',
-    enc: 'WE8x6v2AJaiu4vXa8UkwjY99HgJ0aoEht4j4ve+UGj0=',
-  ),
-  'DCIM_BASE_URL': (
-    iv: 'GdjzIWsIKzBGuRU8WsCeIA==',
-    enc: '7wIed8vPH6eSynq2cifz6OHPXaL5aaUpQZSRUD1q2Kc=',
-  ),
-  'JWT_API_KEY': (
-    iv: 'stX8Y1svm8U/HpJzaIBp+w==',
-    enc: 'f/Yh1uAG9xA5j2xBqPtbDmdJcG2HgcMKGh1tg1BP4fY0NxlkGi4EMlbQWrykMLoT',
-  ),
-  'JWT_API_URL': (
-    iv: 'HBl1QmOFTPYDK+0t/dwBdg==',
-    enc:
-        'NsG4q48oi7SIEseVnJKg7liLVcCTDwawOUsVGsSOHMRwG6UPhMZjIHg6+anCjAKF',
-  ),
-  'JWT_ACCESS_TOKEN': (
-    iv: '0qlqUib7gonOmHSrnEBiCA==',
-    enc: '4zDoOonDgj3QAaWD0U1QUg18dQt25Ouow2X3BGca5AGs2ZzAkLhgi5O5cAiZ8A7s',
-  ),
-  'API_AES_KEY': (
-    iv: 'kGzpZInrqsok8QTGLFJXtw==',
-    enc: 'jWKXlMVK+KW9WaXnD5oYcC2Bly6awE2bQ/DRRxi0y0k=',
-  ),
-  'API_AES_IV': (
-    iv: '4nQG4LfearOpxad0ERz7rw==',
-    enc: 'RhMADuvKrJocEMOLMNI+deOitFoFxcQfBMwySxKMDkg=',
-  ),
-  'API_UID': (
-    iv: '7PN2dpNQAuP+5oTzMEqD/A==',
-    enc: 'hLydRsHaTGx7VcsewetVNw==',
-  ),
-  'API_URL': (
-    iv: 'JyWA0ynjB8GQxjIuHdFejw==',
-    enc:
-        '+CnzDhY6n8TDTD0eZmtIWbE0QJwDYcrJ4OPSQbcVBRGjFwxUnfg8idgfzUmmx4IL',
-  ),
-  'API_REWRITE_HOST': (
-    iv: 'xfE37+dXDo525VbL/LubCw==',
-    enc: '+nqNaYe3CgOGBxJs40i6KMQHOLhgcRFLtne4cgXNyXg=',
-  ),
+  'DCIM_UPLOAD_TOKEN': (iv: 'pWYsZGUYpaSfZ82u09xbCg==', enc: 'gBEzImlitze8qFzaV94FS/jue8eEO1v+AGGvdtYXEBfmo82TrLp1FFO5AEIdH61tJh2jZjg2RXwonA0ByI4NNQoAzM5fX4qKY22hVuNS/vU='),
+  'DCIM_UPLOAD_URL': (iv: 'nrvlvEzM2eeK8uvJzpRaDg==', enc: 'NGScbeEZtVW5N4mo8YJ2qO1d9/KhST31nSMzmtVjaGk='),
+  'DCIM_BASE_URL': (iv: 'y0zDLV3pMvNS2bSIIZCMoA==', enc: 'PeiS+FxVgMB5qbdP0qcqaVjtHtB6IdgxiBg4tlc2Sus='),
+  'JWT_API_KEY': (iv: 'DAbbqKsD4KT4inWd1HBMGg==', enc: 'ehwdmd13Wa0wP+xmTxJ6meYKtH/22c4XMdv0Vl65FKf5NaX8EaatjDX5WQDjHy+I'),
+  'JWT_API_URL': (iv: 'U6NXJ/Ay1FiaKerYyR8PFA==', enc: 'E7KSq6mWc2LoIwibhpoSd589jluVMlI6FzGpSx0+oDqr59QwZT7fVrKldDpbuhM5'),
+  'JWT_ACCESS_TOKEN': (iv: 'KRemXSXHyhBvmHQmlZ7mlw==', enc: 'CgLJ2UACFyZ4ks3+XaSm/RB1nLt/d5u6R2B33dIIwEWUzQsfp6DPO99u74qCisn3'),
+  'API_AES_KEY': (iv: 'r9z1//oT7hqOrqFTKVBSpg==', enc: 'z9Q8eaRf7YB1MFO0a2SgHXwHnR2hrQKGXUdN4VStxW0='),
+  'API_AES_IV': (iv: 'JKEB7g3cdPb3Ab6ETqArjQ==', enc: 'BOXH8O9sVUkRSW/yqbHo4kDb6a2DunTpYTJGSb4tKFQ='),
+  'API_UID': (iv: 'OeckVrOiBeZPya9teW0s3Q==', enc: 'GRJZVRv++Wyc4z+1sNw0Jg=='),
+  'API_URL': (iv: 'ma/Tf7ePdVIqKgT75NvNJw==', enc: 'Gzan57OhkB99tzdkdFbOcpNXGFDzmcPxF3IQ9i05jet69OOYuJ0wGgwvYDOBCI0/'),
+  'API_REWRITE_HOST': (iv: 'BrSn7Wx4P+pYyoT18Z/mkg==', enc: 'LSYA9nN3oeVlG19uUJdybyrJgpBk4F04/pknuPGeE6I='),
   // ── 非敏感配置项（加密后隐藏路径/通知文案等）──────────────────────
-  'PIC_BASE_URL': (
-    iv: 'ODAKOEXp+3qcZ7GBymu7SQ==',
-    enc: '2X3TrEUBHgSIY+KkVija8gRPxgGSUoQEcQKl5gRjgr4=',
-  ),
-  'DCIM_PATH': (
-    iv: 'F73OPnmwmIjWU7S/ptIYBw==',
-    enc: 'j5ZOXeeHKCv2OAk9JMyTYwWETohALsy12LmYXNC0yqc=',
-  ),
-  'CHANNEL_NAME': (
-    iv: 'SLAE6MZinzCLoEn1q+uM3w==',
-    enc: 'qwKopgKgPgWgDTOJ1dJQPOY5SxPLYgHZXFiioV+x7sQ=',
-  ),
-  'CHANNEL_DESC': (
-    iv: 'SCqxV/QIPWyQPPMXHpuJzg==',
-    enc: 'Q/gwkO6IRIWfE0NDyzGEjokZdZrnvbDmH4nwZz0Dnw0m3kVBZE7nK5kLL20UzecM',
-  ),
+  'PIC_BASE_URL': (iv: '++xbEV4tLd9R8Ufy9PNuug==', enc: 'bK20GVrWYor/oftWq0HdCd7z4RGAUfsjbnjZq/AYV4w='),
+  'DCIM_PATH': (iv: '28YdwlcmZ6SqHiIj7ypRxQ==', enc: 'iSYvd2GVvF9Hy9wapuLu90Lb7UKWHzXwUyvlWxypL+w='),
+  'CHANNEL_NAME': (iv: 'vIoBJt7TEoVRG8fxxPNg/g==', enc: 'IQ1SLbSQZo7KQEkkQ0701q2rrJmWcqPnJU0Ddo6P1hw='),
+  'CHANNEL_DESC': (iv: 'savAANZ59afi0vHQiHAkqA==', enc: 'su01Z/zHH+X6LiC1BNNPWGAO3R7O5sqQxtTcZKfHXMM/k4f910YG9g4QvekfaC8s'),
 };
 
 // ══════════════════════════════════════════════════════════════════
@@ -121,8 +74,7 @@ String _decrypt(String name) {
   if (entry == null) throw StateError('Unknown secret: $name');
 
   final iv = enc.IV.fromBase64(entry.iv);
-  final encrypted =
-      enc.Encrypted.fromBase64(entry.enc, urlSafe: false);
+  final encrypted = enc.Encrypted.fromBase64(entry.enc);
   final plain = _encrypter.decrypt(encrypted, iv: iv);
   _decrypted[name] = plain;
   return plain;
@@ -165,8 +117,7 @@ class SecurityCheck {
   SecurityCheck._();
 
   static bool get isRooted {
-    // 方案1：经典 su 可执行文件路径
-    const _rootPaths = [
+    const paths = [
       '/system/bin/su',
       '/system/xbin/su',
       '/sbin/su',
@@ -176,17 +127,15 @@ class SecurityCheck {
       '/system/sd/xbin/su',
       '/system/bin/.ext/su',
     ];
-    for (final p in _rootPaths) {
+    for (final p in paths) {
       if (File(p).existsSync()) return true;
     }
-    // 方案2：检测 Magisk 相关文件
     if (File('/sbin/magisk/magiskbin').existsSync()) return true;
     if (File('/sbin/.magisk').existsSync()) return true;
     return false;
   }
 
   static bool get isEmulator {
-    // 方案：读取 Android 系统属性判断模拟器特征
     try {
       final props = <String>[
         'ro.hardware',
