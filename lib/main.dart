@@ -10,6 +10,7 @@ import 'managers/app_update_manager.dart';
 import 'managers/analytics_manager.dart';
 import 'permission_gate.dart';
 import 'providers/video_provider.dart';
+import 'providers/nav_bar_visibility.dart';   // ★ 新增
 import 'screens/home_screen.dart';
 import 'theme/app_theme.dart';
 
@@ -86,6 +87,8 @@ class _BiliGlassAppState extends State<BiliGlassApp> {
       child: MultiProvider(
         providers: [
           ChangeNotifierProvider(create: (_) => VideoProvider()..fetchVideos()),
+          // ★ 新增：全局底栏显隐控制器（必须在 MaterialApp 之上）
+          ChangeNotifierProvider(create: (_) => NavBarVisibility()),
         ],
         child: MaterialApp(
           navigatorKey: _navigatorKey,

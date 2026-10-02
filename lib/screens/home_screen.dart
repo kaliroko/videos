@@ -5,11 +5,12 @@ import 'package:flutter/material.dart';
 import 'package:liquid_glass_widgets/liquid_glass_widgets.dart';
 import 'package:provider/provider.dart';
 import 'package:bilibili_glass/providers/video_provider.dart';
+import 'package:bilibili_glass/providers/nav_bar_visibility.dart';
 import 'package:bilibili_glass/models/video_model.dart';
 import 'package:bilibili_glass/widgets/video_card.dart';
 import 'package:bilibili_glass/theme/app_theme.dart';
 import 'package:bilibili_glass/screens/video_player_screen.dart';
-import 'package:bilibili_glass/screens/tiktok_feed_screen.dart';
+import 'package:bilibili_glass/screens/swipe_video_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -30,17 +31,37 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
   @override
   Widget build(BuildContext context) {
+    final isSwipeMode = _bottomTab == 1;
+    final nav = context.watch<NavBarVisibility>();
+
     return LiquidGlassScope.stack(
-      background: Container(color: AppTheme.surfaceColor),
+      background: Container(
+        color: isSwipeMode ? Colors.black : AppTheme.surfaceColor,
+      ),
       content: Scaffold(
-        backgroundColor: Colors.transparent,
+        backgroundColor: isSwipeMode ? Colors.black : Colors.transparent,
         body: SafeArea(
+          // ★ 视频模式不避开底部安全区，让视频铺到屏幕最下方
+          bottom: !isSwipeMode,
           child: Column(
-            children: [_buildAppBar(), Expanded(child: _buildBody())],
+            children: [
+              _buildAppBar(),
+              Expanded(
+                child: isSwipeMode
+                    ? const SwipeVideoScreen()
+                    : _buildVideoFeed(),
+              ),
+            ],
           ),
         ),
         extendBody: true,
-        bottomNavigationBar: _buildBottomNav(),
+        // ★ 底部玻璃栏随全局 NavBarVisibility 上下滑出/滑入
+        bottomNavigationBar: AnimatedSlide(
+          offset: nav.visible ? Offset.zero : const Offset(0, 1.3),
+          duration: const Duration(milliseconds: 260),
+          curve: Curves.easeOutCubic,
+          child: _buildBottomNav(),
+        ),
         floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
         floatingActionButton: _buildFab(),
       ),
@@ -116,24 +137,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     );
   }
 
-  // ── 主体内容 ──────────────────────────────────────────────────────────────
-  Widget _buildBody() {
-    // 新API → TikTok 全屏滑动模式
-    if (_bottomTab == 1) {
-      return Consumer<VideoProvider>(
-        builder: (context, provider, child) {
-          if (provider.loading && provider.videos.isEmpty) {
-            return _buildLoadingState();
-          }
-          if (provider.error != null && provider.videos.isEmpty) {
-            return _buildErrorState(provider.error!);
-          }
-          return const TiktokFeedScreen();
-        },
-      );
-    }
-
-    // 老API → 原有网格视图
+  // ── 主体内容（老 API 网格）───────────────────────────────────────────────
+  Widget _buildVideoFeed() {
     return Consumer<VideoProvider>(
       builder: (context, provider, child) {
         if (provider.loading && provider.videos.isEmpty) {
@@ -148,7 +153,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 provider.hasMore &&
                 !provider.loading) {
               final maxScroll = _scrollController.position.maxScrollExtent;
-              if (maxScroll > 0 && _scrollController.offset >= maxScroll * 0.85) {
+              if (maxScroll > 0 &&
+                  _scrollController.offset >= maxScroll * 0.85) {
                 provider.fetchVideos();
               }
             }
@@ -199,6 +205,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         selectedIndex: _bottomTab,
         onTabSelected: (i) {
           setState(() => _bottomTab = i);
+          // 切换 tab 时先恢复底栏可见
+          context.read<NavBarVisibility>().show();
           final source = i == 0 ? VideoSource.oldApi : VideoSource.newApi;
           context.read<VideoProvider>().setSource(source);
         },
