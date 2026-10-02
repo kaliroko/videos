@@ -1,6 +1,9 @@
 /// TikTok 风格全屏上下滑动视频流 — 仅用于新API（kuleu.com）
 /// 惰性加载：初始显示 1 条，滑到末尾时再请求下一条
+/// 使用 MD3 真实物理弹簧动画：惯性滑动 + 弹跳归位
 library;
+
+import 'dart:math' show pow;
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:chewie/chewie.dart';
@@ -10,6 +13,89 @@ import 'package:video_player/video_player.dart';
 import 'package:bilibili_glass/models/video_model.dart';
 import 'package:bilibili_glass/repository/simple_api.dart';
 import 'package:bilibili_glass/theme/app_theme.dart';
+
+/// 抖音式 MD3 物理弹簧翻页
+/// 继承 PageScrollPhysics，调高弹簧刚度与衰减，加入真实阻尼回弹
+class TiktokPageScrollPhysics extends PageScrollPhysics {
+  const TiktokPageScrollPhysics({ScrollPhysics? parent}) : super(parent: parent);
+
+  @override
+  TiktokPageScrollPhysics applyTo(ScrollPhysics? ancestor) {
+    return TiktokPageScrollPhysics(parent: buildParent(ancestor));
+  }
+
+  // 更快的弹簧衰减 → 类似抖音那种"嗖"一下到位的感觉
+  @override
+  double get springDecay => -pow(0.001, 1.0 / (TiktokPageScrollPhysics._springsPerSecond * 2));
+
+  // 更高的刚度 → 页面 snap 更果断
+  @override
+  double get springStiffness => 600.0;
+
+  // 减小小球模拟阻尼 → 滚动惯性更强
+  @override
+  double get decayRate => 0.005;
+
+  @override
+  Simulation? createBallisticSimulation(ScrollMetrics position, double velocity) {
+    final bearing = _getBearing(position, velocity);
+    // 快速减速模拟（比默认 2500 dp/s² 更灵敏）
+    const deceleration = 3500.0;
+    // 速度阈值：低于此值触发 snap
+    if (abs(velocity) > 0.001) {
+      final double stoppingDistance = _speedAtDeceleration(abs(velocity), deceleration);
+      if (stoppingDistance.abs() > position.dimensions * 0.25) {
+        // 超出四分之一屏，强制 snap 到目标页
+        final int targetPage = _pageAfter(position.pixels + bearing * stoppingDistance, position.viewportDimension);
+        final double targetPixels = _pixelsAfterSnap(targetPage, position);
+        return TweenAnimationSimulation(
+          SpringSimulation(
+            SpringDescription.withDampingRatio(
+              mass: 1.0,
+              stiffness: springStiffness,
+              ratio: 0.9, // 接近临界阻尼，快速归位无过冲
+            ),
+            position.pixels,
+            targetPixels,
+            0.0,
+          ),
+          deceleration,
+          bearing,
+        );
+      }
+    }
+    // 默认 PageSnap（低速滑）
+    return super.createBallisticSimulation(position, velocity);
+  }
+
+  /// 根据速度和位置计算方向（+1 向下，-1 向上）
+  double _getBearing(ScrollMetrics position, double velocity) {
+    if (position.pixels == 0.0 && velocity < 0.0) return -1.0;
+    if (position.maxScrollExtent == position.pixels && velocity > 0.0) return 1.0;
+    return -velocity.sign;
+  }
+
+  /// 计算以给定减速度完全停止所需的距离
+  double _speedAtDeceleration(double speed, double rate) {
+    return sqrt(speed * speed / (2.0 * rate));
+  }
+
+  /// 计算 snap 后的目标像素位置
+  double _pixelsAfterSnap(int page, ScrollMetrics position) {
+    return page * position.viewportDimension + position.viewportDimension / 2.0 - position.extentAfter;
+  }
+
+  /// 判断滑动后应该进入哪一页
+  int _pageAfter(double afterPixels, double viewportDimension) {
+    if (afterPixels >= 0.0) {
+      return (afterPixels / viewportDimension).ceil();
+    } else {
+      return (afterPixels / viewportDimension).floor();
+    }
+  }
+
+  static const double _springsPerSecond = 6.0;
+}
 
 class TiktokFeedScreen extends StatefulWidget {
   const TiktokFeedScreen({super.key});
@@ -34,7 +120,10 @@ class _TiktokFeedScreenState extends State<TiktokFeedScreen>
   @override
   void initState() {
     super.initState();
-    _pageController = PageController(initialPage: 0);
+    _pageController = PageController(
+      initialPage: 0,
+      viewportFraction: 1.0,
+    );
     _fetchNext();
   }
 
@@ -155,6 +244,7 @@ class _TiktokFeedScreenState extends State<TiktokFeedScreen>
           children: [
             PageView.builder(
               controller: _pageController,
+              physics: const TiktokPageScrollPhysics(),
               scrollDirection: Axis.vertical,
               onPageChanged: _onPageChanged,
               itemCount: _videos.length,
