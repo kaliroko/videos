@@ -24,17 +24,20 @@ class MainActivity : FlutterActivity() {
     private val handler = Handler(Looper.getMainLooper())
     private var splashRemoved = false
 
-    // ★ 4. 最小显示时长（热启动稳定性）
+    // ★ 最小显示时长：1000ms，让动画完整播出
     private val splashStartTime = System.currentTimeMillis()
-    private val minSplashMs = 300L
+    /** ★ 最小显示时长：1000ms，让动画完整播出 */
+    private val minSplashMs = 1000L
+    /** ★ 动画时长：1000ms */
+    private val splashAnimMs = 1000L
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
             showCustomSplash()
-            // ★ 3. 兜底 3 秒
-            handler.postDelayed({ removeSplash() }, 3000)
+            // ★ 兜底：5 秒
+            handler.postDelayed({ removeSplash() }, 5000)
         }
     }
 
@@ -83,8 +86,8 @@ class MainActivity : FlutterActivity() {
         icon.animate()
             .scaleX(1f)
             .scaleY(1f)
-            // ★ 1. 时长 500ms
-            .setDuration(500)
+            // ★ 1. 动画时长 1500ms
+            .setDuration(splashAnimMs)
             .setInterpolator(m3Easing)
             .start()
     }
@@ -104,7 +107,8 @@ class MainActivity : FlutterActivity() {
 
     /**
      * 移除 splash（带最小显示时长保护）
-     * ★ 4. 热启动时如果 splash 已显示 < 300ms，等满 300ms 再移除
+     * - 如果已显示 < 1500ms，等到 1500ms 再移除
+     * - 让动画完整播完
      */
     private fun removeSplash() {
         if (splashRemoved) return
