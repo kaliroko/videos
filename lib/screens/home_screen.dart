@@ -1,7 +1,8 @@
-/// 首页 — 统一深灰色 MD3 深色主题
+/// 首页 — 液态玻璃主题 + 统一深灰色 MD3 背景
 library;
 
 import 'package:flutter/material.dart';
+import 'package:liquid_glass_widgets/liquid_glass_widgets.dart';
 import 'package:provider/provider.dart';
 import 'package:bilibili_glass/providers/video_provider.dart';
 import 'package:bilibili_glass/repository/api_gateway.dart';
@@ -46,20 +47,25 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      // 统一深灰 MD3 表面色，不再用渐变
-      backgroundColor: AppTheme.surfaceColor,
-      body: SafeArea(
-        child: Column(
-          children: [
-            _buildAppBar(),
-            if (_bottomTab == 1) _buildCategoryBar(),
-            Expanded(child: _buildVideoFeed()),
-          ],
+    return LiquidGlassScope.stack(
+      // ★ 统一深灰色背景，不再用蓝黑渐变
+      background: Container(color: AppTheme.surfaceColor),
+      content: Scaffold(
+        backgroundColor: Colors.transparent,
+        body: SafeArea(
+          child: Column(
+            children: [
+              _buildAppBar(),
+              if (_bottomTab == 1) _buildCategoryBar(),
+              Expanded(child: _buildVideoFeed()),
+            ],
+          ),
         ),
+        extendBody: true,
+        bottomNavigationBar: _buildBottomNav(),
+        floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
+        floatingActionButton: _buildFab(),
       ),
-      bottomNavigationBar: _buildBottomNav(),
-      floatingActionButton: _buildFab(),
     );
   }
 
@@ -92,7 +98,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             ],
           ),
           const Spacer(),
-          // API 来源徽章
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
             decoration: BoxDecoration(
@@ -226,57 +231,63 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     );
   }
 
-  // ── 底部导航（Material 标准版）────────────────────────────────────────────
+  // ── 底部导航（液态玻璃）──────────────────────────────────────────────────
   Widget _buildBottomNav() {
-    return NavigationBar(
-      selectedIndex: _bottomTab,
-      surfaceTintColor: Colors.transparent,
-      shadowColor: Colors.transparent,
-      labelBehavior: NavigationBarLabelBehavior.alwaysHide,
-      indicatorColor: AppTheme.surfaceColor.withValues(alpha: 0.12),
-      onDestinationSelected: (i) {
-        setState(() => _bottomTab = i);
-        if (i == 0) {
-          context.read<VideoProvider>().setSource(VideoSource.oldApi);
-        } else {
-          context.read<VideoProvider>().setSource(VideoSource.newApi);
-          setState(() => _activeCatIndex = 0);
-        }
-      },
-      destinations: [
-        NavigationDestination(
-          icon: Icon(Icons.cloud, color: AppTheme.textTertiary),
-          selectedIcon: Icon(Icons.cloud_outlined, color: AppTheme.primaryColor),
-          label: '老API',
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+      child: GlassBottomBar(
+        selectedIndex: _bottomTab,
+        onTabSelected: (i) {
+          setState(() => _bottomTab = i);
+          if (i == 0) {
+            context.read<VideoProvider>().setSource(VideoSource.oldApi);
+          } else {
+            context.read<VideoProvider>().setSource(VideoSource.newApi);
+            setState(() => _activeCatIndex = 0);
+          }
+        },
+        tabs: [
+          GlassBottomBarTab(
+            label: '老API',
+            icon: Icons.cloud,
+            selectedIcon: Icons.cloud_outlined,
+            glowColor: AppTheme.primaryColor,
+          ),
+          GlassBottomBarTab(
+            label: '新API',
+            icon: Icons.auto_awesome,
+            selectedIcon: Icons.auto_awesome_outlined,
+            glowColor: AppTheme.accentColor,
+          ),
+        ],
+        barHeight: 60,
+        iconSize: 24,
+        selectedIconColor: AppTheme.accentColor,
+        unselectedIconColor: AppTheme.textTertiary,
+        glassSettings: const LiquidGlassSettings(
+          thickness: 30,
+          blur: 6,
+          refractiveIndex: 1.59,
+          saturation: 0.7,
+          lightIntensity: 0.6,
+          chromaticAberration: 0.3,
+          ambientStrength: 1.0,
+          lightAngle: 0.785,
+          glassColor: Color(0x3DFFFFFF),
         ),
-        NavigationDestination(
-          icon: Icon(Icons.auto_awesome, color: AppTheme.textTertiary),
-          selectedIcon: Icon(Icons.auto_awesome_outlined, color: AppTheme.accentColor),
-          label: '新API',
-        ),
-      ],
+      ),
     );
   }
 
-  // ── FAB ───────────────────────────────────────────────────────────────────
+  // ── FAB（液态玻璃）────────────────────────────────────────────────────────
   Widget _buildFab() {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 72, right: 16),
-      decoration: BoxDecoration(
-        color: AppTheme.accentColor,
-        borderRadius: BorderRadius.circular(14),
-        boxShadow: [
-          BoxShadow(
-            color: AppTheme.accentColor.withValues(alpha: 0.4),
-            blurRadius: 12,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: IconButton(
-        icon: const Icon(Icons.refresh, color: Colors.black),
-        onPressed: _refresh,
-      ),
+    return GlassIconButton(
+      quality: GlassQuality.standard,
+      icon: Icons.refresh,
+      size: 46,
+      useOwnLayer: true,
+      onPressed: _refresh,
+      glowColor: AppTheme.accentColor,
     );
   }
 
