@@ -6,7 +6,6 @@ library;
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:chewie/chewie.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/physics.dart';
 import 'package:flutter/services.dart';
 import 'package:video_player/video_player.dart';
 import 'package:bilibili_glass/models/video_model.dart';
@@ -56,7 +55,7 @@ class TiktokPageScrollPhysics extends ScrollPhysics {
       return null;
     }
 
-    // ★ 弹簧模拟：使用父类提供的 spring 参数
+    // 弹簧模拟
     return ScrollSpringSimulation(
       spring,
       position.pixels,
@@ -330,6 +329,7 @@ class _TiktokFeedScreenState extends State<TiktokFeedScreen>
 
 // ══════════════════════════════════════════════════════════════
 // 单个抖音视频卡片
+// ★ 已删除右侧"点赞/评论/分享"按钮（装饰性、无功能）
 // ══════════════════════════════════════════════════════════════
 class _TiktokVideoCard extends StatelessWidget {
   final VideoItem video;
@@ -344,7 +344,7 @@ class _TiktokVideoCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // ★ 局部变量，便于空安全提升
+    // 局部变量，便于空安全提升
     final ctrl = chewieController;
     final bool ready =
         ctrl != null && ctrl.videoPlayerController.value.isInitialized;
@@ -398,21 +398,6 @@ class _TiktokVideoCard extends StatelessWidget {
                   ],
                 ),
               ),
-            ),
-          ),
-
-          // 右侧操作按钮
-          Positioned(
-            right: 10,
-            bottom: 120,
-            child: Column(
-              children: [
-                _actionButton(Icons.favorite_border, '点赞'),
-                const SizedBox(height: 20),
-                _actionButton(Icons.comment, '评论'),
-                const SizedBox(height: 20),
-                _actionButton(Icons.share, '分享'),
-              ],
             ),
           ),
 
@@ -504,27 +489,6 @@ class _TiktokVideoCard extends StatelessWidget {
       child: const Center(
         child: Icon(Icons.movie, color: AppTheme.textTertiary, size: 48),
       ),
-    );
-  }
-
-  Widget _actionButton(IconData icon, String label) {
-    return Column(
-      children: [
-        Container(
-          width: 44,
-          height: 44,
-          decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.15),
-            shape: BoxShape.circle,
-          ),
-          child: Icon(icon, color: Colors.white, size: 22),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          label,
-          style: const TextStyle(color: Colors.white70, fontSize: 10),
-        ),
-      ],
     );
   }
 }
