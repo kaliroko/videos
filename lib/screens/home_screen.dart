@@ -128,7 +128,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           if (provider.error != null && provider.videos.isEmpty) {
             return _buildErrorState(provider.error!);
           }
-          return TiktokFeedScreen(videos: provider.videos);
+          return const TiktokFeedScreen();
         },
       );
     }

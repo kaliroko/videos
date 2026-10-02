@@ -1,4 +1,5 @@
 /// TikTok 风格全屏上下滑动视频流 — 仅用于新API（kuleu.com）
+/// 惰性加载：初始显示 1 条，滑到末尾时再请求下一条
 library;
 
 import 'package:cached_network_image/cached_network_image.dart';
@@ -7,11 +8,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:video_player/video_player.dart';
 import 'package:bilibili_glass/models/video_model.dart';
+import 'package:bilibili_glass/repository/simple_api.dart';
 import 'package:bilibili_glass/theme/app_theme.dart';
 
 class TiktokFeedScreen extends StatefulWidget {
-  final List<VideoItem> videos;
-  const TiktokFeedScreen({super.key, required this.videos});
+  const TiktokFeedScreen({super.key});
 
   @override
   State<TiktokFeedScreen> createState() => _TiktokFeedScreenState();
@@ -21,27 +22,45 @@ class _TiktokFeedScreenState extends State<TiktokFeedScreen>
     with TickerProviderStateMixin {
   late final PageController _pageController;
   int _currentPage = 0;
+
+  final List<VideoItem> _videos = [];
+  bool _loading = true;
+  String? _error;
+
+  // 播放器状态
   final List<VideoPlayerController?> _controllers = [];
   final List<ChewieController?> _chewieControllers = [];
-  bool _initialized = false;
 
   @override
   void initState() {
     super.initState();
     _pageController = PageController(initialPage: 0);
-    WidgetsBinding.instance.addPostFrameCallback((_) => _initCurrentVideo());
+    _fetchNext();
   }
 
-  Future<void> _initCurrentVideo() async {
-    await _initVideoAt(0);
-    setState(() => _initialized = true);
+  // ── 数据加载 ────────────────────────────────────────────────────────────
+  Future<void> _fetchNext() async {
+    final video = await SimpleApiRepository.fetchOne();
+    if (!mounted) return;
+    if (video == null) {
+      setState(() {
+        _loading = false;
+        _error = _videos.isEmpty ? '加载失败，请重试' : null;
+      });
+      return;
+    }
+    setState(() {
+      _videos.add(video);
+      _loading = false;
+    });
   }
 
+  // ── 播放器 ────────────────────────────────────────────────────────────
   Future<void> _initVideoAt(int index) async {
-    if (index < 0 || index >= widget.videos.length) return;
-    final video = widget.videos[index];
-    if (_controllers[index] != null) return; // 已初始化
+    if (index < 0 || index >= _videos.length) return;
+    if (_controllers[index] != null) return;
 
+    final video = _videos[index];
     final controller = VideoPlayerController.networkUrl(Uri.parse(video.url));
     _controllers[index] = controller;
 
@@ -49,7 +68,7 @@ class _TiktokFeedScreenState extends State<TiktokFeedScreen>
       await controller.initialize();
       if (!mounted) return;
 
-      final chewie = ChewieController(
+      _chewieControllers[index] = ChewieController(
         videoPlayerController: controller,
         autoPlay: false,
         looping: true,
@@ -57,7 +76,6 @@ class _TiktokFeedScreenState extends State<TiktokFeedScreen>
         placeholder: Container(color: Colors.black),
         showControls: false,
       );
-      _chewieControllers[index] = chewie;
     } catch (e) {
       debugPrint('[TiktokFeed] init video $index failed: $e');
     }
@@ -68,6 +86,11 @@ class _TiktokFeedScreenState extends State<TiktokFeedScreen>
     _pauseAllExcept(index);
     _initVideoAt(index);
     _playCurrent();
+
+    // 滑到末尾时预加载下一条
+    if (index >= _videos.length - 1 && !_loading) {
+      _fetchNext();
+    }
   }
 
   void _pauseAllExcept(int keepIndex) {
@@ -105,20 +128,14 @@ class _TiktokFeedScreenState extends State<TiktokFeedScreen>
 
   @override
   Widget build(BuildContext context) {
-    if (widget.videos.isEmpty) {
-      return const Scaffold(
-        backgroundColor: Colors.black,
-        body: Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              CircularProgressIndicator(color: AppTheme.accentColor),
-              SizedBox(height: 16),
-              Text('加载中…', style: TextStyle(color: Colors.white70)),
-            ],
-          ),
-        ),
-      );
+    // 加载中
+    if (_loading && _videos.isEmpty) {
+      return _loadingView();
+    }
+
+    // 初始加载失败且无视频
+    if (_error != null && _videos.isEmpty) {
+      return _errorView(_error!);
     }
 
     return WillPopScope(
@@ -132,20 +149,83 @@ class _TiktokFeedScreenState extends State<TiktokFeedScreen>
       },
       child: Scaffold(
         backgroundColor: Colors.black,
-        body: PageView.builder(
-          controller: _pageController,
-          scrollDirection: Axis.vertical,
-          onPageChanged: _onPageChanged,
-          itemCount: widget.videos.length,
-          itemBuilder: (context, index) {
-            final video = widget.videos[index];
-            return _TiktokVideoCard(
-              video: video,
-              chewieController: _chewieControllers[index],
-              isActive: index == _currentPage,
-              onTap: () => _onVideoTap(index),
-            );
-          },
+        body: Stack(
+          children: [
+            PageView.builder(
+              controller: _pageController,
+              scrollDirection: Axis.vertical,
+              onPageChanged: _onPageChanged,
+              itemCount: _videos.length,
+              itemBuilder: (context, index) {
+                return _TiktokVideoCard(
+                  video: _videos[index],
+                  chewieController: _chewieControllers[index],
+                  onTap: () => _onVideoTap(index),
+                );
+              },
+            ),
+            // 加载中指示器（滑到末尾触发时显示）
+            if (_loading && _currentPage >= _videos.length - 1)
+              Positioned(
+                bottom: 80,
+                left: 0,
+                right: 0,
+                child: Center(
+                  child: SizedBox(
+                    width: 24,
+                    height: 24,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Colors.white.withValues(alpha: 0.6),
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _loadingView() {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      body: const Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CircularProgressIndicator(color: AppTheme.accentColor),
+            SizedBox(height: 16),
+            Text('加载中…', style: TextStyle(color: Colors.white70)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _errorView(String msg) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      body: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.cloud_off, size: 56, color: AppTheme.textTertiary),
+            const SizedBox(height: 16),
+            Text(msg, style: const TextStyle(color: AppTheme.textTertiary)),
+            const SizedBox(height: 20),
+            FilledButton.icon(
+              onPressed: () {
+                setState(() {
+                  _loading = true;
+                  _error = null;
+                });
+                _fetchNext();
+              },
+              icon: const Icon(Icons.refresh, size: 16),
+              label: const Text('重试'),
+            ),
+          ],
         ),
       ),
     );
@@ -156,13 +236,11 @@ class _TiktokFeedScreenState extends State<TiktokFeedScreen>
 class _TiktokVideoCard extends StatelessWidget {
   final VideoItem video;
   final ChewieController? chewieController;
-  final bool isActive;
   final VoidCallback onTap;
 
   const _TiktokVideoCard({
     required this.video,
     required this.chewieController,
-    required this.isActive,
     required this.onTap,
   });
 
@@ -173,7 +251,7 @@ class _TiktokVideoCard extends StatelessWidget {
       child: Stack(
         fit: StackFit.expand,
         children: [
-          // 视频播放器或封面
+          // 视频播放器或封面占位
           chewieController != null && chewieController!.isInitialized
               ? Chewie(controller: chewieController!)
               : _buildPlaceholder(),
@@ -184,7 +262,8 @@ class _TiktokVideoCard extends StatelessWidget {
             left: 0,
             right: 0,
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+              padding: const EdgeInsets.symmetric(
+                  horizontal: 12, vertical: 12),
               decoration: const BoxDecoration(
                 gradient: LinearGradient(
                   begin: Alignment.topCenter,
@@ -196,7 +275,8 @@ class _TiktokVideoCard extends StatelessWidget {
                 child: Row(
                   children: [
                     IconButton(
-                      icon: const Icon(Icons.arrow_back, color: Colors.white),
+                      icon:
+                          const Icon(Icons.arrow_back, color: Colors.white),
                       onPressed: () => Navigator.pop(context),
                     ),
                     const Spacer(),
@@ -307,9 +387,11 @@ class _TiktokVideoCard extends StatelessWidget {
             decoration: BoxDecoration(
               color: Colors.black.withValues(alpha: 0.5),
               shape: BoxShape.circle,
-              border: Border.all(color: Colors.white.withValues(alpha: 0.3), width: 1.5),
+              border: Border.all(
+                  color: Colors.white.withValues(alpha: 0.3), width: 1.5),
             ),
-            child: const Icon(Icons.play_arrow, color: Colors.white, size: 28),
+            child: const Icon(Icons.play_arrow,
+                color: Colors.white, size: 28),
           ),
         ),
       ],
@@ -320,7 +402,8 @@ class _TiktokVideoCard extends StatelessWidget {
     return Container(
       color: AppTheme.surfaceColor,
       child: const Center(
-        child: Icon(Icons.movie, color: AppTheme.textTertiary, size: 48),
+        child:
+            Icon(Icons.movie, color: AppTheme.textTertiary, size: 48),
       ),
     );
   }
