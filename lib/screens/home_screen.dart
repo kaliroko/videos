@@ -20,15 +20,27 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
+  /// ★ 默认打开的是「新API」视频页（索引 0）
   int _bottomTab = 0;
+
   final ScrollController _scrollController = ScrollController();
 
-  /// ★ 触发底栏显隐的滑动阈值（像素）。
-  /// 设小 → 灵敏；设大 → 需要更长的滑动距离。
+  /// 触发底栏显隐的滑动阈值（像素），越小越灵敏
   static const double _kNavTriggerDelta = 0.5;
 
   /// 靠近顶部多少像素内强制显示底栏
   static const double _kTopZone = 8.0;
+
+  @override
+  void initState() {
+    super.initState();
+    // ★ 打开 app 时主动切到新 API source（SwipleVideoScreen 用的是 SimpleApiRepository，
+    //   但为了 tab 切换时状态统一，这里同步一下 VideoProvider 的 source）
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      context.read<VideoProvider>().setSource(VideoSource.newApi);
+    });
+  }
 
   @override
   void dispose() {
@@ -38,7 +50,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
   @override
   Widget build(BuildContext context) {
-    final isSwipeMode = _bottomTab == 1;
+    // ★ 索引 0 = 新API（视频滑动页）；索引 1 = 老API（网格）
+    final isSwipeMode = _bottomTab == 0;
     final nav = context.watch<NavBarVisibility>();
     final topInset = MediaQuery.of(context).padding.top;
 
@@ -50,6 +63,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         backgroundColor: isSwipeMode ? Colors.black : Colors.transparent,
         body: Column(
           children: [
+            // ★ 视频模式不显示顶部栏，视频铺到屏幕最顶端
             if (!isSwipeMode) _buildAppBar(topInset: topInset),
             Expanded(
               child: isSwipeMode
@@ -103,15 +117,17 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
             decoration: BoxDecoration(
-              color: _bottomTab == 1
+              // ★ 索引 0 = 新API → kuleu.com
+              color: _bottomTab == 0
                   ? AppTheme.accentColor.withValues(alpha: 0.2)
                   : AppTheme.primaryColor.withValues(alpha: 0.15),
               borderRadius: BorderRadius.circular(10),
             ),
             child: Text(
-              _bottomTab == 1 ? 'kuleu.com' : 'Flask',
+              // ★ 索引 0 = 新API → kuleu.com
+              _bottomTab == 0 ? 'kuleu.com' : 'Flask',
               style: TextStyle(
-                color: _bottomTab == 1
+                color: _bottomTab == 0
                     ? AppTheme.accentColor
                     : AppTheme.primaryColor,
                 fontSize: 10,
@@ -152,7 +168,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         }
         return NotificationListener<ScrollNotification>(
           onNotification: (notification) {
-            // ① 触底自动加载下一页（保留原逻辑）
+            // ① 触底自动加载下一页
             if (notification is ScrollEndNotification &&
                 provider.hasMore &&
                 !provider.loading) {
@@ -170,17 +186,13 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               final nav = context.read<NavBarVisibility>();
 
               if (offset <= _kTopZone) {
-                // 顶部附近 → 强制显示
                 nav.show();
               } else if (delta > _kNavTriggerDelta) {
-                // 手指往上滑（看下面内容）→ 隐藏底栏
                 nav.hide();
               } else if (delta < -_kNavTriggerDelta) {
-                // 手指往下滑（看上面内容）→ 显示底栏
                 nav.show();
               }
             } else if (notification is ScrollEndNotification) {
-              // 滑动停止时，若已在顶部附近 → 强制显示
               if (_scrollController.offset <= _kTopZone) {
                 context.read<NavBarVisibility>().show();
               }
@@ -236,21 +248,25 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           setState(() => _bottomTab = i);
           // 切换 tab 时恢复底栏可见
           context.read<NavBarVisibility>().show();
-          final source = i == 0 ? VideoSource.oldApi : VideoSource.newApi;
+          // ★ 索引 0 = 新API；索引 1 = 老API
+          final source =
+              i == 0 ? VideoSource.newApi : VideoSource.oldApi;
           context.read<VideoProvider>().setSource(source);
         },
         tabs: [
-          GlassBottomBarTab(
-            label: '老API',
-            icon: Icons.cloud,
-            selectedIcon: Icons.cloud_outlined,
-            glowColor: AppTheme.primaryColor,
-          ),
+          // ★ 第一个：新API（默认选中，打开就是全屏视频页）
           GlassBottomBarTab(
             label: '新API',
             icon: Icons.auto_awesome,
             selectedIcon: Icons.auto_awesome_outlined,
             glowColor: AppTheme.accentColor,
+          ),
+          // ★ 第二个：老API（网格）
+          GlassBottomBarTab(
+            label: '老API',
+            icon: Icons.cloud,
+            selectedIcon: Icons.cloud_outlined,
+            glowColor: AppTheme.primaryColor,
           ),
         ],
         barHeight: 60,
