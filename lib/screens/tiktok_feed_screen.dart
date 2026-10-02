@@ -95,15 +95,16 @@ class _TiktokFeedScreenState extends State<TiktokFeedScreen>
 
   void _pauseAllExcept(int keepIndex) {
     for (int i = 0; i < _chewieControllers.length; i++) {
-      if (i != keepIndex && _chewieControllers[i] != null) {
-        _chewieControllers[i]!.pause();
+      final c = _chewieControllers[i];
+      if (i != keepIndex && c != null) {
+        c.pause();
       }
     }
   }
 
   void _playCurrent() {
     final chewie = _chewieControllers[_currentPage];
-    if (chewie != null && chewie.isInitialized) {
+    if (chewie != null && chewie.videoPlayerController.value.isInitialized) {
       chewie.play();
     }
   }
@@ -138,14 +139,15 @@ class _TiktokFeedScreenState extends State<TiktokFeedScreen>
       return _errorView(_error!);
     }
 
-    return WillPopScope(
-      onWillPop: () async {
-        SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
-        SystemChrome.setPreferredOrientations([
-          DeviceOrientation.portraitUp,
-        ]);
-        Navigator.pop(context);
-        return false;
+    return PopScope(
+      canPop: true,
+      onPopInvoked: (didPop) async {
+        if (!didPop) {
+          SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+          SystemChrome.setPreferredOrientations([
+            DeviceOrientation.portraitUp,
+          ]);
+        }
       },
       child: Scaffold(
         backgroundColor: Colors.black,
@@ -252,7 +254,8 @@ class _TiktokVideoCard extends StatelessWidget {
         fit: StackFit.expand,
         children: [
           // 视频播放器或封面占位
-          chewieController != null && chewieController!.isInitialized
+          chewieController != null &&
+                  chewieController.videoPlayerController.value.isInitialized
               ? Chewie(controller: chewieController!)
               : _buildPlaceholder(),
 
