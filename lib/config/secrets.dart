@@ -14,7 +14,8 @@ import 'package:encrypt/encrypt.dart' as enc;
 // AES-256 密钥派生（无需 crypto 包）
 // 用 XOR 混淆原始密钥，运行时还原为 32 字节 AES 密钥
 // ══════════════════════════════════════════════════════════════════
-const _xorKey = 0xA7u;
+// ★ 修复 1：去掉 Dart 不支持的 `u` 后缀
+const _xorKey = 0xA7;
 
 /// 混淆的 32 字节密钥（原始值: "bilibili_glass_master_2024\0\0\0\0\0\0"）
 const _encodedKeyBytes = <int>[
@@ -24,9 +25,10 @@ const _encodedKeyBytes = <int>[
   0x95, 0x93, 0xA7, 0xA7, 0xA7, 0xA7, 0xA7, 0xA7,
 ];
 
+// ★ 修复 2：用构造函数 Key(...)，encrypt 包没有 fromBytes 方法
 enc.Key _getAesKey() {
   final decoded = _encodedKeyBytes.map((b) => b ^ _xorKey).toList();
-  return enc.Key.fromBytes(Uint8List.fromList(decoded));
+  return enc.Key(Uint8List.fromList(decoded));
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -56,20 +58,22 @@ const _secrets = <String, _SecretEntry>{
 };
 
 // ══════════════════════════════════════════════════════════════════
-// 运行时解密（懒初始化，单次计算）
+// 运行时解密（懒初始化 + 单条缓存）
 // ══════════════════════════════════════════════════════════════════
 final _encrypter = enc.Encrypter(
   enc.AES(_getAesKey(), mode: enc.AESMode.cbc),
 );
 
 final Map<String, String> _decrypted = {};
-bool _decryptCalled = false;
 
 /// 从加密注册表中解密单个字符串
+/// ★ 修复 3：单条缓存，不是全局开关。每次调用都检查缓存 → 没命中才解密
 String _decrypt(String name) {
-  if (_decryptCalled) return _decrypted[name]!;
-  _decryptCalled = true;
+  // 先查缓存
+  final cached = _decrypted[name];
+  if (cached != null) return cached;
 
+  // 缓存没有 → 解密
   final entry = _secrets[name];
   if (entry == null) throw StateError('Unknown secret: $name');
 
