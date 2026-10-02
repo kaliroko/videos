@@ -42,7 +42,7 @@ jobs:
         run: flutter analyze --no-fatal-infos --no-fatal-warnings
 
   build:
-    name: Build APK (signed, obfuscated)
+    name: Build APK (signed, obfuscated, fluff)
     runs-on: ubuntu-latest
     needs: analyze
     steps:
@@ -54,6 +54,12 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: ${{ env.JAVA_VERSION }}
+
+      # fluff 依赖 Python
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
@@ -81,7 +87,7 @@ jobs:
           fi
 
       # ══════════════════════════════════════════════════════
-      # ★ 自动版本号：base version + run_number
+      # 自动版本号
       # ══════════════════════════════════════════════════════
       - name: Extract version from pubspec
         id: ver
@@ -93,11 +99,12 @@ jobs:
           echo "full=$FULL_VERSION" >> $GITHUB_OUTPUT
           echo "build_number=$RUN_NUM" >> $GITHUB_OUTPUT
           echo "=========================================="
-          echo "Base version: $BASE_VERSION"
-          echo "Run number:   $RUN_NUM"
           echo "Full version: $FULL_VERSION"
           echo "=========================================="
 
+      # ══════════════════════════════════════════════════════
+      # 第一步：Flutter 构建（官方混淆 + 自动签名）
+      # ══════════════════════════════════════════════════════
       - name: Build APK (release, obfuscated)
         run: |
           flutter clean
@@ -111,24 +118,132 @@ jobs:
             --split-debug-info=symbols/android-arm64 \
             --dart-define=FLUTTER_BUILD_MODE=release
 
-      - name: Build App Bundle (release, obfuscated)
+      # 备份原签名 APK（用于签名对比）
+      - name: Backup original APK
         run: |
-          flutter build appbundle \
-            --release \
-            --target-platform=android-arm64 \
-            --build-name=${{ steps.ver.outputs.full }} \
-            --build-number=${{ steps.ver.outputs.build_number }} \
-            --obfuscate \
-            --split-debug-info=symbols/aab \
-            --dart-define=FLUTTER_BUILD_MODE=release
+          cp build/app/outputs/flutter-apk/app-release.apk /tmp/app-original.apk
+          echo "✅ 原 APK 已备份: $(du -h /tmp/app-original.apk | cut -f1)"
 
+      # ══════════════════════════════════════════════════════
+      # 第二步：fluff 混淆 libapp.so（失败不挂 CI）
+      # ══════════════════════════════════════════════════════
+      - name: Install fluff
+        id: install_fluff
+        continue-on-error: true
+        run: |
+          python -m pip install --upgrade pip
+          pip install fluff-ohos
+          fluff --version
+
+      - name: Fluff obfuscate libapp.so
+        id: fluff
+        if: steps.install_fluff.outcome == 'success'
+        continue-on-error: true
+        run: |
+          set -e
+          APK=build/app/outputs/flutter-apk/app-release.apk
+          WORKDIR=/tmp/fluff_work
+          rm -rf "$WORKDIR"
+          mkdir -p "$WORKDIR/unpacked"
+
+          unzip -o "$APK" -d "$WORKDIR/unpacked"
+
+          LIBAPP="$WORKDIR/unpacked/lib/arm64-v8a/libapp.so"
+          if [ ! -f "$LIBAPP" ]; then
+            echo "❌ libapp.so 不存在"
+            exit 1
+          fi
+          echo "📦 原始 libapp.so: $(du -h "$LIBAPP" | cut -f1)"
+
+          fluff obfuscate --input "$LIBAPP" --output "$WORKDIR/libapp_obf.so"
+
+          if [ ! -f "$WORKDIR/libapp_obf.so" ]; then
+            echo "❌ fluff 未生成输出"
+            exit 1
+          fi
+          echo "✅ 混淆后 libapp.so: $(du -h "$WORKDIR/libapp_obf.so" | cut -f1)"
+
+          cp "$WORKDIR/libapp_obf.so" "$LIBAPP"
+
+          # 删除旧签名
+          rm -rf "$WORKDIR/unpacked/META-INF"
+
+          # 重新打包
+          cd "$WORKDIR/unpacked"
+          zip -r -q "$WORKDIR/app-unsigned.apk" .
+          cd -
+          echo "✅ 重新打包: $(du -h "$WORKDIR/app-unsigned.apk" | cut -f1)"
+
+      # ══════════════════════════════════════════════════════
+      # 第三步：用同一 keystore 重新签名
+      # ══════════════════════════════════════════════════════
+      - name: Re-sign APK with same keystore
+        if: steps.fluff.outcome == 'success'
+        run: |
+          set -e
+          WORKDIR=/tmp/fluff_work
+          UNSIGNED="$WORKDIR/app-unsigned.apk"
+
+          KEYSTORE_FILE=$(grep '^storeFile' android/key.properties | cut -d'=' -f2 | tr -d ' ')
+          KEYSTORE_PASS=$(grep '^storePassword' android/key.properties | cut -d'=' -f2 | tr -d ' ')
+          KEY_ALIAS=$(grep '^keyAlias' android/key.properties | cut -d'=' -f2 | tr -d ' ')
+          KEY_PASS=$(grep '^keyPassword' android/key.properties | cut -d'=' -f2 | tr -d ' ')
+
+          KEYSTORE_PATH="android/app/$KEYSTORE_FILE"
+          if [ ! -f "$KEYSTORE_PATH" ]; then
+            echo "❌ keystore 不存在: $KEYSTORE_PATH"
+            exit 1
+          fi
+          echo "🔐 keystore: $KEYSTORE_PATH"
+          echo "🔐 alias:    $KEY_ALIAS"
+
+          APKSIGNER=$(find $ANDROID_HOME/build-tools -name apksigner | sort -V | tail -n 1)
+          ZIPALIGN=$(find $ANDROID_HOME/build-tools -name zipalign | sort -V | tail -n 1)
+
+          $ZIPALIGN -f -p 4 "$UNSIGNED" "$WORKDIR/app-aligned.apk"
+
+          $APKSIGNER sign \
+            --ks "$KEYSTORE_PATH" \
+            --ks-pass "pass:$KEYSTORE_PASS" \
+            --ks-key-alias "$KEY_ALIAS" \
+            --key-pass "pass:$KEY_PASS" \
+            --out "$WORKDIR/app-release-fluff.apk" \
+            "$WORKDIR/app-aligned.apk"
+
+          cp "$WORKDIR/app-release-fluff.apk" build/app/outputs/flutter-apk/app-release.apk
+          echo "✅ 重签完成"
+
+      # ══════════════════════════════════════════════════════
+      # 第四步：验证签名
+      # ══════════════════════════════════════════════════════
       - name: Verify APK signature
         run: |
           APK=build/app/outputs/flutter-apk/app-release.apk
           APKSIGNER=$(find $ANDROID_HOME/build-tools -name apksigner | sort -V | tail -n 1)
-          echo "Using: $APKSIGNER"
-          $APKSIGNER verify --print-certs $APK
 
+          echo "════════ 最终 APK 证书 ════════"
+          $APKSIGNER verify --print-certs "$APK"
+
+          if [ -f /tmp/app-original.apk ] && [ "${{ steps.fluff.outcome }}" = "success" ]; then
+            echo ""
+            echo "════════ 签名一致性检查 ════════"
+            ORIG_SHA=$($APKSIGNER verify --print-certs /tmp/app-original.apk | grep "SHA-256" | head -1)
+            NEW_SHA=$($APKSIGNER verify --print-certs "$APK" | grep "SHA-256" | head -1)
+            echo "原 APK:  $ORIG_SHA"
+            echo "新 APK:  $NEW_SHA"
+            if [ "$ORIG_SHA" = "$NEW_SHA" ]; then
+              echo "✅ 签名一致，可覆盖安装"
+            else
+              echo "❌ 签名不一致！"
+              exit 1
+            fi
+          else
+            echo "ℹ️ fluff 未执行，使用原始签名"
+          fi
+
+      # ══════════════════════════════════════════════════════
+      # 上传产物（只上传 APK）
+      # ══════════════════════════════════════════════════════
       - name: Upload symbols
         uses: actions/upload-artifact@v4
         with:
@@ -144,16 +259,8 @@ jobs:
           retention-days: 14
           if-no-files-found: error
 
-      - name: Upload AAB artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: bili-glass-aab
-          path: build/app/outputs/bundle/release/app-release.aab
-          retention-days: 14
-          if-no-files-found: error
-
       # ══════════════════════════════════════════════════════
-      # ★ 自动创建 Release（tag 用 4 段版本号，天然不冲突）
+      # 自动创建 Release（只含 APK）
       # ══════════════════════════════════════════════════════
       - name: Create Release
         if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
@@ -163,7 +270,6 @@ jobs:
           name: Release v${{ steps.ver.outputs.full }}
           files: |
             build/app/outputs/flutter-apk/app-release.apk
-            build/app/outputs/bundle/release/app-release.aab
           draft: false
           prerelease: false
         env:
