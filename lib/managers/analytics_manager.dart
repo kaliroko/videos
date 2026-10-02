@@ -17,7 +17,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 // ══════════════════════════════════════════════════════════════════
 const int _kXorKey = 0x3C;
 
-/// 加密后的 "https://ctqeylyblqwpxcrcqljn.supabase.co"（40 字节）
+/// 加密后的 "https://ctqeylyblqwpxcrcqljn.supabase.co"
 const List<int> _kSupabaseUrlEnc = [
   // "https://"
   0x54, 0x48, 0x48, 0x4C, 0x4F, 0x06, 0x13, 0x13,
@@ -31,7 +31,7 @@ const List<int> _kSupabaseUrlEnc = [
   0x12, 0x5F, 0x53,
 ];
 
-/// 加密后的 anon key（46 字节）
+/// 加密后的 anon key
 const List<int> _kSupabaseKeyEnc = [
   // "sb_publishable_"
   0x4F, 0x5E, 0x63, 0x4C, 0x49, 0x5E, 0x50, 0x55,
@@ -45,20 +45,21 @@ const List<int> _kSupabaseKeyEnc = [
   0x66,
 ];
 
-/// 加密后的表名 "app_opens"（9 字节）
+/// 加密后的表名 "app_opens"
 const List<int> _kTableNameEnc = [
   0x5D, 0x4C, 0x4C, 0x63, 0x53, 0x4C, 0x59, 0x52, 0x4F,
 ];
 
-/// 加密后的 IP 查询 URL "http://ip-api.com/json/?lang=zh-CN"
+/// ★ 加密后的 IP 查询 URL "http://ip-api.com/json/?lang=zh-CN"
+/// ⚠️ 已修复：原来 8 个字节写错，导致解出乱码 URL
 const List<int> _kIpApiUrlEnc = [
   // "http://"
   0x54, 0x48, 0x48, 0x4C, 0x06, 0x13, 0x13,
-  // "ip-api.com"
-  0x55, 0x4C, 0x11, 0x5D, 0x4C, 0x55, 0x12, 0x5F, 0x53, 0x4D,
-  // "/json/?lang=zh-CN"
-  0x13, 0x56, 0x53, 0x4F, 0x52, 0x13, 0x69, 0x50, 0x5D, 0x52,
-  0x5B, 0x0B, 0x5C, 0x54, 0x11, 0x5F, 0x4E,
+  // "ip-api.com"（★ 末尾 0x51 修正，原来是 0x4D）
+  0x55, 0x4C, 0x11, 0x5D, 0x4C, 0x55, 0x12, 0x5F, 0x53, 0x51,
+  // "/json/?lang=zh-CN"（★ 全段重算）
+  0x13, 0x56, 0x4F, 0x53, 0x52, 0x13, 0x03, 0x50, 0x5D, 0x52,
+  0x5B, 0x01, 0x46, 0x54, 0x11, 0x7F, 0x72,
 ];
 
 String _xorDecode(List<int> bytes) =>
@@ -118,8 +119,8 @@ class AnalyticsManager {
 
     try {
       await Supabase.initialize(
-        url: _supabaseUrl,              // ★ 解密后的 URL
-        publishableKey: _supabaseAnonKey, // ★ 解密后的 key
+        url: _supabaseUrl,
+        publishableKey: _supabaseAnonKey,
       );
 
       final info = await DeviceInfoPlugin().androidInfo;
@@ -183,7 +184,7 @@ class AnalyticsManager {
 
     try {
       final resp = await http
-          .get(Uri.parse(_ipApiUrl))   // ★ 解密后的 URL
+          .get(Uri.parse(_ipApiUrl))
           .timeout(const Duration(seconds: 8));
 
       if (resp.statusCode == 200) {
