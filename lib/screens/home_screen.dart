@@ -1,4 +1,4 @@
-/// 首页 — 双 Tab 底部导航（旧API / 新API），液态玻璃主题
+/// 首页 — 液态玻璃主题 + 统一深灰色 MD3 背景
 library;
 
 import 'package:flutter/material.dart';
@@ -16,7 +16,7 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   int _bottomTab = 0;
   final ScrollController _scrollController = ScrollController();
 
@@ -29,17 +29,9 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     return LiquidGlassScope.stack(
-      background: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [Color(0xFF0a0a1a), Color(0xFF16213e), Color(0xFF0f3460)],
-          ),
-        ),
-      ),
+      background: Container(color: AppTheme.surfaceColor),
       content: Scaffold(
-        backgroundColor: AppTheme.backgroundColor,
+        backgroundColor: Colors.transparent,
         body: SafeArea(
           child: Column(
             children: [_buildAppBar(), Expanded(child: _buildVideoFeed())],
@@ -56,18 +48,18 @@ class _HomeScreenState extends State<HomeScreen> {
   // ── 顶部栏 ────────────────────────────────────────────────────────────────
   Widget _buildAppBar() {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+      padding: const EdgeInsets.fromLTRB(14, 10, 14, 8),
       child: Row(
         children: [
           Row(
             children: [
               Container(
-                width: 30, height: 30,
+                width: 32, height: 32,
                 decoration: BoxDecoration(
                   color: AppTheme.accentColor,
                   borderRadius: BorderRadius.circular(8),
                 ),
-                child: const Icon(Icons.movie, color: Colors.black, size: 16),
+                child: const Icon(Icons.movie, color: Colors.black, size: 18),
               ),
               const SizedBox(width: 6),
               const Text(
@@ -85,24 +77,24 @@ class _HomeScreenState extends State<HomeScreen> {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
             decoration: BoxDecoration(
-              color: _bottomTab == 0
-                  ? AppTheme.primaryColor.withValues(alpha: 0.2)
-                  : AppTheme.accentColor.withValues(alpha: 0.2),
+              color: _bottomTab == 1
+                  ? AppTheme.accentColor.withValues(alpha: 0.2)
+                  : AppTheme.primaryColor.withValues(alpha: 0.15),
               borderRadius: BorderRadius.circular(10),
             ),
             child: Text(
-              _bottomTab == 0 ? 'AES-CBC' : 'kuleu.com',
+              _bottomTab == 1 ? 'kuleu.com' : 'Flask',
               style: TextStyle(
-                color: _bottomTab == 0
-                    ? AppTheme.primaryColor
-                    : AppTheme.accentColor,
+                color: _bottomTab == 1
+                    ? AppTheme.accentColor
+                    : AppTheme.primaryColor,
                 fontSize: 10,
                 fontWeight: FontWeight.w600,
               ),
             ),
           ),
           const SizedBox(width: 8),
-          _iconBtn(Icons.refresh, () => context.read<VideoProvider>().fetchVideos()),
+          _iconBtn(Icons.refresh, _refresh),
         ],
       ),
     );
@@ -112,12 +104,12 @@ class _HomeScreenState extends State<HomeScreen> {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        width: 36, height: 36,
+        width: 34, height: 34,
         decoration: BoxDecoration(
-          color: AppTheme.surfaceColor,
+          color: AppTheme.cardColor,
           borderRadius: BorderRadius.circular(10),
         ),
-        child: Icon(icon, size: 18, color: AppTheme.textSecondary),
+        child: Icon(icon, size: 17, color: AppTheme.textSecondary),
       ),
     );
   }
@@ -132,23 +124,43 @@ class _HomeScreenState extends State<HomeScreen> {
         if (provider.error != null && provider.videos.isEmpty) {
           return _buildErrorState(provider.error!);
         }
-        return GridView.builder(
-          controller: _scrollController,
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount:    2,
-            crossAxisSpacing:  8,
-            mainAxisSpacing:   8,
-            childAspectRatio:  9 / 14,
-          ),
-          itemCount: provider.videos.length,
-          itemBuilder: (context, index) {
-            final video = provider.videos[index];
-            return VideoCard(
-              video: video,
-              onTap: () => _playVideo(context, video),
-            );
+        return NotificationListener<ScrollNotification>(
+          onNotification: (notification) {
+            if (notification is ScrollEndNotification &&
+                provider.hasMore &&
+                !provider.loading) {
+              final maxScroll = _scrollController.position.maxScrollExtent;
+              if (maxScroll > 0 && _scrollController.offset >= maxScroll * 0.85) {
+                provider.fetchVideos();
+              }
+            }
+            return false;
           },
+          child: GridView.builder(
+            controller: _scrollController,
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 2,
+              crossAxisSpacing: 8,
+              mainAxisSpacing: 8,
+              childAspectRatio: 9 / 14,
+            ),
+            itemCount: provider.videos.length + (provider.loading ? 1 : 0),
+            itemBuilder: (context, index) {
+              if (index >= provider.videos.length) {
+                return const Center(
+                  child: Padding(
+                    padding: EdgeInsets.all(24),
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                );
+              }
+              return VideoCard(
+                video: provider.videos[index],
+                onTap: () => _playVideo(context, provider.videos[index]),
+              );
+            },
+          ),
         );
       },
     );
@@ -161,7 +173,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // ── 底部双 Tab（液态玻璃）────────────────────────────────────────────────
+  // ── 底部导航（液态玻璃）──────────────────────────────────────────────────
   Widget _buildBottomNav() {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
@@ -174,7 +186,7 @@ class _HomeScreenState extends State<HomeScreen> {
         },
         tabs: [
           GlassBottomBarTab(
-            label: '旧API',
+            label: '老API',
             icon: Icons.cloud,
             selectedIcon: Icons.cloud_outlined,
             glowColor: AppTheme.primaryColor,
@@ -208,14 +220,16 @@ class _HomeScreenState extends State<HomeScreen> {
   // ── FAB（液态玻璃）─────────────────────────────────────────────────────────
   Widget _buildFab() {
     return GlassIconButton(
-      quality:   GlassQuality.standard,
-      icon:      Icons.refresh,
-      size:      46,
-      useOwnLayer: true,
-      onPressed: () => context.read<VideoProvider>().fetchVideos(),
-      glowColor: AppTheme.accentColor,
+      quality:       GlassQuality.standard,
+      icon:          Icons.refresh,
+      size:          46,
+      useOwnLayer:   true,
+      onPressed:     _refresh,
+      glowColor:     AppTheme.accentColor,
     );
   }
+
+  void _refresh() => context.read<VideoProvider>().fetchVideos();
 
   Widget _buildLoadingState() {
     return const Center(
@@ -224,7 +238,7 @@ class _HomeScreenState extends State<HomeScreen> {
         children: [
           CircularProgressIndicator(color: AppTheme.accentColor),
           SizedBox(height: 16),
-          Text('正在加载视频...', style: TextStyle(color: AppTheme.textTertiary)),
+          Text('正在加载…', style: TextStyle(color: AppTheme.textTertiary)),
         ],
       ),
     );
@@ -247,7 +261,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 style: const TextStyle(color: AppTheme.textTertiary, fontSize: 13)),
             const SizedBox(height: 20),
             FilledButton.icon(
-              onPressed: () => context.read<VideoProvider>().fetchVideos(),
+              onPressed: _refresh,
               icon: const Icon(Icons.refresh, size: 16),
               label: const Text('重试'),
             ),
