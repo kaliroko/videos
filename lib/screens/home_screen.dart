@@ -1,12 +1,7 @@
-/// 首页 — LiquidGlass 悬浮液态玻璃导航 + 分类筛选
-///
-/// 底部悬浮导航两个 Tab：
-///   1.「老API」→ m.py Flask listHot 接口
-///   2.「新API」→ JWT认证CMS接口（动态分类）
+/// 首页 — 统一深灰色 MD3 深色主题
 library;
 
 import 'package:flutter/material.dart';
-import 'package:liquid_glass_widgets/liquid_glass_widgets.dart';
 import 'package:provider/provider.dart';
 import 'package:bilibili_glass/providers/video_provider.dart';
 import 'package:bilibili_glass/repository/api_gateway.dart';
@@ -17,37 +12,29 @@ import 'package:bilibili_glass/screens/video_player_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
+
   @override
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
 class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
-  int _bottomTab = 0; // ★ 0=老API, 1=新API
+  int _bottomTab = 0;
   int _activeCatIndex = 0;
   final ScrollController _scrollController = ScrollController();
-  bool _appBarElevated = false;
   List<Category> _categories = ApiService.categories;
-
-  void _onScroll() {
-    final elevated = _scrollController.offset > 60;
-    if (elevated != _appBarElevated) setState(() => _appBarElevated = elevated);
-  }
 
   @override
   void initState() {
     super.initState();
-    _scrollController.addListener(_onScroll);
     _loadCategories();
   }
 
   @override
   void dispose() {
-    _scrollController.removeListener(_onScroll);
     _scrollController.dispose();
     super.dispose();
   }
 
-  /// 从 API 动态加载分类，失败则用默认
   Future<void> _loadCategories() async {
     try {
       final cats = await ApiService.fetchCategories();
@@ -59,44 +46,27 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
   @override
   Widget build(BuildContext context) {
-    return LiquidGlassScope.stack(
-      background: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [Color(0xFF0a0a1a), Color(0xFF16213e), Color(0xFF0f3460)],
-          ),
+    return Scaffold(
+      // 统一深灰 MD3 表面色，不再用渐变
+      backgroundColor: AppTheme.surfaceColor,
+      body: SafeArea(
+        child: Column(
+          children: [
+            _buildAppBar(),
+            if (_bottomTab == 1) _buildCategoryBar(),
+            Expanded(child: _buildVideoFeed()),
+          ],
         ),
       ),
-      content: Scaffold(
-        backgroundColor: Colors.transparent,
-        body: SafeArea(
-          child: Column(
-            children: [
-              _buildAppBar(),
-              // ★ 只有新API（index 1）才显示分类栏
-              if (_bottomTab == 1) _buildCategoryBar(),
-              Expanded(child: _buildVideoFeed()),
-            ],
-          ),
-        ),
-        extendBody: true,
-        bottomNavigationBar: _buildBottomNav(),
-        floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
-        floatingActionButton: _buildFab(),
-      ),
+      bottomNavigationBar: _buildBottomNav(),
+      floatingActionButton: _buildFab(),
     );
   }
 
-  // ── 顶部 App Bar ──────────────────────────────────────────────────────────
+  // ── 顶部栏 ────────────────────────────────────────────────────────────────
   Widget _buildAppBar() {
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 200),
+    return Padding(
       padding: const EdgeInsets.fromLTRB(14, 10, 14, 8),
-      color: _appBarElevated
-          ? AppTheme.surfaceColor.withValues(alpha: 0.9)
-          : Colors.transparent,
       child: Row(
         children: [
           Row(
@@ -122,7 +92,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             ],
           ),
           const Spacer(),
-          // ★ 徽章：index 1 才是 JWT CMS
+          // API 来源徽章
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
             decoration: BoxDecoration(
@@ -155,7 +125,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       child: Container(
         width: 34, height: 34,
         decoration: BoxDecoration(
-          color: AppTheme.surfaceColor.withValues(alpha: 0.8),
+          color: AppTheme.cardColor,
           borderRadius: BorderRadius.circular(10),
         ),
         child: Icon(icon, size: 17, color: AppTheme.textSecondary),
@@ -163,7 +133,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     );
   }
 
-  // ── 分类 Tab 栏（仅新API源显示）───────────────────────────────────────────
+  // ── 分类栏 ────────────────────────────────────────────────────────────────
   Widget _buildCategoryBar() {
     if (_categories.isEmpty) return const SizedBox.shrink();
     return SizedBox(
@@ -182,19 +152,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 setState(() => _activeCatIndex = i);
                 context.read<VideoProvider>().selectCategory(cat);
               },
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 200),
-                curve: Curves.easeInOut,
+              child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
                 decoration: BoxDecoration(
-                  color: active ? AppTheme.accentColor : AppTheme.surfaceColor,
+                  color: active ? AppTheme.accentColor : AppTheme.cardColor,
                   borderRadius: BorderRadius.circular(18),
-                  boxShadow: active
-                      ? [BoxShadow(
-                          color: AppTheme.accentColor.withValues(alpha: 0.4),
-                          blurRadius: 8, spreadRadius: 0,
-                        )]
-                      : null,
                 ),
                 child: Text(
                   cat.name,
@@ -264,66 +226,57 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     );
   }
 
-  // ── 悬浮液态玻璃底部导航栏 ───────────────────────────────────────────────
+  // ── 底部导航（Material 标准版）────────────────────────────────────────────
   Widget _buildBottomNav() {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-      child: GlassBottomBar(
-        selectedIndex: _bottomTab,
-        // ★ 交换：index 0 = 老API，index 1 = 新API
-        onTabSelected: (i) {
-          setState(() => _bottomTab = i);
-          if (i == 0) {
-            // 老API
-            context.read<VideoProvider>().setSource(VideoSource.oldApi);
-          } else {
-            // 新API
-            context.read<VideoProvider>().setSource(VideoSource.newApi);
-            setState(() => _activeCatIndex = 0);
-          }
-        },
-        // ★ tabs 顺序交换：老API 在前
-        tabs: [
-          GlassBottomBarTab(
-            label: '老API',
-            icon: Icons.cloud,
-            selectedIcon: Icons.cloud_outlined,
-            glowColor: AppTheme.primaryColor,
-          ),
-          GlassBottomBarTab(
-            label: '新API',
-            icon: Icons.auto_awesome,
-            selectedIcon: Icons.auto_awesome_outlined,
-            glowColor: AppTheme.accentColor,
-          ),
-        ],
-        barHeight: 60,
-        iconSize: 24,
-        selectedIconColor: AppTheme.accentColor,
-        unselectedIconColor: AppTheme.textTertiary,
-        glassSettings: const LiquidGlassSettings(
-          thickness: 30,
-          blur: 6,
-          refractiveIndex: 1.59,
-          saturation: 0.7,
-          lightIntensity: 0.6,
-          chromaticAberration: 0.3,
-          ambientStrength: 1.0,
-          lightAngle: 0.785,
-          glassColor: Color(0x3DFFFFFF),
+    return NavigationBar(
+      selectedIndex: _bottomTab,
+      surfaceTintColor: Colors.transparent,
+      shadowColor: Colors.transparent,
+      labelBehavior: NavigationBarLabelBehavior.alwaysHide,
+      indicatorColor: AppTheme.surfaceColor.withValues(alpha: 0.12),
+      onDestinationSelected: (i) {
+        setState(() => _bottomTab = i);
+        if (i == 0) {
+          context.read<VideoProvider>().setSource(VideoSource.oldApi);
+        } else {
+          context.read<VideoProvider>().setSource(VideoSource.newApi);
+          setState(() => _activeCatIndex = 0);
+        }
+      },
+      destinations: [
+        NavigationDestination(
+          icon: Icon(Icons.cloud, color: AppTheme.textTertiary),
+          selectedIcon: Icon(Icons.cloud_outlined, color: AppTheme.primaryColor),
+          label: '老API',
         ),
-      ),
+        NavigationDestination(
+          icon: Icon(Icons.auto_awesome, color: AppTheme.textTertiary),
+          selectedIcon: Icon(Icons.auto_awesome_outlined, color: AppTheme.accentColor),
+          label: '新API',
+        ),
+      ],
     );
   }
 
+  // ── FAB ───────────────────────────────────────────────────────────────────
   Widget _buildFab() {
-    return GlassIconButton(
-      quality: GlassQuality.standard,
-      icon: Icons.refresh,
-      size: 46,
-      useOwnLayer: true,
-      onPressed: _refresh,
-      glowColor: AppTheme.accentColor,
+    return Container(
+      margin: const EdgeInsets.only(bottom: 72, right: 16),
+      decoration: BoxDecoration(
+        color: AppTheme.accentColor,
+        borderRadius: BorderRadius.circular(14),
+        boxShadow: [
+          BoxShadow(
+            color: AppTheme.accentColor.withValues(alpha: 0.4),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: IconButton(
+        icon: const Icon(Icons.refresh, color: Colors.black),
+        onPressed: _refresh,
+      ),
     );
   }
 
