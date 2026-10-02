@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:liquid_glass_widgets/liquid_glass_widgets.dart';
 import 'package:provider/provider.dart';
 import 'package:bilibili_glass/providers/video_provider.dart';
+import 'package:bilibili_glass/models/video_model.dart';
 import 'package:bilibili_glass/widgets/video_card.dart';
 import 'package:bilibili_glass/theme/app_theme.dart';
 import 'package:bilibili_glass/screens/video_player_screen.dart';
