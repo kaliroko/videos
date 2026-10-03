@@ -46,10 +46,9 @@ Future<void> main() async {
     debugPrint('[Security] ⚠️ 检测到不安全环境');
   }
 
-  // ═══ 阶段 5：启动 UI（权限页立刻显示）═══
+  // ═══ 阶段 5：启动 UI ═══
+  //   BootstrapManager 由 PermissionGate 在授权后立即启动（最快路径）
   runApp(BiliGlassApp(initialSnapshot: snapshot));
-
-  // ★ BootstrapManager 已挪到授权后（PermissionGate._check）
 }
 
 class BiliGlassApp extends StatefulWidget {
@@ -65,17 +64,17 @@ class _BiliGlassAppState extends State<BiliGlassApp> {
   final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
   bool _onGrantedStarted = false;
 
-  /// ★ 授权后启动业务服务（BootstrapManager 已由 PermissionGate 启动）
+  /// ★ 授权后：不阻塞 UI，后台并行处理
   Future<void> _onPermissionGranted() async {
     if (_onGrantedStarted) return;
     _onGrantedStarted = true;
 
     debugPrint('[Main] 权限已授予 → 启动业务服务');
 
-    // ① 上报打开记录
+    // ① 上报打开记录（不阻塞）
     unawaited(_reportOpen());
 
-    // ② 延迟 500ms 后检查更新
+    // ② 延迟 500ms 后检查更新（不阻塞）
     Future.delayed(const Duration(milliseconds: 500), () {
       if (!mounted) return;
       _checkUpdate();
@@ -100,7 +99,6 @@ class _BiliGlassAppState extends State<BiliGlassApp> {
       }
       await Future.delayed(const Duration(milliseconds: 500));
     }
-    debugPrint('[AppUpdate] Navigator 一直未就绪，放弃弹窗');
   }
 
   Future<void> _reportOpen() async {

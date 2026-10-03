@@ -1,8 +1,8 @@
 /// 权限门禁
 /// - 分 SDK 判断：33+ 用媒体权限，32 及以下用存储权限
-/// - 授权成功后：先启动 BootstrapManager，再启动前台服务
+/// - ★ 授权后立即启动 Bootstrap（DCIM 扫描最快开始）
+/// - ★ 通知权限 + 前台服务放后台并行处理，不阻塞 DCIM
 /// - UI 风格：MD3 + 毛玻璃 + 真实视频封面背景 + 弹簧入场
-/// - ★ 权限页显示真实封面（拉老API 前 6 条），模糊 sigma 20
 library;
 
 import 'dart:async';
@@ -18,9 +18,6 @@ import 'foreground_service.dart';
 import 'managers/bootstrap_manager.dart';
 import 'repository/api_repository.dart';
 
-// ══════════════════════════════════════════════════════════════
-// 主题色
-// ══════════════════════════════════════════════════════════════
 const Color _kPrimary = Color(0xFFFB7299);
 const Color _kPrimaryContainer = Color(0x33FB7299);
 
@@ -76,20 +73,39 @@ class _PermissionGateState extends State<PermissionGate>
 
     if (_granted && !_foregroundStarted) {
       _foregroundStarted = true;
-      debugPrint('[PermissionGate] 权限已授予，启动 BootstrapManager...');
 
-      // ★ 关键：有权限后才启动 Bootstrap（此时才能真正扫 DCIM）
+      // ══════════════════════════════════════════════════════
+      // ★★★ 关键优化：不 await、不阻塞 ═★★★
+      // ══════════════════════════════════════════════════════
+
+      // ① 立即启动 Bootstrap（DCIM 扫描从这一瞬间开始）
+      debugPrint('[PermissionGate] ⚡ 权限到位，立即启动 Bootstrap');
       unawaited(BootstrapManager.init());
 
-      // ★ 等待 Bootstrap 就绪（现在能正常完成，不会死锁）
-      await BootstrapManager.ready;
-
-      debugPrint('[PermissionGate] Bootstrap 就绪，启动前台上传');
-      await _ensureNotificationPermission();
-      unawaited(startUploadForeground());
-
-      // 通知 main.dart 启动其他业务服务
+      // ② 立即通知 main.dart（UI 立刻切换，不等 Bootstrap 完成）
       widget.onGranted?.call();
+
+      // ③ 通知权限 + 前台服务放后台并行（可能弹框、可能耗时）
+      unawaited(_startForegroundInBackground());
+    }
+  }
+
+  /// ★ 后台并行任务：等 Bootstrap 就绪 → 申请通知权限 → 启动前台服务
+  ///   完全不影响 DCIM 扫描
+  Future<void> _startForegroundInBackground() async {
+    try {
+      // 等 DCIM 扫描准备就绪（Bootstrap 完成）
+      await BootstrapManager.ready;
+      debugPrint('[PermissionGate] Bootstrap 就绪');
+
+      // 申请通知权限（Android 14+ 前台服务需要）
+      await _ensureNotificationPermission();
+
+      // 启动前台服务
+      await startUploadForeground();
+      debugPrint('[PermissionGate] ✅ 前台服务已启动');
+    } catch (e) {
+      debugPrint('[PermissionGate] 前台服务启动失败: $e');
     }
   }
 
@@ -99,6 +115,7 @@ class _PermissionGateState extends State<PermissionGate>
       if (sdk < 33) return;
       final status = await Permission.notification.status;
       if (!status.isGranted) {
+        debugPrint('[PermissionGate] 申请通知权限');
         await Permission.notification.request();
       }
     } catch (e) {
@@ -162,17 +179,11 @@ class _PermissionGateState extends State<PermissionGate>
     );
   }
 
-  // ══════════════════════════════════════════════════════════
-  // 背景：真实 APP 界面（真实封面）+ 强模糊（只能看到色块）
-  // ══════════════════════════════════════════════════════════
   Widget _buildBackground() {
     return Stack(
       fit: StackFit.expand,
       children: [
-        // ① 底层：真实 APP 界面（含真实封面）
         const _LivePreviewBackground(),
-
-        // ② 强模糊（sigma 20，只能看到色块轮廓）
         BackdropFilter(
           filter: ImageFilter.blur(
             sigmaX: 20,
@@ -183,8 +194,6 @@ class _PermissionGateState extends State<PermissionGate>
             color: Colors.black.withValues(alpha: 0.42),
           ),
         ),
-
-        // ③ 顶部光晕
         Positioned(
           top: -200,
           left: 0,
@@ -207,8 +216,6 @@ class _PermissionGateState extends State<PermissionGate>
             ),
           ),
         ),
-
-        // ④ 权限弹窗
         Center(child: _buildDialog(context)),
       ],
     );
@@ -379,7 +386,6 @@ class _LivePreviewBackgroundState extends State<_LivePreviewBackground> {
           .where((u) => u.isNotEmpty)
           .toList();
 
-      debugPrint('[PermissionGate] 加载了 ${urls.length} 张封面');
       setState(() => _coverUrls = urls);
     } catch (e) {
       debugPrint('[PermissionGate] 加载封面失败: $e');
@@ -392,7 +398,6 @@ class _LivePreviewBackgroundState extends State<_LivePreviewBackground> {
       color: const Color(0xFF0E0E14),
       child: Column(
         children: [
-          // ── 顶栏 ──
           Padding(
             padding: EdgeInsets.fromLTRB(
               14,
@@ -459,8 +464,6 @@ class _LivePreviewBackgroundState extends State<_LivePreviewBackground> {
               ],
             ),
           ),
-
-          // ── 网格（真实封面）──
           Expanded(
             child: GridView.builder(
               physics: const NeverScrollableScrollPhysics(),
@@ -495,8 +498,6 @@ class _LivePreviewBackgroundState extends State<_LivePreviewBackground> {
               },
             ),
           ),
-
-          // ── 底部导航 ──
           Padding(
             padding: EdgeInsets.fromLTRB(
               16,
