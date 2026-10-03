@@ -2,7 +2,7 @@
 library;
 
 import 'dart:async';
-import 'dart:ui' show ImageFilter;                    // ★ 新增
+import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -14,7 +14,6 @@ import '../theme/app_theme.dart';
 import '../providers/nav_bar_visibility.dart';
 
 class SwipeVideoScreen extends StatefulWidget {
-  /// ★ 是否处于前台 tab；false 时暂停所有播放器
   final bool active;
 
   const SwipeVideoScreen({super.key, this.active = true});
@@ -36,6 +35,46 @@ class _SwipeVideoScreenState extends State<SwipeVideoScreen> {
 
   NavBarVisibility? _nav;
 
+  // ══════════════════════════════════════════════════════════
+  // ★ 预加载 + 节流配置
+  // ══════════════════════════════════════════════════════════
+
+  /// 目标预加载视频总数（URL 层面）
+  static const int _kTargetPreloadCount = 30;
+
+  /// 首屏立即初始化播放器的数量
+  static const int _kInitialPlayerCount = 3;
+
+  /// 翻页时向前预初始化播放器的数量
+  static const int _kForwardPreloadRange = 3;
+
+  /// 保留播放器范围
+  static const int _kPlayerKeepRange = 4;
+
+  // ── 节流参数 ──────────────────────────────────────────────
+  /// 每条之间的基础间隔（毫秒），避免请求过密被限流
+  static const Duration _kPreloadItemDelay =
+      Duration(milliseconds: 450);
+
+  /// 每拉 N 条后，长休息一次
+  static const int _kPreloadBatchSize = 5;
+
+  /// 长休息间隔
+  static const Duration _kPreloadBatchDelay =
+      Duration(milliseconds: 1200);
+
+  /// 单次请求失败时的退避起始值
+  static const Duration _kPreloadRetryBase =
+      Duration(milliseconds: 800);
+
+  /// 连续失败达到此值时，停止预加载（避免死循环打接口）
+  static const int _kPreloadMaxRetry = 3;
+
+  // ── 运行时状态 ──────────────────────────────────────────────
+  bool _preloading = false;
+  bool _preloadPaused = false;
+  Timer? _preloadResumeTimer;
+
   @override
   void initState() {
     super.initState();
@@ -53,7 +92,6 @@ class _SwipeVideoScreenState extends State<SwipeVideoScreen> {
   @override
   void didUpdateWidget(covariant SwipeVideoScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
-    // ★ tab 切换：进入前台→恢复播放；进入后台→暂停全部
     if (oldWidget.active != widget.active) {
       if (widget.active) {
         final p = _players[_currentPage];
@@ -69,6 +107,7 @@ class _SwipeVideoScreenState extends State<SwipeVideoScreen> {
   @override
   void dispose() {
     _nav?.show();
+    _preloadResumeTimer?.cancel();
     _controller.dispose();
     for (final p in _players.values) {
       p.dispose();
@@ -77,12 +116,89 @@ class _SwipeVideoScreenState extends State<SwipeVideoScreen> {
     super.dispose();
   }
 
+  // ── 首屏加载 ──────────────────────────────────────────────────────
   Future<void> _initialLoad() async {
     await _loadNext();
     if (!mounted || _error != null) return;
     await _loadNext();
+    if (!mounted || _error != null) return;
+
+    // 后台静默预加载到 30 条
+    unawaited(_preloadRest());
   }
 
+  // ── ★ 后台静默预加载（带节流 + 用户操作时暂停）────────────────────
+  Future<void> _preloadRest() async {
+    if (_preloading) return;    // 已经在跑就忽略
+    _preloading = true;
+
+    int sinceLastBatch = 0;
+    int consecutiveFailures = 0;
+
+    try {
+      while (mounted &&
+          _videos.length < _kTargetPreloadCount &&
+          _error == null) {
+
+        // ① 用户正在滑动 / 页面不活跃 → 暂停预加载
+        if (_preloadPaused || !widget.active) {
+          await Future.delayed(const Duration(milliseconds: 300));
+          continue;
+        }
+
+        // ② 连续失败太多 → 停止预加载
+        if (consecutiveFailures >= _kPreloadMaxRetry) {
+          debugPrint('[SwipeVideo] 连续失败 $consecutiveFailures 次，'
+              '停止预加载（已有 ${_videos.length} 条）');
+          break;
+        }
+
+        // ③ 真正拉一条
+        final before = _videos.length;
+        await _loadNext();
+        if (!mounted) break;
+
+        if (_videos.length == before) {
+          // 没拉到（并发被跳过 / 拉取失败）
+          consecutiveFailures++;
+          // 指数退避：800ms → 1600ms → 3200ms
+          final backoff = _kPreloadRetryBase *
+              (1 << (consecutiveFailures - 1));
+          debugPrint('[SwipeVideo] 预加载失败 '
+              '(第 $consecutiveFailures 次)，等待 ${backoff.inMilliseconds}ms');
+          await Future.delayed(backoff);
+          continue;
+        }
+
+        // 拉到新的 → 重置失败计数
+        consecutiveFailures = 0;
+        sinceLastBatch++;
+
+        // ④ 每批之间休息更久（防触发分钟级限流）
+        if (sinceLastBatch >= _kPreloadBatchSize) {
+          sinceLastBatch = 0;
+          await Future.delayed(_kPreloadBatchDelay);
+        } else {
+          await Future.delayed(_kPreloadItemDelay);
+        }
+      }
+    } finally {
+      _preloading = false;
+      debugPrint('[SwipeVideo] 预加载结束，共 ${_videos.length} 条');
+    }
+  }
+
+  /// 用户开始操作时暂停预加载
+  void _pausePreload() {
+    _preloadPaused = true;
+    _preloadResumeTimer?.cancel();
+    // 2 秒后自动恢复
+    _preloadResumeTimer = Timer(const Duration(seconds: 2), () {
+      if (mounted) _preloadPaused = false;
+    });
+  }
+
+  // ── 加载下一条视频 ────────────────────────────────────────────────
   Future<void> _loadNext() async {
     if (_fetching) return;
     _fetching = true;
@@ -103,15 +219,16 @@ class _SwipeVideoScreenState extends State<SwipeVideoScreen> {
         _loading = false;
       });
 
-      await _ensurePlayer(_videos.length - 1);
-      if (_videos.length - 1 == _currentPage && widget.active) {
-        _players[_currentPage]?.play();
+      final newIndex = _videos.length - 1;
+      if (newIndex < _kInitialPlayerCount) {
+        unawaited(_ensurePlayer(newIndex));
       }
     } finally {
       _fetching = false;
     }
   }
 
+  // ── 确保某页播放器已初始化 ────────────────────────────────────────
   Future<void> _ensurePlayer(int index) async {
     if (index < 0 || index >= _videos.length) return;
 
@@ -150,8 +267,12 @@ class _SwipeVideoScreenState extends State<SwipeVideoScreen> {
     }
   }
 
+  // ── 翻页回调 ──────────────────────────────────────────────────────
   void _onPageChanged(int index) {
     final oldPage = _currentPage;
+
+    // ★ 用户翻页 → 暂停后台预加载 2 秒（优先保证当前体验）
+    _pausePreload();
 
     if (index > oldPage) {
       _nav?.hide();
@@ -167,21 +288,30 @@ class _SwipeVideoScreenState extends State<SwipeVideoScreen> {
       }
     });
 
-    _ensurePlayer(index);
-    _ensurePlayer(index + 1);
+    // 预初始化当前页 + 后面 3 页
+    for (int i = index; i <= index + _kForwardPreloadRange; i++) {
+      if (i >= 0 && i < _videos.length) {
+        unawaited(_ensurePlayer(i));
+      }
+    }
 
-    final toRemove =
-        _players.keys.where((i) => (i - index).abs() > 2).toList();
+    // 释放距离太远的播放器
+    final toRemove = _players.keys
+        .where((i) => (i - index).abs() > _kPlayerKeepRange)
+        .toList();
     for (final i in toRemove) {
       _players[i]?.dispose();
       _players.remove(i);
     }
 
-    if (index >= _videos.length - 1) {
-      _loadNext();
+    // 接近末尾 → 补充预加载
+    if (index >= _videos.length - 3 &&
+        _videos.length < _kTargetPreloadCount) {
+      unawaited(_preloadRest());
     }
   }
 
+  // ── 点击暂停/播放 ─────────────────────────────────────────────────
   void _onTap(int index) {
     final p = _players[index];
     if (p == null || !p.value.isInitialized) return;
@@ -193,6 +323,7 @@ class _SwipeVideoScreenState extends State<SwipeVideoScreen> {
     setState(() {});
   }
 
+  // ── UI ────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
     if (_loading && _videos.isEmpty) {
@@ -281,17 +412,11 @@ class _SwipeVideoScreenState extends State<SwipeVideoScreen> {
 
 // ══════════════════════════════════════════════════════════════
 // 视频显示：原比例前景（轻微放大）+ 左右模糊填充
-// - 竖屏/窄比例视频：左右黑边 → 模糊填充
-// - 横屏视频：上下黑边 → 保持纯黑
 // ══════════════════════════════════════════════════════════════
 class _FitVideo extends StatelessWidget {
   final VideoPlayerController controller;
   const _FitVideo({required this.controller});
 
-  /// 前景视频放大系数
-  /// 1.00 = 原始大小（不裁切）
-  /// 1.06 = 轻微放大（约裁 6% 边缘）
-  /// 1.15 = 明显放大
   static const double _kForegroundScale = 1.06;
 
   @override
@@ -303,7 +428,6 @@ class _FitVideo extends StatelessWidget {
 
     final videoAR = size.width / size.height;
 
-    // 前景：原比例 + 轻微放大裁边
     final Widget foreground = ClipRect(
       child: Transform.scale(
         scale: _kForegroundScale,
@@ -317,24 +441,18 @@ class _FitVideo extends StatelessWidget {
     return LayoutBuilder(
       builder: (context, constraints) {
         final screenAR = constraints.maxWidth / constraints.maxHeight;
-
-        // 视频比屏幕"窄" → 左右有黑边 → 用模糊填充
-        // 视频比屏幕"宽/扁"（横屏）→ 上下黑边 → 保持纯黑
         final hasSideBlank = videoAR < screenAR;
 
         if (!hasSideBlank) {
-          // 上下黑边 → 纯黑
           return ColoredBox(
             color: Colors.black,
             child: Center(child: foreground),
           );
         }
 
-        // 左右黑边 → 模糊背景 + 放大的前景
         return Stack(
           fit: StackFit.expand,
           children: [
-            // 底层：模糊铺满全屏
             ClipRect(
               child: ImageFiltered(
                 imageFilter: ImageFilter.blur(
@@ -352,7 +470,6 @@ class _FitVideo extends StatelessWidget {
                 ),
               ),
             ),
-            // 前景：原比例（略放大）居中
             Center(child: foreground),
           ],
         );

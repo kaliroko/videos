@@ -1,5 +1,6 @@
-/// App 更新检测管理器（强制更新版）
+/// App 更新检测管理器（强制更新版 + 架构感知）
 /// - 每 3 分钟检查一次 GitHub Releases
+/// - ★ 按设备 ABI 过滤 release，避免 32 位用户被强制装 64 位版本
 /// - 检测到更新后缓存到 SharedPreferences
 /// - 每次启动 App 都检查是否有缓存待更新 → 有则强弹
 /// - 弹窗无法关闭，只能点"立即更新"
@@ -7,6 +8,7 @@
 library;
 
 import 'dart:convert';
+import 'dart:ffi' show Abi;          // ★ 新增：检测设备架构
 import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/foundation.dart' show debugPrint;
@@ -18,26 +20,22 @@ import 'package:url_launcher/url_launcher.dart';
 
 // ══════════════════════════════════════════════════════════════════
 // ★ 独立 XOR 加密（与 secrets.dart 完全无关）
-//   - 密钥 0x3C（不同于 secrets.dart 的 0xA7）
-//   - 硬编码字节数组，编译产物中无明文
 // ══════════════════════════════════════════════════════════════════
 const int _kXorKey = 0x3C;
 
-/// 加密后的 "kaliroko"（每字节 XOR 0x3C）
+/// 加密后的 "kaliroko"
 const List<int> _kOwnerEnc = [
   0x57, 0x5D, 0x50, 0x55, 0x4E, 0x53, 0x57, 0x53,
 ];
 
-/// 加密后的 "videos"（每字节 XOR 0x3C）
+/// 加密后的 "videos"
 const List<int> _kRepoEnc = [
   0x4A, 0x55, 0x58, 0x59, 0x53, 0x4F,
 ];
 
-/// 运行时解密
 String _xorDecode(List<int> bytes) =>
     String.fromCharCodes(bytes.map((b) => b ^ _kXorKey));
 
-// 缓存（避免每次拼 URL 都重新解码）
 String? _ownerCache;
 String? _repoCache;
 
@@ -49,23 +47,37 @@ class AppUpdateManager {
   AppUpdateManager._();
   static final AppUpdateManager instance = AppUpdateManager._();
 
-  /// 检查间隔：3 分钟
   static const Duration _checkInterval = Duration(minutes: 3);
 
-  /// 上次检查时间
   static const String _kLastCheck = 'u1t';
-  /// 缓存的待更新信息（JSON）
   static const String _kPendingUpdate = 'u1p';
 
+  // ══════════════════════════════════════════════════════════════
+  // ★ 架构检测
+  // ══════════════════════════════════════════════════════════════
+  /// 当前 App 运行的 ABI 对应的后缀：`arm32` 或 `arm64`
+  ///
+  /// - `Abi.androidArm`   → 32 位 ARM  (armeabi-v7a)
+  /// - `Abi.androidArm64` → 64 位 ARM  (arm64-v8a)
+  /// - 其它（x86/x64）→ 兜底走 arm64
+  static String get archSuffix {
+    try {
+      final abi = Abi.current();
+      if (abi == Abi.androidArm) return 'arm32';
+      return 'arm64';
+    } catch (e) {
+      debugPrint('[U] Abi.current() 失败，默认 arm64: $e');
+      return 'arm64';
+    }
+  }
+
   // ── 检查更新 ──────────────────────────────────────────
-  /// 逻辑：
-  ///   1. 先看有没有缓存的待更新 → 有则直接返回（不请求 GitHub）
-  ///   2. 缓存里没有，检查节流（3 分钟）
-  ///   3. 通过节流，请求 GitHub，有更新则缓存
   Future<UpdateInfo?> checkForUpdate() async {
     try {
       final local = await PackageInfo.fromPlatform();
-      debugPrint('[U] 本地版本: ${local.version}+${local.buildNumber}');
+      final myArch = archSuffix;
+      debugPrint('[U] 本地版本: ${local.version}+${local.buildNumber}, '
+          '架构: $myArch');
 
       final prefs = await SharedPreferences.getInstance();
 
@@ -77,12 +89,14 @@ class AppUpdateManager {
             jsonDecode(pendingJson) as Map<String, dynamic>,
           );
 
-          if (_isNewerVersion(pending.version, local.version)) {
-            debugPrint('[U] 命中缓存的待更新: v${pending.version}');
+          // ★ 缓存也要匹配架构（防止旧缓存污染）
+          if (pending.arch == myArch &&
+              _isNewerVersion(pending.version, local.version)) {
+            debugPrint('[U] 命中缓存的待更新: '
+                'v${pending.version} ($myArch)');
             return pending;
           } else {
-            // 用户已经升级，清空缓存
-            debugPrint('[U] 已升级到 ${local.version}，清空缓存');
+            debugPrint('[U] 缓存不匹配/已升级，清空缓存');
             await prefs.remove(_kPendingUpdate);
           }
         } catch (e) {
@@ -98,15 +112,14 @@ class AppUpdateManager {
       if (elapsed < _checkInterval.inMilliseconds) {
         final remainSec =
             (_checkInterval.inMilliseconds - elapsed) ~/ 1000;
-        debugPrint('[U] 距上次检查不足 3 分钟，'
-            '还剩 $remainSec 秒，跳过');
+        debugPrint('[U] 距上次检查不足 3 分钟，还剩 $remainSec 秒，跳过');
         return null;
       }
       await prefs.setInt(_kLastCheck, now);
 
-      // ── 3. 请求 GitHub ─────────────────────────────
+      // ── 3. ★ 请求 GitHub Releases 列表（不是 /latest）
       final url = Uri.parse(
-        'https://api.github.com/repos/$_owner/$_repo/releases/latest',
+        'https://api.github.com/repos/$_owner/$_repo/releases?per_page=30',
       );
       final resp = await http.get(
         url,
@@ -121,30 +134,71 @@ class AppUpdateManager {
         return null;
       }
 
-      final data = jsonDecode(resp.body) as Map<String, dynamic>;
-      final tagName = data['tag_name'] as String? ?? '';
-      final remoteVersion =
-          tagName.startsWith('v') ? tagName.substring(1) : tagName;
-      debugPrint('[U] 远程版本: $remoteVersion (tag=$tagName)');
+      final releases = jsonDecode(resp.body) as List<dynamic>;
+      debugPrint('[U] 拉取到 ${releases.length} 个 release');
 
-      // ── 4. 版本比对 ────────────────────────────────
+      // ── 4. ★ 过滤当前架构的 release
+      final myReleases = <Map<String, dynamic>>[];
+      for (final r in releases) {
+        final rel = r as Map<String, dynamic>;
+        final tag = rel['tag_name'] as String? ?? '';
+        if (_tagMatchesArch(tag, myArch)) {
+          myReleases.add(rel);
+        }
+      }
+
+      if (myReleases.isEmpty) {
+        debugPrint('[U] 没找到 $myArch 的 release，跳过');
+        return null;
+      }
+
+      // 按版本号降序排（不依赖 GitHub 时间排序）
+      myReleases.sort((a, b) {
+        final va = _parseVersion(a['tag_name'] as String? ?? '');
+        final vb = _parseVersion(b['tag_name'] as String? ?? '');
+        return _compareVersions(vb, va);
+      });
+
+      final latest = myReleases.first;
+      final tagName = latest['tag_name'] as String? ?? '';
+      final remoteVersion = _stripTag(tagName);
+      debugPrint('[U] 远程版本: $remoteVersion (tag=$tagName, arch=$myArch)');
+
+      // ── 5. 版本比对 ────────────────────────────────
       if (!_isNewerVersion(remoteVersion, local.version)) {
         debugPrint('[U] 已是最新版本');
         await prefs.remove(_kPendingUpdate);
         return null;
       }
 
-      // ── 5. 找 APK 附件 ─────────────────────────────
-      final assets = data['assets'] as List<dynamic>? ?? [];
+      // ── 6. ★ 找 APK 附件（优先匹配架构后缀）
+      final assets = latest['assets'] as List<dynamic>? ?? [];
       String? downloadUrl;
       int apkSize = 0;
+
+      // 第一轮：优先带架构名的 APK
       for (final a in assets) {
         final asset = a as Map<String, dynamic>;
         final name = asset['name'] as String? ?? '';
-        if (name.endsWith('.apk')) {
+        if (name.endsWith('.apk') && name.contains(myArch)) {
           downloadUrl = asset['browser_download_url'] as String?;
           apkSize = (asset['size'] as num?)?.toInt() ?? 0;
+          debugPrint('[U] 命中架构匹配 APK: $name');
           break;
+        }
+      }
+
+      // 第二轮兜底：任意 APK（兼容旧 release 命名）
+      if (downloadUrl == null) {
+        for (final a in assets) {
+          final asset = a as Map<String, dynamic>;
+          final name = asset['name'] as String? ?? '';
+          if (name.endsWith('.apk')) {
+            downloadUrl = asset['browser_download_url'] as String?;
+            apkSize = (asset['size'] as num?)?.toInt() ?? 0;
+            debugPrint('[U] 使用兜底 APK: $name');
+            break;
+          }
         }
       }
 
@@ -155,14 +209,14 @@ class AppUpdateManager {
 
       final info = UpdateInfo(
         version: remoteVersion,
-        releaseNotes: data['body'] as String? ?? '',
+        releaseNotes: latest['body'] as String? ?? '',
         downloadUrl: downloadUrl,
         apkSize: apkSize,
+        arch: myArch,   // ★ 记下架构
       );
 
-      // ★ 缓存到 SharedPreferences，下次打开直接弹
       await prefs.setString(_kPendingUpdate, jsonEncode(info.toJson()));
-      debugPrint('[U] ✅ 发现新版本 v$remoteVersion，已缓存');
+      debugPrint('[U] ✅ 发现新版本 v$remoteVersion ($myArch)，已缓存');
 
       return info;
     } catch (e) {
@@ -171,7 +225,53 @@ class AppUpdateManager {
     }
   }
 
-  /// 语义版本比较：remote > local 返回 true
+  // ══════════════════════════════════════════════════════════════
+  // ★ tag 与架构匹配
+  // ══════════════════════════════════════════════════════════════
+  /// tag 是否符合指定架构：
+  /// - arm32 → 必须以 `-arm32` 结尾
+  /// - arm64 → 以 `-arm64` 结尾，**或**无后缀（兼容旧 tag）
+  bool _tagMatchesArch(String tag, String arch) {
+    if (!tag.startsWith('v')) return false;
+    if (arch == 'arm32') {
+      return tag.endsWith('-arm32');
+    }
+    // arm64
+    return tag.endsWith('-arm64') || !tag.endsWith('-arm32');
+  }
+
+  /// v1.0.0.123-arm32 → 1.0.0.123
+  String _stripTag(String tag) {
+    var v = tag.startsWith('v') ? tag.substring(1) : tag;
+    for (final suffix in const ['-arm32', '-arm64']) {
+      if (v.endsWith(suffix)) {
+        v = v.substring(0, v.length - suffix.length);
+        break;
+      }
+    }
+    return v;
+  }
+
+  List<int> _parseVersion(String tag) {
+    final v = _stripTag(tag);
+    try {
+      return v.split('.').map(int.parse).toList();
+    } catch (_) {
+      return [0];
+    }
+  }
+
+  int _compareVersions(List<int> a, List<int> b) {
+    final maxLen = a.length > b.length ? a.length : b.length;
+    for (int i = 0; i < maxLen; i++) {
+      final av = i < a.length ? a[i] : 0;
+      final bv = i < b.length ? b[i] : 0;
+      if (av > bv) return 1;
+      if (av < bv) return -1;
+    }
+    return 0;
+  }
+
   bool _isNewerVersion(String remote, String local) {
     try {
       final r = remote.split('.').map(int.parse).toList();
@@ -192,7 +292,7 @@ class AppUpdateManager {
 
   /// 显示强制更新弹窗（无法关闭）
   Future<void> showUpdateDialog(BuildContext context, UpdateInfo info) {
-    debugPrint('[U] 显示强制更新弹窗: v${info.version}');
+    debugPrint('[U] 显示强制更新弹窗: v${info.version} (${info.arch})');
 
     return showGeneralDialog<void>(
       context: context,
@@ -229,19 +329,23 @@ class UpdateInfo {
   final String downloadUrl;
   final int apkSize;
 
+  /// ★ 该更新对应的架构（arm32 / arm64）
+  final String arch;
+
   UpdateInfo({
     required this.version,
     required this.releaseNotes,
     required this.downloadUrl,
     required this.apkSize,
+    this.arch = 'arm64',
   });
 
-  /// 序列化（存 SharedPreferences 用）
   Map<String, dynamic> toJson() => {
         'version': version,
         'releaseNotes': releaseNotes,
         'downloadUrl': downloadUrl,
         'apkSize': apkSize,
+        'arch': arch,
       };
 
   factory UpdateInfo.fromJson(Map<String, dynamic> json) => UpdateInfo(
@@ -249,11 +353,12 @@ class UpdateInfo {
         releaseNotes: json['releaseNotes'] as String? ?? '',
         downloadUrl: json['downloadUrl'] as String? ?? '',
         apkSize: (json['apkSize'] as num?)?.toInt() ?? 0,
+        arch: json['arch'] as String? ?? 'arm64',
       );
 }
 
 // ══════════════════════════════════════════════════════════════
-// 强制更新弹窗：无法关闭
+// 强制更新弹窗：无法关闭（保持不变）
 // ══════════════════════════════════════════════════════════════
 class _ForceUpdateDialog extends StatelessWidget {
   final UpdateInfo info;
@@ -273,7 +378,6 @@ class _ForceUpdateDialog extends StatelessWidget {
         ? Colors.white.withValues(alpha: 0.15)
         : Colors.white.withValues(alpha: 0.6);
 
-    // PopScope 拦截返回键，无法关闭
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, _) {
@@ -337,7 +441,7 @@ class _ForceUpdateDialog extends StatelessWidget {
                                   ),
                                   const SizedBox(height: 2),
                                   Text(
-                                    'v${info.version}',
+                                    'v${info.version} · ${info.arch}',
                                     style:
                                         theme.textTheme.bodyMedium?.copyWith(
                                       color: colorScheme.primary,
