@@ -12,18 +12,18 @@ import 'announcement_dialog.dart';
 
 class RemoteGate extends StatefulWidget {
   final Widget child;
-
-  /// ★ 首帧禁用原因（来自 main.dart 缓存预读）
   final String? initialDisabledReason;
-
-  /// ★ 首帧放行剩余（来自 main.dart 缓存预读）
   final Duration? initialBypassRemaining;
+
+  /// ★ 传入 MaterialApp 的 navigatorKey，用于 showDialog
+  final GlobalKey<NavigatorState>? navigatorKey;
 
   const RemoteGate({
     super.key,
     required this.child,
     this.initialDisabledReason,
     this.initialBypassRemaining,
+    this.navigatorKey,
   });
 
   @override
@@ -46,7 +46,6 @@ class _RemoteGateState extends State<RemoteGate> {
   void initState() {
     super.initState();
 
-    // ★ 首帧直接使用传入的缓存结果（无异步等待、无闪烁）
     _debugBypass = widget.initialBypassRemaining != null;
     _disabledReason =
         _debugBypass ? null : widget.initialDisabledReason;
@@ -62,10 +61,8 @@ class _RemoteGateState extends State<RemoteGate> {
       debugPrint('[RemoteGate] ✅ 首帧：正常 UI');
     }
 
-    // 首帧后延迟拉服务端
     WidgetsBinding.instance.addPostFrameCallback((_) => _scheduleFirstCheck());
 
-    // 60 秒轮询
     _pollTimer = Timer.periodic(
       const Duration(seconds: 60),
       (_) {
@@ -101,7 +98,6 @@ class _RemoteGateState extends State<RemoteGate> {
   Future<void> _runCheck({required bool showAnnouncement}) async {
     final cfg = await RemoteConfigManager.fetch();
 
-    // 拉取失败 → 保持现状（不清缓存、不改变显示）
     if (cfg == null) {
       debugPrint('[RemoteGate] 未拉到配置，保持现状');
       return;
@@ -109,7 +105,6 @@ class _RemoteGateState extends State<RemoteGate> {
 
     if (!mounted) return;
 
-    // 放行中 → 忽略禁用，仍允许公告
     if (_debugBypass) {
       debugPrint('[RemoteGate] 🔓 放行中，忽略禁用指令');
       if (cfg.appEnabled && showAnnouncement && !_showingAnnouncement) {
@@ -190,7 +185,6 @@ class _RemoteGateState extends State<RemoteGate> {
         } else if (cfg != null && cfg.appEnabled) {
           _disabledReason = null;
         } else {
-          // 拉取失败 → 回退到禁用缓存
           _disabledReason = _bypassDisabledFallback;
         }
         _bypassDisabledFallback = null;
@@ -256,8 +250,16 @@ class _RemoteGateState extends State<RemoteGate> {
       return;
     }
 
+    // ★ 使用 navigatorKey.currentContext（builder 之上没有 Navigator）
+    final dialogCtx = widget.navigatorKey?.currentContext;
+    if (dialogCtx == null) {
+      debugPrint('[RemoteGate] navigatorKey 未就绪，跳过公告');
+      _showingAnnouncement = false;
+      return;
+    }
+
     await showDialog(
-      context: context,
+      context: dialogCtx,
       barrierDismissible: false,
       builder: (_) => AnnouncementDialog(config: cfg),
     );
@@ -267,13 +269,13 @@ class _RemoteGateState extends State<RemoteGate> {
 
   @override
   Widget build(BuildContext context) {
-    // ★ 首帧就判断，无任何闪烁
     if (_disabledReason != null) {
       return AppDisabledScreen(
         reason: _disabledReason!,
         onRetry: _manualRetry,
         retrying: _retrying,
         onDebugUnlock: _onDebugUnlock,
+        navigatorKey: widget.navigatorKey,   // ★ 传给禁用页
       );
     }
     return widget.child;

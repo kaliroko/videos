@@ -140,6 +140,8 @@ class _BiliGlassAppState extends State<BiliGlassApp> {
           theme: AppTheme.darkTheme,
           builder: (context, child) {
             return RemoteGate(
+              // ★ 关键：传入 navigatorKey，让 AppDisabledScreen 能 showDialog
+              navigatorKey: _navigatorKey,
               initialDisabledReason:
                   widget.initialSnapshot.initialDisabledReason,
               initialBypassRemaining:

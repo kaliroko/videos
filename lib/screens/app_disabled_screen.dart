@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter/material.dart';
 
 import '../config/debug_secret.dart';
@@ -12,12 +13,17 @@ class AppDisabledScreen extends StatefulWidget {
   /// 密钥验证通过时调用，参数是用户选择的放行时长
   final Future<bool> Function(Duration duration)? onDebugUnlock;
 
+  /// ★ 用于 showDialog（因为本 widget 在 MaterialApp.builder 之上，
+  ///   自身 context 拿不到 Navigator）
+  final GlobalKey<NavigatorState>? navigatorKey;
+
   const AppDisabledScreen({
     super.key,
     required this.reason,
     this.onRetry,
     this.retrying = false,
     this.onDebugUnlock,
+    this.navigatorKey,
   });
 
   @override
@@ -25,6 +31,16 @@ class AppDisabledScreen extends StatefulWidget {
 }
 
 class _AppDisabledScreenState extends State<AppDisabledScreen> {
+  /// ★ 获取可用的 dialog context
+  /// 优先用 navigatorKey（Navigator 内部的 context），
+  /// 因为本 widget 位于 builder 层，自身 context 没有 Navigator
+  BuildContext? get _dialogContext {
+    final navCtx = widget.navigatorKey?.currentContext;
+    if (navCtx != null && navCtx.mounted) return navCtx;
+    // 兜底：用自身 context（可能失败，但至少尝试一次）
+    return mounted ? context : null;
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -87,7 +103,7 @@ class _AppDisabledScreenState extends State<AppDisabledScreen> {
               bottom: 28,
               child: Center(
                 child: _DebugEntry(
-                  onTap: () => _openDebugDialog(context),
+                  onTap: _openDebugDialog,
                 ),
               ),
             ),
@@ -96,7 +112,16 @@ class _AppDisabledScreenState extends State<AppDisabledScreen> {
     );
   }
 
-  Future<void> _openDebugDialog(BuildContext context) async {
+  Future<void> _openDebugDialog() async {
+    debugPrint('[Debug] 打开调试解锁弹窗');
+
+    // ★ 关键：用 navigatorKey 的 context
+    final ctx = _dialogContext;
+    if (ctx == null) {
+      debugPrint('[Debug] ❌ 没有可用的 context，无法弹窗');
+      return;
+    }
+
     final controller = TextEditingController();
     String? errorText;
     Duration selectedDuration = const Duration(hours: 1);
@@ -104,11 +129,11 @@ class _AppDisabledScreenState extends State<AppDisabledScreen> {
     final customHoursController = TextEditingController();
 
     await showDialog<void>(
-      context: context,
+      context: ctx,
       barrierDismissible: true,
-      builder: (ctx) {
+      builder: (dialogCtx) {
         return StatefulBuilder(
-          builder: (ctx, setDialogState) {
+          builder: (dialogCtx, setDialogState) {
             return AlertDialog(
               backgroundColor: AppTheme.cardColor,
               shape: RoundedRectangleBorder(
@@ -263,7 +288,7 @@ class _AppDisabledScreenState extends State<AppDisabledScreen> {
               ),
               actions: [
                 TextButton(
-                  onPressed: () => Navigator.of(ctx).pop(),
+                  onPressed: () => Navigator.of(dialogCtx).pop(),
                   child: const Text(
                     '取消',
                     style: TextStyle(color: AppTheme.textTertiary),
@@ -284,7 +309,7 @@ class _AppDisabledScreenState extends State<AppDisabledScreen> {
                       return;
                     }
                     // 第二步：解锁
-                    Navigator.of(ctx).pop();
+                    Navigator.of(dialogCtx).pop();
                     _unlock(selectedDuration);
                   },
                   child: Text(
