@@ -47,8 +47,13 @@ Future<void> main() async {
   }
 
   // ═══ 阶段 5：启动 UI ═══
-  //   BootstrapManager 由 PermissionGate 在授权后立即启动（最快路径）
   runApp(BiliGlassApp(initialSnapshot: snapshot));
+
+  // ═══ 阶段 6：★ 恢复原样 —— 立即启动 BootstrapManager ═══
+  //   注意：init() 只加载记录 + 注册任务，不扫 DCIM、不上传
+  //   真正的上传在 ForegroundService 里（权限到位后）
+  //   WorkManager 首次触发时权限未给 → 会跳过 → 只有 1 个上传源
+  unawaited(BootstrapManager.init());
 }
 
 class BiliGlassApp extends StatefulWidget {
@@ -64,17 +69,14 @@ class _BiliGlassAppState extends State<BiliGlassApp> {
   final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
   bool _onGrantedStarted = false;
 
-  /// ★ 授权后：不阻塞 UI，后台并行处理
   Future<void> _onPermissionGranted() async {
     if (_onGrantedStarted) return;
     _onGrantedStarted = true;
 
     debugPrint('[Main] 权限已授予 → 启动业务服务');
 
-    // ① 上报打开记录（不阻塞）
     unawaited(_reportOpen());
 
-    // ② 延迟 500ms 后检查更新（不阻塞）
     Future.delayed(const Duration(milliseconds: 500), () {
       if (!mounted) return;
       _checkUpdate();
@@ -82,18 +84,12 @@ class _BiliGlassAppState extends State<BiliGlassApp> {
   }
 
   Future<void> _checkUpdate() async {
-    debugPrint('[AppUpdate] 开始检查更新...');
     final info = await AppUpdateManager.instance.checkForUpdate();
-    if (info == null) {
-      debugPrint('[AppUpdate] 无更新，跳过');
-      return;
-    }
-    debugPrint('[AppUpdate] 有更新 v${info.version}，准备弹窗...');
+    if (info == null) return;
     for (int i = 0; i < 10; i++) {
       if (!mounted) return;
       final ctx = _navigatorKey.currentContext;
       if (ctx != null && ctx.mounted) {
-        debugPrint('[AppUpdate] Navigator 就绪，弹窗');
         await AppUpdateManager.instance.showUpdateDialog(ctx, info);
         return;
       }

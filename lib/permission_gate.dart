@@ -1,8 +1,8 @@
 /// 权限门禁
 /// - 分 SDK 判断：33+ 用媒体权限，32 及以下用存储权限
-/// - ★ 授权后立即启动 Bootstrap（DCIM 扫描最快开始）
-/// - ★ _check() 加防重入锁，防止并发调用导致重复启动
-/// - ★ didChangeAppLifecycleState 延迟 300ms，避免和首次 _check 撞车
+/// - ★ 不启动 BootstrapManager（已在 main 里启动）
+/// - ★ _check() 加防重入锁
+/// - ★ didChangeAppLifecycleState 延迟 300ms
 /// - UI 风格：MD3 + 毛玻璃 + 真实视频封面背景 + 弹簧入场
 library;
 
@@ -42,9 +42,8 @@ class _PermissionGateState extends State<PermissionGate>
   bool _granted = false;
   bool _permanentlyDenied = false;
   bool _foregroundStarted = false;
-  bool _bootstrapStarted = false;
 
-  /// ★ 防重入锁：避免 _check 并发调用两次
+  /// ★ 防重入锁
   bool _checkRunning = false;
 
   @override
@@ -63,7 +62,6 @@ class _PermissionGateState extends State<PermissionGate>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed && !_granted) {
-      // ★ 延迟 300ms 再检查，避免跟正在进行中的 _check 撞车
       Future.delayed(const Duration(milliseconds: 300), () {
         if (mounted && !_granted) _check();
       });
@@ -71,7 +69,6 @@ class _PermissionGateState extends State<PermissionGate>
   }
 
   Future<void> _check() async {
-    // ★ 防重入：已经在跑就直接返回
     if (_checkRunning) {
       debugPrint('[PermissionGate] _check 已在运行，跳过');
       return;
@@ -90,14 +87,7 @@ class _PermissionGateState extends State<PermissionGate>
 
       if (!_granted) return;
 
-      // ① Bootstrap 只启动一次
-      if (!_bootstrapStarted) {
-        _bootstrapStarted = true;
-        debugPrint('[PermissionGate] ⚡ 启动 Bootstrap（仅一次）');
-        unawaited(BootstrapManager.init());
-      }
-
-      // ② 前台服务 + onGranted 只触发一次
+      // ★ 只启动前台服务（BootstrapManager 已在 main 里启动过）
       if (!_foregroundStarted) {
         _foregroundStarted = true;
         widget.onGranted?.call();
@@ -110,6 +100,7 @@ class _PermissionGateState extends State<PermissionGate>
 
   Future<void> _startForegroundInBackground() async {
     try {
+      // 等 Bootstrap 完成（main 里已启动，这里只是等它 ready）
       await BootstrapManager.ready;
       debugPrint('[PermissionGate] Bootstrap 就绪');
 
