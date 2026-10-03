@@ -44,27 +44,18 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       background: Container(color: AppTheme.surfaceColor),
       content: Scaffold(
         backgroundColor: AppTheme.surfaceColor,
-        // ★ 直接用 GlassAppBar 作为 Scaffold.appBar
-        appBar: _buildAppBar(),
-        // ★ 用 extendBodyBehindAppBar 让 body 顶到 AppBar 下面
-        extendBodyBehindAppBar: true,
-        body: Padding(
-          // 顶部留出 AppBar 高度（44 + 状态栏）
-          padding: EdgeInsets.only(
-            top: MediaQuery.of(context).padding.top + 56,
-          ),
-          child: PageView(
-            controller: _pageController,
-            onPageChanged: _onPageChanged,
-            physics: const PageScrollPhysics(),
-            children: [
-              // ── Page 0: 老API（网格）──
-              _buildVideoFeed(),
+        // ★ 已删除 appBar
+        body: PageView(
+          controller: _pageController,
+          onPageChanged: _onPageChanged,
+          physics: const PageScrollPhysics(),
+          children: [
+            // ── Page 0: 老API（网格）──
+            _buildVideoFeed(),
 
-              // ── Page 1: 新API（全屏视频）──
-              SwipeVideoScreen(active: _bottomTab == 1),
-            ],
-          ),
+            // ── Page 1: 新API（全屏视频）──
+            SwipeVideoScreen(active: _bottomTab == 1),
+          ],
         ),
         extendBody: true,
         bottomNavigationBar: AnimatedSlide(
@@ -87,100 +78,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     if (i == 0) {
       context.read<VideoProvider>().setSource(VideoSource.oldApi);
     }
-  }
-
-  // ── 顶部栏 ★ 用官方 GlassAppBar ───────────────────────────────────────
-  PreferredSizeWidget _buildAppBar() {
-    return GlassAppBar(
-      // ★ 独立玻璃层（不依赖外部 LiquidGlassLayer）
-      useOwnLayer: true,
-      // 透明底（玻璃由组件自己渲染）
-      backgroundColor: Colors.transparent,
-      // 高度 56（比默认 44 稍大，配合内容）
-      preferredSize: const Size.fromHeight(56),
-      // 左对齐
-      centerTitle: false,
-      // ★ 与底栏同款的液态玻璃参数
-      settings: const LiquidGlassSettings(
-        thickness:           30,
-        blur:                12,
-        refractiveIndex:     1.59,
-        saturation:          0.7,
-        lightIntensity:      0.6,
-        chromaticAberration: 0.3,
-        ambientStrength:     1.0,
-        lightAngle:          0.785,
-        glassColor:          Color(0x3DFFFFFF),
-      ),
-      // 整栏内容放在 title 里
-      title: Row(
-        children: [
-          // Logo + 名字
-          Container(
-            width: 32,
-            height: 32,
-            decoration: BoxDecoration(
-              color: AppTheme.accentColor,
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: const Icon(
-              Icons.movie,
-              color: Colors.black,
-              size: 18,
-            ),
-          ),
-          const SizedBox(width: 6),
-          const Text(
-            '玻璃哔哩',
-            style: TextStyle(
-              color: AppTheme.accentColor,
-              fontSize: 15,
-              fontWeight: FontWeight.bold,
-              letterSpacing: 0.5,
-            ),
-          ),
-          const Spacer(),
-          // Flask 标签
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-            decoration: BoxDecoration(
-              color: AppTheme.primaryColor.withValues(alpha: 0.15),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Text(
-              'Flask',
-              style: TextStyle(
-                color: AppTheme.primaryColor,
-                fontSize: 10,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ),
-          const SizedBox(width: 8),
-          // 刷新按钮
-          _iconBtn(Icons.refresh, _refresh),
-        ],
-      ),
-    );
-  }
-
-  Widget _iconBtn(IconData icon, VoidCallback onTap) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: 34,
-        height: 34,
-        decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.08),
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(
-            color: Colors.white.withValues(alpha: 0.10),
-            width: 0.5,
-          ),
-        ),
-        child: Icon(icon, size: 17, color: AppTheme.textSecondary),
-      ),
-    );
   }
 
   // ── 老API 网格 ───────────────────────────────────────────────────────────
@@ -227,7 +124,13 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           },
           child: GridView.builder(
             controller: _scrollController,
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            // ★ 顶部只留状态栏高度（避免被状态栏图标压住）
+            padding: EdgeInsets.fromLTRB(
+              10,
+              MediaQuery.of(context).padding.top + 8,
+              10,
+              8,
+            ),
             gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
               crossAxisCount: 2,
               crossAxisSpacing: 8,
@@ -326,12 +229,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   }
 
   void _refresh() {
-    if (_bottomTab == 0) {
-      context.read<VideoProvider>().fetchVideos();
-    } else {
-      _pageController.jumpToPage(0);
-      _pageController.jumpToPage(1);
-    }
+    context.read<VideoProvider>().fetchVideos();
   }
 
   Widget _buildLoadingState() {
