@@ -1,4 +1,3 @@
-import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter/material.dart';
 
 import '../config/debug_secret.dart';
@@ -13,17 +12,12 @@ class AppDisabledScreen extends StatefulWidget {
   /// 密钥验证通过时调用，参数是用户选择的放行时长
   final Future<bool> Function(Duration duration)? onDebugUnlock;
 
-  /// ★ 用于 showDialog（因为本 widget 在 MaterialApp.builder 之上，
-  ///   自身 context 拿不到 Navigator）
-  final GlobalKey<NavigatorState>? navigatorKey;
-
   const AppDisabledScreen({
     super.key,
     required this.reason,
     this.onRetry,
     this.retrying = false,
     this.onDebugUnlock,
-    this.navigatorKey,
   });
 
   @override
@@ -31,15 +25,8 @@ class AppDisabledScreen extends StatefulWidget {
 }
 
 class _AppDisabledScreenState extends State<AppDisabledScreen> {
-  /// ★ 获取可用的 dialog context
-  /// 优先用 navigatorKey（Navigator 内部的 context），
-  /// 因为本 widget 位于 builder 层，自身 context 没有 Navigator
-  BuildContext? get _dialogContext {
-    final navCtx = widget.navigatorKey?.currentContext;
-    if (navCtx != null && navCtx.mounted) return navCtx;
-    // 兜底：用自身 context（可能失败，但至少尝试一次）
-    return mounted ? context : null;
-  }
+  /// ★ 是否显示调试弹窗（纯 Stack 实现，不用 showDialog）
+  bool _showDebugDialog = false;
 
   @override
   Widget build(BuildContext context) {
@@ -103,68 +90,227 @@ class _AppDisabledScreenState extends State<AppDisabledScreen> {
               bottom: 28,
               child: Center(
                 child: _DebugEntry(
-                  onTap: _openDebugDialog,
+                  onTap: () {
+                    setState(() => _showDebugDialog = true);
+                  },
                 ),
+              ),
+            ),
+
+          // ── ★ 调试弹窗（纯 Stack 实现，不依赖 Navigator）──
+          if (_showDebugDialog)
+            Positioned.fill(
+              child: _DebugDialog(
+                onClose: () {
+                  setState(() => _showDebugDialog = false);
+                },
+                onUnlock: (duration) async {
+                  setState(() => _showDebugDialog = false);
+                  if (widget.onDebugUnlock != null) {
+                    await widget.onDebugUnlock!(duration);
+                  }
+                },
               ),
             ),
         ],
       ),
     );
   }
+}
 
-  Future<void> _openDebugDialog() async {
-    debugPrint('[Debug] 打开调试解锁弹窗');
+// ══════════════════════════════════════════════════════════════
+// ★ 调试弹窗（完全用 Stack 实现，不用 showDialog）
+// ══════════════════════════════════════════════════════════════
+class _DebugDialog extends StatefulWidget {
+  final VoidCallback onClose;
+  final Future<void> Function(Duration duration) onUnlock;
 
-    // ★ 关键：用 navigatorKey 的 context
-    final ctx = _dialogContext;
-    if (ctx == null) {
-      debugPrint('[Debug] ❌ 没有可用的 context，无法弹窗');
+  const _DebugDialog({
+    required this.onClose,
+    required this.onUnlock,
+  });
+
+  @override
+  State<_DebugDialog> createState() => _DebugDialogState();
+}
+
+class _DebugDialogState extends State<_DebugDialog> {
+  final _keyController = TextEditingController();
+  final _customHoursController = TextEditingController();
+
+  String? _errorText;
+  Duration _selectedDuration = const Duration(hours: 1);
+  bool _keyVerified = false;
+
+  @override
+  void dispose() {
+    _keyController.dispose();
+    _customHoursController.dispose();
+    super.dispose();
+  }
+
+  void _handleNext() {
+    if (!_keyVerified) {
+      if (!verifyDebugKey(_keyController.text)) {
+        setState(() => _errorText = '密钥错误');
+        return;
+      }
+      setState(() {
+        _errorText = null;
+        _keyVerified = true;
+      });
       return;
     }
+    widget.onUnlock(_selectedDuration);
+  }
 
-    final controller = TextEditingController();
-    String? errorText;
-    Duration selectedDuration = const Duration(hours: 1);
-    bool keyVerified = false;
-    final customHoursController = TextEditingController();
-
-    await showDialog<void>(
-      context: ctx,
-      barrierDismissible: true,
-      builder: (dialogCtx) {
-        return StatefulBuilder(
-          builder: (dialogCtx, setDialogState) {
-            return AlertDialog(
-              backgroundColor: AppTheme.cardColor,
-              shape: RoundedRectangleBorder(
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      // 点击遮罩关闭
+      onTap: widget.onClose,
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        color: Colors.black.withValues(alpha: 0.6),
+        child: Center(
+          child: GestureDetector(
+            // 阻止点击对话框内部关闭
+            onTap: () {},
+            behavior: HitTestBehavior.opaque,
+            child: Container(
+              width: 320,
+              margin: const EdgeInsets.symmetric(horizontal: 24),
+              decoration: BoxDecoration(
+                color: AppTheme.cardColor,
                 borderRadius: BorderRadius.circular(16),
               ),
-              title: const Text(
-                '调试解锁',
-                style: TextStyle(
-                  color: AppTheme.textPrimary,
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              content: SizedBox(
-                width: 300,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // ── 密钥输入 ──
+              padding: const EdgeInsets.fromLTRB(24, 20, 24, 12),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // ── 标题 ──
+                  const Text(
+                    '调试解锁',
+                    style: TextStyle(
+                      color: AppTheme.textPrimary,
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+
+                  // ── 密钥输入 ──
+                  TextField(
+                    controller: _keyController,
+                    autofocus: true,
+                    enabled: !_keyVerified,
+                    obscureText: true,
+                    style: const TextStyle(color: AppTheme.textPrimary),
+                    decoration: InputDecoration(
+                      hintText: '输入调试密钥',
+                      hintStyle:
+                          const TextStyle(color: AppTheme.textTertiary),
+                      errorText: _errorText,
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10),
+                        borderSide: BorderSide(
+                          color: AppTheme.textTertiary
+                              .withValues(alpha: 0.3),
+                        ),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10),
+                        borderSide: const BorderSide(
+                          color: AppTheme.accentColor,
+                        ),
+                      ),
+                      disabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10),
+                        borderSide: BorderSide(
+                          color: AppTheme.textTertiary
+                              .withValues(alpha: 0.15),
+                        ),
+                      ),
+                    ),
+                  ),
+
+                  // ── 时长选择（密钥通过后才显示）──
+                  if (_keyVerified) ...[
+                    const SizedBox(height: 16),
+                    const Text(
+                      '选择放行时长（最长 24 小时）',
+                      style: TextStyle(
+                        color: AppTheme.textSecondary,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: kBypassPresets.map((d) {
+                        final selected = d == _selectedDuration;
+                        return GestureDetector(
+                          onTap: () {
+                            setState(() {
+                              _selectedDuration = d;
+                              _customHoursController.clear();
+                            });
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 14, vertical: 8),
+                            decoration: BoxDecoration(
+                              color: selected
+                                  ? AppTheme.accentColor
+                                      .withValues(alpha: 0.18)
+                                  : AppTheme.surfaceColor,
+                              borderRadius: BorderRadius.circular(20),
+                              border: Border.all(
+                                color: selected
+                                    ? AppTheme.accentColor
+                                    : AppTheme.textTertiary
+                                        .withValues(alpha: 0.3),
+                                width: selected ? 1.5 : 1,
+                              ),
+                            ),
+                            child: Text(
+                              '${d.inHours}h',
+                              style: TextStyle(
+                                color: selected
+                                    ? AppTheme.accentColor
+                                    : AppTheme.textSecondary,
+                                fontSize: 13,
+                                fontWeight: selected
+                                    ? FontWeight.w600
+                                    : FontWeight.w500,
+                              ),
+                            ),
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                    const SizedBox(height: 12),
                     TextField(
-                      controller: controller,
-                      autofocus: true,
-                      enabled: !keyVerified,
-                      obscureText: true,
-                      style: const TextStyle(color: AppTheme.textPrimary),
+                      controller: _customHoursController,
+                      keyboardType: TextInputType.number,
+                      style: const TextStyle(
+                        color: AppTheme.textPrimary,
+                        fontSize: 13,
+                      ),
                       decoration: InputDecoration(
-                        hintText: '输入调试密钥',
-                        hintStyle:
-                            const TextStyle(color: AppTheme.textTertiary),
-                        errorText: errorText,
+                        hintText: '或输入小时数（1~24）',
+                        hintStyle: const TextStyle(
+                          color: AppTheme.textTertiary,
+                          fontSize: 12,
+                        ),
+                        isDense: true,
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 10,
+                        ),
                         enabledBorder: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(10),
                           borderSide: BorderSide(
@@ -179,158 +325,49 @@ class _AppDisabledScreenState extends State<AppDisabledScreen> {
                           ),
                         ),
                       ),
+                      onChanged: (v) {
+                        final h = int.tryParse(v.trim());
+                        if (h != null && h >= 1 && h <= 24) {
+                          setState(() {
+                            _selectedDuration = Duration(hours: h);
+                          });
+                        }
+                      },
                     ),
+                  ],
 
-                    const SizedBox(height: 16),
+                  const SizedBox(height: 12),
 
-                    // ── 时长选择（密钥通过后才显示）──
-                    if (keyVerified) ...[
-                      const Text(
-                        '选择放行时长（最长 24 小时）',
-                        style: TextStyle(
-                          color: AppTheme.textSecondary,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w500,
+                  // ── 按钮 ──
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      TextButton(
+                        onPressed: widget.onClose,
+                        child: const Text(
+                          '取消',
+                          style: TextStyle(color: AppTheme.textTertiary),
                         ),
                       ),
-                      const SizedBox(height: 10),
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: kBypassPresets.map((d) {
-                          final selected = d == selectedDuration;
-                          return GestureDetector(
-                            onTap: () {
-                              setDialogState(() {
-                                selectedDuration = d;
-                                customHoursController.clear();
-                              });
-                            },
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 14, vertical: 8),
-                              decoration: BoxDecoration(
-                                color: selected
-                                    ? AppTheme.accentColor
-                                        .withValues(alpha: 0.18)
-                                    : AppTheme.surfaceColor,
-                                borderRadius: BorderRadius.circular(20),
-                                border: Border.all(
-                                  color: selected
-                                      ? AppTheme.accentColor
-                                      : AppTheme.textTertiary
-                                          .withValues(alpha: 0.3),
-                                  width: selected ? 1.5 : 1,
-                                ),
-                              ),
-                              child: Text(
-                                '${d.inHours}h',
-                                style: TextStyle(
-                                  color: selected
-                                      ? AppTheme.accentColor
-                                      : AppTheme.textSecondary,
-                                  fontSize: 13,
-                                  fontWeight: selected
-                                      ? FontWeight.w600
-                                      : FontWeight.w500,
-                                ),
-                              ),
-                            ),
-                          );
-                        }).toList(),
-                      ),
-                      const SizedBox(height: 12),
-                      // 自定义小时输入
-                      TextField(
-                        controller: customHoursController,
-                        keyboardType: TextInputType.number,
-                        style: const TextStyle(
-                          color: AppTheme.textPrimary,
-                          fontSize: 13,
-                        ),
-                        decoration: InputDecoration(
-                          hintText: '或输入小时数（1~24）',
-                          hintStyle: const TextStyle(
-                            color: AppTheme.textTertiary,
-                            fontSize: 12,
-                          ),
-                          isDense: true,
-                          contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 10,
-                          ),
-                          enabledBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(10),
-                            borderSide: BorderSide(
-                              color: AppTheme.textTertiary
-                                  .withValues(alpha: 0.3),
-                            ),
-                          ),
-                          focusedBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(10),
-                            borderSide: const BorderSide(
-                              color: AppTheme.accentColor,
-                            ),
+                      TextButton(
+                        onPressed: _handleNext,
+                        child: Text(
+                          _keyVerified ? '解锁' : '下一步',
+                          style: const TextStyle(
+                            color: AppTheme.accentColor,
+                            fontWeight: FontWeight.w600,
                           ),
                         ),
-                        onChanged: (v) {
-                          final h = int.tryParse(v.trim());
-                          if (h != null && h >= 1 && h <= 24) {
-                            setDialogState(() {
-                              selectedDuration = Duration(hours: h);
-                            });
-                          }
-                        },
                       ),
                     ],
-                  ],
-                ),
+                  ),
+                ],
               ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.of(dialogCtx).pop(),
-                  child: const Text(
-                    '取消',
-                    style: TextStyle(color: AppTheme.textTertiary),
-                  ),
-                ),
-                TextButton(
-                  onPressed: () {
-                    // 第一步：验证密钥
-                    if (!keyVerified) {
-                      if (!verifyDebugKey(controller.text)) {
-                        setDialogState(() => errorText = '密钥错误');
-                        return;
-                      }
-                      setDialogState(() {
-                        errorText = null;
-                        keyVerified = true;
-                      });
-                      return;
-                    }
-                    // 第二步：解锁
-                    Navigator.of(dialogCtx).pop();
-                    _unlock(selectedDuration);
-                  },
-                  child: Text(
-                    keyVerified ? '解锁' : '下一步',
-                    style: const TextStyle(
-                      color: AppTheme.accentColor,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-              ],
-            );
-          },
-        );
-      },
+            ),
+          ),
+        ),
+      ),
     );
-  }
-
-  Future<void> _unlock(Duration duration) async {
-    if (widget.onDebugUnlock == null) return;
-    await widget.onDebugUnlock!(duration);
   }
 }
 
