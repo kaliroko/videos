@@ -1,8 +1,6 @@
 /// 首页 — 液态玻璃主题 + 统一深灰色 MD3 背景
 library;
 
-import 'dart:ui' show ImageFilter;
-
 import 'package:flutter/material.dart';
 import 'package:liquid_glass_widgets/liquid_glass_widgets.dart';
 import 'package:provider/provider.dart';
@@ -44,9 +42,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     final topInset = MediaQuery.of(context).padding.top;
 
     return LiquidGlassScope.stack(
+      // 网格模式背景为深灰；视频页自己会盖一层黑色
       background: Container(color: AppTheme.surfaceColor),
       content: Scaffold(
         backgroundColor: AppTheme.surfaceColor,
+        // ★ 水平 PageView —— 左右滑切换两个 tab
         body: PageView(
           controller: _pageController,
           onPageChanged: _onPageChanged,
@@ -72,6 +72,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           child: _buildBottomNav(),
         ),
         floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
+        // ★ FAB 只在老API页显示（视频页不需要刷新按钮）
         floatingActionButton: _bottomTab == 0 ? _buildFab() : null,
       ),
     );
@@ -82,83 +83,89 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     setState(() => _bottomTab = i);
     context.read<NavBarVisibility>().show();
 
+    // ★ 索引 0 = 老API → 需要 Provider 参与
     if (i == 0) {
       context.read<VideoProvider>().setSource(VideoSource.oldApi);
     }
   }
 
-  // ── 顶部栏 ★ 与底部液态玻璃参数一致 ──────────────────────────────────
+  // ── 顶部栏 ★ 真·液态玻璃（与底栏 GlassBottomBar 同款参数）────────────
   Widget _buildAppBar({required double topInset}) {
     return RepaintBoundary(
-      child: ClipRRect(
-        borderRadius: const BorderRadius.vertical(
-          bottom: Radius.circular(20),
+      child: Padding(
+        // 悬浮玻璃卡片：左右留边距，顶部避开状态栏
+        padding: EdgeInsets.only(
+          top: topInset + 6,
+          left: 10,
+          right: 10,
         ),
-        child: BackdropFilter(
-          // ★ 模糊强度 12
-          filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
-          child: Container(
-            padding: EdgeInsets.fromLTRB(14, topInset + 10, 14, 12),
-            decoration: BoxDecoration(
-              // 与底栏 glassColor: 0x3DFFFFFF 一致
-              color: const Color(0x3DFFFFFF),
-              border: Border(
-                bottom: BorderSide(
-                  color: Colors.white.withValues(alpha: 0.12),
-                  width: 0.5,
+        child: GlassContainer(
+          // ★ 独立玻璃层（不在 LiquidGlassLayer 内时必填）
+          useOwnLayer: true,
+          // ★ 与底栏 GlassBottomBar 完全相同的参数
+          settings: const LiquidGlassSettings(
+            thickness:           26,
+            blur:                3,
+            refractiveIndex:     1.55,
+            saturation:          0.7,
+            lightIntensity:      0.55,
+            chromaticAberration: 0.05,
+            ambientStrength:     0.9,
+            lightAngle:          0.785,
+            glassColor:          Color(0x3DFFFFFF),
+          ),
+          // ★ 四周圆角（用 shape 参数）
+          shape: const LiquidRoundedSuperellipse(borderRadius: 20),
+          padding: const EdgeInsets.fromLTRB(14, 10, 14, 12),
+          child: Row(
+            children: [
+              Row(
+                children: [
+                  Container(
+                    width: 32,
+                    height: 32,
+                    decoration: BoxDecoration(
+                      color: AppTheme.accentColor,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Icon(
+                      Icons.movie,
+                      color: Colors.black,
+                      size: 18,
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  const Text(
+                    '玻璃哔哩',
+                    style: TextStyle(
+                      color: AppTheme.accentColor,
+                      fontSize: 15,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 0.5,
+                    ),
+                  ),
+                ],
+              ),
+              const Spacer(),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: AppTheme.primaryColor.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Text(
+                  'Flask',
+                  style: TextStyle(
+                    color: AppTheme.primaryColor,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ),
-            ),
-            child: Row(
-              children: [
-                Row(
-                  children: [
-                    Container(
-                      width: 32,
-                      height: 32,
-                      decoration: BoxDecoration(
-                        color: AppTheme.accentColor,
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: const Icon(
-                        Icons.movie,
-                        color: Colors.black,
-                        size: 18,
-                      ),
-                    ),
-                    const SizedBox(width: 6),
-                    const Text(
-                      'Github Glass',
-                      style: TextStyle(
-                        color: AppTheme.accentColor,
-                        fontSize: 15,
-                        fontWeight: FontWeight.bold,
-                        letterSpacing: 0.5,
-                      ),
-                    ),
-                  ],
-                ),
-                const Spacer(),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 8, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: AppTheme.primaryColor.withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Text(
-                    'Flask',
-                    style: TextStyle(
-                      color: AppTheme.primaryColor,
-                      fontSize: 10,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                _iconBtn(Icons.refresh, _refresh),
-              ],
-            ),
+              const SizedBox(width: 8),
+              _iconBtn(Icons.refresh, _refresh),
+            ],
           ),
         ),
       ),
