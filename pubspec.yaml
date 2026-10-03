@@ -39,13 +39,14 @@ dependencies:
 
   # 跳转应用设置页
   app_settings: ^6.0.1
-
+  shared_preferences: ^2.2.3    # ← 如果没有就加上
   # 用户统计
   supabase_flutter: ^2.8.0
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^5.0.0
+  
 
 flutter:
   uses-material-design: true
