@@ -72,7 +72,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           child: _buildBottomNav(),
         ),
         floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
-        floatingActionButton: _buildFab(),
+        // ★ FAB 只在老API页显示（视频页不需要刷新按钮）
+        floatingActionButton: _bottomTab == 0 ? _buildFab() : null,
       ),
     );
   }
@@ -88,53 +89,55 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     }
   }
 
-  // ── 顶部栏（仅老API页显示）──────────────────────────────────────────────
+  // ── 顶部栏 ★ 优化 4：加 RepaintBoundary ─────────────────────────────────
   Widget _buildAppBar({required double topInset}) {
-    return Padding(
-      padding: EdgeInsets.fromLTRB(14, topInset + 10, 14, 8),
-      child: Row(
-        children: [
-          Row(
-            children: [
-              Container(
-                width: 32, height: 32,
-                decoration: BoxDecoration(
-                  color: AppTheme.accentColor,
-                  borderRadius: BorderRadius.circular(8),
+    return RepaintBoundary(   // ★ 优化 4
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(14, topInset + 10, 14, 8),
+        child: Row(
+          children: [
+            Row(
+              children: [
+                Container(
+                  width: 32, height: 32,
+                  decoration: BoxDecoration(
+                    color: AppTheme.accentColor,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Icon(Icons.movie, color: Colors.black, size: 18),
                 ),
-                child: const Icon(Icons.movie, color: Colors.black, size: 18),
+                const SizedBox(width: 6),
+                const Text(
+                  '玻璃哔哩',
+                  style: TextStyle(
+                    color: AppTheme.accentColor,
+                    fontSize: 15,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 0.5,
+                  ),
+                ),
+              ],
+            ),
+            const Spacer(),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: AppTheme.primaryColor.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(10),
               ),
-              const SizedBox(width: 6),
-              const Text(
-                '玻璃哔哩',
+              child: Text(
+                'Flask',
                 style: TextStyle(
-                  color: AppTheme.accentColor,
-                  fontSize: 15,
-                  fontWeight: FontWeight.bold,
-                  letterSpacing: 0.5,
+                  color: AppTheme.primaryColor,
+                  fontSize: 10,
+                  fontWeight: FontWeight.w600,
                 ),
               ),
-            ],
-          ),
-          const Spacer(),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-            decoration: BoxDecoration(
-              color: AppTheme.primaryColor.withValues(alpha: 0.15),
-              borderRadius: BorderRadius.circular(10),
             ),
-            child: Text(
-              'Flask',
-              style: TextStyle(
-                color: AppTheme.primaryColor,
-                fontSize: 10,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ),
-          const SizedBox(width: 8),
-          _iconBtn(Icons.refresh, _refresh),
-        ],
+            const SizedBox(width: 8),
+            _iconBtn(Icons.refresh, _refresh),
+          ],
+        ),
       ),
     );
   }
@@ -214,9 +217,13 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                   ),
                 );
               }
-              return VideoCard(
-                video: provider.videos[index],
-                onTap: () => _playVideo(context, provider.videos[index]),
+              // ★ 优化 3：每个卡片独立 RepaintBoundary
+              //   滚动时一个卡片变化不影响其它卡片
+              return RepaintBoundary(
+                child: VideoCard(
+                  video: provider.videos[index],
+                  onTap: () => _playVideo(context, provider.videos[index]),
+                ),
               );
             },
           ),
@@ -232,63 +239,67 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     );
   }
 
-  // ── 底部导航（液态玻璃）──────────────────────────────────────────────────
+  // ── 底部导航 ★ 优化 4：加 RepaintBoundary + 玻璃参数减负 ────────────────
   Widget _buildBottomNav() {
     final bottomInset = MediaQuery.of(context).padding.bottom;
-    return Padding(
-      padding: EdgeInsets.fromLTRB(16, 0, 16, 16 + bottomInset),
-      child: GlassBottomBar(
-        selectedIndex: _bottomTab,
-        onTabSelected: (i) {
-          // ★ 点 tab → 动画翻页；_onPageChanged 会同步状态
-          _pageController.animateToPage(
-            i,
-            duration: const Duration(milliseconds: 280),
-            curve: Curves.easeOutCubic,
-          );
-        },
-        tabs: [
-          // ★ 第一个：老API（默认）
-          GlassBottomBarTab(
-            label: '老API',
-            icon: Icons.cloud,
-            selectedIcon: Icons.cloud_outlined,
-            glowColor: AppTheme.primaryColor,
+    return RepaintBoundary(   // ★ 优化 4
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(16, 0, 16, 16 + bottomInset),
+        child: GlassBottomBar(
+          selectedIndex: _bottomTab,
+          onTabSelected: (i) {
+            // ★ 点 tab → 动画翻页；_onPageChanged 会同步状态
+            _pageController.animateToPage(
+              i,
+              duration: const Duration(milliseconds: 280),
+              curve: Curves.easeOutCubic,
+            );
+          },
+          tabs: [
+            // ★ 第一个：老API（默认）
+            GlassBottomBarTab(
+              label: '老API',
+              icon: Icons.cloud,
+              selectedIcon: Icons.cloud_outlined,
+              glowColor: AppTheme.primaryColor,
+            ),
+            // ★ 第二个：新API
+            GlassBottomBarTab(
+              label: '新API',
+              icon: Icons.auto_awesome,
+              selectedIcon: Icons.auto_awesome_outlined,
+              glowColor: AppTheme.accentColor,
+            ),
+          ],
+          barHeight: 60,
+          iconSize: 24,
+          selectedIconColor: AppTheme.accentColor,
+          unselectedIconColor: AppTheme.textTertiary,
+          // ★ 性能减负：保留折射（thickness / refractiveIndex），
+          //   只削减性能大头（blur / chromaticAberration）
+          glassSettings: const LiquidGlassSettings(
+            thickness:           26,     // 30 → 26（保留玻璃厚度感）
+            blur:                3,      // 6 → 3（★ 性能大头）
+            refractiveIndex:     1.55,   // 1.59 → 1.55（★ 保留折射）
+            saturation:          0.7,
+            lightIntensity:      0.55,
+            chromaticAberration: 0.05,   // 0.3 → 0.05（★ 性能大头）
+            ambientStrength:     0.9,
+            lightAngle:          0.785,
+            glassColor:          Color(0x3DFFFFFF),
           ),
-          // ★ 第二个：新API
-          GlassBottomBarTab(
-            label: '新API',
-            icon: Icons.auto_awesome,
-            selectedIcon: Icons.auto_awesome_outlined,
-            glowColor: AppTheme.accentColor,
-          ),
-        ],
-        barHeight: 60,
-        iconSize: 24,
-        selectedIconColor: AppTheme.accentColor,
-        unselectedIconColor: AppTheme.textTertiary,
-        glassSettings: const LiquidGlassSettings(
-          thickness:         30,
-          blur:              6,
-          refractiveIndex:   1.59,
-          saturation:        0.7,
-          lightIntensity:    0.6,
-          chromaticAberration: 0.3,
-          ambientStrength:   1.0,
-          lightAngle:        0.785,
-          glassColor:        Color(0x3DFFFFFF),
         ),
       ),
     );
   }
 
-  // ── FAB（液态玻璃）─────────────────────────────────────────────────────────
+  // ── FAB（液态玻璃，性能减负）───────────────────────────────────────────
   Widget _buildFab() {
     return GlassIconButton(
-      quality:       GlassQuality.standard,
+      quality:       GlassQuality.minimal,   // ★ standard → minimal
       icon:          Icons.refresh,
       size:          46,
-      useOwnLayer:   true,
+      useOwnLayer:   false,                  // ★ true → false
       onPressed:     _refresh,
       glowColor:     AppTheme.accentColor,
     );

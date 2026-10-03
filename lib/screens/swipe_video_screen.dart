@@ -1,9 +1,11 @@
 /// 上下滑动视频播放器（仿抖音上下滑动）
 /// - 当前视频秒开
 /// - 后台预加载后 4 个
-/// - ★ 前面保留 15 个播放器（向上滑回不重新请求）
-/// - ★ 记录播放进度，被释放后重新初始化会 seek 回去
-/// - ★ 两级释放：超范围 + 超上限，其他永远保留
+/// - 前面保留 15 个播放器（向上滑回不重新请求）
+/// - 记录播放进度，被释放后重新初始化会 seek 回去
+/// - 两级释放：超范围 + 超上限
+/// - ★ 优化 1：竖屏模糊 sigma 15 / 横屏 sigma 8
+/// - ★ 优化 2：每个视频页加 RepaintBoundary
 library;
 
 import 'dart:async';
@@ -400,21 +402,24 @@ class _SwipeVideoScreenState extends State<SwipeVideoScreen> {
           final player = _players[index];
           final ready = player != null && player.value.isInitialized;
 
-          return GestureDetector(
-            onTap: () => _onTap(index),
-            child: SizedBox.expand(
-              child: ready
-                  ? _FitVideo(controller: player)
-                  : const Center(
-                      child: SizedBox(
-                        width: 40,
-                        height: 40,
-                        child: CircularProgressIndicator(
-                          color: Color(0xFFFB7299),
-                          strokeWidth: 2,
+          // ★ 优化 2：每个视频页加 RepaintBoundary
+          return RepaintBoundary(
+            child: GestureDetector(
+              onTap: () => _onTap(index),
+              child: SizedBox.expand(
+                child: ready
+                    ? _FitVideo(controller: player)
+                    : const Center(
+                        child: SizedBox(
+                          width: 40,
+                          height: 40,
+                          child: CircularProgressIndicator(
+                            color: Color(0xFFFB7299),
+                            strokeWidth: 2,
+                          ),
                         ),
                       ),
-                    ),
+              ),
             ),
           );
         },
@@ -424,13 +429,21 @@ class _SwipeVideoScreenState extends State<SwipeVideoScreen> {
 }
 
 // ══════════════════════════════════════════════════════════════
-// 视频显示：原比例前景（轻微放大）+ 左右模糊填充
+// 视频显示：原比例前景（轻微放大）+ 四周模糊填充
+// - 竖屏视频 → 左右黑边模糊（sigma 15）
+// - 横屏视频 → 上下黑边模糊（sigma 8，更低省性能）
 // ══════════════════════════════════════════════════════════════
 class _FitVideo extends StatelessWidget {
   final VideoPlayerController controller;
   const _FitVideo({required this.controller});
 
   static const double _kForegroundScale = 1.06;
+
+  /// 竖屏视频模糊强度
+  static const double _kBlurPortrait = 15.0;
+
+  /// 横屏视频模糊强度（更低，减少 GPU 负担）
+  static const double _kBlurLandscape = 8.0;
 
   @override
   Widget build(BuildContext context) {
@@ -440,7 +453,10 @@ class _FitVideo extends StatelessWidget {
     }
 
     final videoAR = size.width / size.height;
+    final isPortrait = videoAR < 1.0;
+    final blurSigma = isPortrait ? _kBlurPortrait : _kBlurLandscape;
 
+    // 前景：原比例 + 轻微放大裁边
     final Widget foreground = ClipRect(
       child: Transform.scale(
         scale: _kForegroundScale,
@@ -451,42 +467,32 @@ class _FitVideo extends StatelessWidget {
       ),
     );
 
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final screenAR = constraints.maxWidth / constraints.maxHeight;
-        final hasSideBlank = videoAR < screenAR;
-
-        if (!hasSideBlank) {
-          return ColoredBox(
-            color: Colors.black,
-            child: Center(child: foreground),
-          );
-        }
-
-        return Stack(
-          fit: StackFit.expand,
-          children: [
-            ClipRect(
-              child: ImageFiltered(
-                imageFilter: ImageFilter.blur(
-                  sigmaX: 30,
-                  sigmaY: 30,
-                  tileMode: TileMode.clamp,
-                ),
-                child: FittedBox(
-                  fit: BoxFit.cover,
-                  child: SizedBox(
-                    width: size.width,
-                    height: size.height,
-                    child: VideoPlayer(controller),
-                  ),
-                ),
+    // 统一：四周都模糊背景（横屏 sigma 更低）
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        // ① 底层：视频模糊铺满全屏
+        ClipRect(
+          child: ImageFiltered(
+            imageFilter: ImageFilter.blur(
+              sigmaX: blurSigma,
+              sigmaY: blurSigma,
+              tileMode: TileMode.clamp,
+            ),
+            child: FittedBox(
+              fit: BoxFit.cover,
+              child: SizedBox(
+                width: size.width,
+                height: size.height,
+                child: VideoPlayer(controller),
               ),
             ),
-            Center(child: foreground),
-          ],
-        );
-      },
+          ),
+        ),
+
+        // ② 前景：原比例居中
+        Center(child: foreground),
+      ],
     );
   }
 }
