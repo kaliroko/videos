@@ -43,6 +43,9 @@ class _SwipeVideoScreenState extends State<SwipeVideoScreen> {
   bool _fetching = false;
   String? _error;
 
+  /// ★ 补充声明：URL 缓存补齐中标志（上次重构时漏了）
+  bool _fetchingNext = false;
+
   bool _autoAdvancing = false;
   bool _pendingAutoAdvance = false;
   int? _pendingAutoAdvanceForPage;
@@ -122,10 +125,7 @@ class _SwipeVideoScreenState extends State<SwipeVideoScreen> {
     await _loadNext();
     if (!mounted || _error != null) return;
 
-    // URL 缓存（慢速补齐）
     unawaited(_ensureUrlBuffer());
-
-    // 首屏也预加载后 3 个
     unawaited(_preloadAhead(0));
   }
 
@@ -238,9 +238,10 @@ class _SwipeVideoScreenState extends State<SwipeVideoScreen> {
         }
       }
 
-      final listener = () => _onPlayerTick(index, player);
-      _listeners[index] = listener;
-      player.addListener(listener);
+      // ★ 用函数声明替代变量赋值（消除 prefer_function_declarations_over_variables）
+      void onTick() => _onPlayerTick(index, player);
+      _listeners[index] = onTick;
+      player.addListener(onTick);
 
       if (index == _currentPage && widget.active) {
         player.play();
@@ -353,10 +354,8 @@ class _SwipeVideoScreenState extends State<SwipeVideoScreen> {
       }
     });
 
-    // 立即初始化当前页（秒开，高优先级）
     unawaited(_ensurePlayer(index));
 
-    // ★ 只在用户往下翻时预加载；往上翻（回看）跳过
     if (!isBackward) {
       unawaited(_preloadAhead(index));
     } else {
@@ -385,20 +384,17 @@ class _SwipeVideoScreenState extends State<SwipeVideoScreen> {
     unawaited(_ensureUrlBuffer());
   }
 
-  // ── ★ 预加载后 3 个（低并发 + 页码校验）─────────────────────────
+  // ── ★ 预加载后 3 个 ──────────────────────────────────────────────
   Future<void> _preloadAhead(int snapshotPage) async {
-    // 延迟启动，等当前视频稳定
     await Future.delayed(_kPreloadStartDelay);
     if (!mounted) return;
 
-    // 用户已翻走 → 放弃
     if (_currentPage != snapshotPage) {
       debugPrint('[SwipeVideo] 预加载延迟结束，用户已翻走，放弃');
       return;
     }
 
     for (int offset = 1; offset <= _kPreloadAheadCount; offset++) {
-      // ★ 每轮都检查用户是否已翻走
       if (!mounted) return;
       if (_currentPage != snapshotPage) {
         debugPrint('[SwipeVideo] 预加载中途用户翻走，停止');
@@ -412,11 +408,11 @@ class _SwipeVideoScreenState extends State<SwipeVideoScreen> {
       await _ensurePlayer(idx);
       if (!mounted) return;
 
-      // 每次预加载之间间隔 1s
       await Future.delayed(_kPreloadGap);
     }
 
-    debugPrint('[SwipeVideo] 预加载 $snapshotPage 完成（共 ${_kPreloadAheadCount} 个）');
+    // ★ 修复 unnecessary_brace_in_string_interps
+    debugPrint('[SwipeVideo] 预加载 $snapshotPage 完成（共 $_kPreloadAheadCount 个）');
   }
 
   // ── 点击暂停/播放 ─────────────────────────────────────────────────
