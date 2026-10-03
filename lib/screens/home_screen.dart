@@ -296,7 +296,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   // ── FAB（液态玻璃，性能减负）───────────────────────────────────────────
   Widget _buildFab() {
     return GlassIconButton(
-      quality:       GlassQuality.minimal,   // ★ standard → minimal
+      quality:       GlassQuality.standard,   // ★ standard → standard
       icon:          Icons.refresh,
       size:          46,
       useOwnLayer:   false,                  // ★ true → false
