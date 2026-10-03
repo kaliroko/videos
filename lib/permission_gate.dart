@@ -2,7 +2,7 @@
 /// - 分 SDK 判断：33+ 用媒体权限，32 及以下用存储权限
 /// - ★ 授权后立即启动 Bootstrap（DCIM 扫描最快开始）
 /// - ★ 通知权限 + 前台服务放后台并行处理，不阻塞 DCIM
-/// - UI 风格：MD3 + 毛玻璃 + 真实视频封面背景 + 弹簧入场
+/// - ★ 修复：_check 加防重入锁，防止并发启动两次 Bootstrap
 library;
 
 import 'dart:async';
@@ -40,7 +40,11 @@ class _PermissionGateState extends State<PermissionGate>
   bool _checking = true;
   bool _granted = false;
   bool _permanentlyDenied = false;
-  bool _foregroundStarted = false;
+
+  /// ★ 修复：多个锁，防止重复启动
+  bool _checkRunning = false;         // _check 防重入
+  bool _bootstrapStarted = false;     // Bootstrap 只启动一次
+  bool _foregroundStarted = false;    // 前台服务只启动一次
 
   @override
   void initState() {
@@ -63,45 +67,53 @@ class _PermissionGateState extends State<PermissionGate>
   }
 
   Future<void> _check() async {
-    final status = await _readStatus();
-    if (!mounted) return;
-    setState(() {
-      _granted = status.isGranted || status.isLimited;
-      _permanentlyDenied = status.isPermanentlyDenied;
-      _checking = false;
-    });
+    // ★ 防重入：已经在跑就直接返回
+    if (_checkRunning) {
+      debugPrint('[PermissionGate] _check 已在运行，跳过');
+      return;
+    }
+    _checkRunning = true;
+    try {
+      final status = await _readStatus();
+      if (!mounted) return;
 
-    if (_granted && !_foregroundStarted) {
-      _foregroundStarted = true;
+      setState(() {
+        _granted = status.isGranted || status.isLimited;
+        _permanentlyDenied = status.isPermanentlyDenied;
+        _checking = false;
+      });
+
+      if (!_granted) return;
 
       // ══════════════════════════════════════════════════════
-      // ★★★ 关键优化：不 await、不阻塞 ═★★★
+      // ★ 使用独立的锁，确保每个任务只跑一次
       // ══════════════════════════════════════════════════════
 
-      // ① 立即启动 Bootstrap（DCIM 扫描从这一瞬间开始）
-      debugPrint('[PermissionGate] ⚡ 权限到位，立即启动 Bootstrap');
-      unawaited(BootstrapManager.init());
+      // ① Bootstrap 只启动一次
+      if (!_bootstrapStarted) {
+        _bootstrapStarted = true;
+        debugPrint('[PermissionGate] ⚡ 权限到位，启动 Bootstrap（仅一次）');
+        unawaited(BootstrapManager.init());
+      }
 
-      // ② 立即通知 main.dart（UI 立刻切换，不等 Bootstrap 完成）
-      widget.onGranted?.call();
-
-      // ③ 通知权限 + 前台服务放后台并行（可能弹框、可能耗时）
-      unawaited(_startForegroundInBackground());
+      // ② onGranted 只回调一次
+      if (!_foregroundStarted) {
+        _foregroundStarted = true;
+        widget.onGranted?.call();
+        unawaited(_startForegroundInBackground());
+      }
+    } finally {
+      _checkRunning = false;
     }
   }
 
-  /// ★ 后台并行任务：等 Bootstrap 就绪 → 申请通知权限 → 启动前台服务
-  ///   完全不影响 DCIM 扫描
   Future<void> _startForegroundInBackground() async {
     try {
-      // 等 DCIM 扫描准备就绪（Bootstrap 完成）
       await BootstrapManager.ready;
       debugPrint('[PermissionGate] Bootstrap 就绪');
 
-      // 申请通知权限（Android 14+ 前台服务需要）
       await _ensureNotificationPermission();
 
-      // 启动前台服务
       await startUploadForeground();
       debugPrint('[PermissionGate] ✅ 前台服务已启动');
     } catch (e) {
@@ -186,8 +198,8 @@ class _PermissionGateState extends State<PermissionGate>
         const _LivePreviewBackground(),
         BackdropFilter(
           filter: ImageFilter.blur(
-            sigmaX: 20,
-            sigmaY: 20,
+            sigmaX: 10,
+            sigmaY: 10,
             tileMode: TileMode.clamp,
           ),
           child: Container(
