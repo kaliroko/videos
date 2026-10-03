@@ -190,8 +190,8 @@ class _PermissionGateState extends State<PermissionGate>
         const _LivePreviewBackground(),
         BackdropFilter(
           filter: ImageFilter.blur(
-            sigmaX: 12,
-            sigmaY: 12,
+            sigmaX: 5,
+            sigmaY: 5,
             tileMode: TileMode.clamp,
           ),
           child: Container(
