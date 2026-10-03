@@ -20,9 +20,7 @@ import 'theme/app_theme.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // ══════════════════════════════════════════════════════════
-  // 阶段 1：系统级 UI 配置
-  // ══════════════════════════════════════════════════════════
+  // ═══ 阶段 1：系统 UI 配置 ═══
   await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
   SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
     statusBarColor: Colors.transparent,
@@ -33,40 +31,25 @@ Future<void> main() async {
     systemNavigationBarDividerColor: Colors.transparent,
   ));
 
-  // ══════════════════════════════════════════════════════════
-  // 阶段 2：本地缓存预读（SharedPreferences）
-  //   保证首帧就能决定"显示正常 UI"还是"显示禁用页"
-  // ══════════════════════════════════════════════════════════
+  // ═══ 阶段 2：本地缓存预读 ═══
   final snapshot = await RemoteConfigManager.preload();
   debugPrint('[Main] ✅ 缓存预读完成: '
       'cachedDisabled=${snapshot.cachedDisabled}, '
       'bypassRemaining=${snapshot.bypassRemaining?.inMinutes}分钟');
 
-  // ══════════════════════════════════════════════════════════
-  // 阶段 3：Supabase 客户端初始化
-  //   保证后续 RemoteGate 拉服务端时客户端已就绪
-  //   （AnalyticsManager.init 是幂等的，多次调用只生效一次）
-  // ══════════════════════════════════════════════════════════
+  // ═══ 阶段 3：联网初始化 Supabase 客户端 ═══
   await AnalyticsManager.instance.init();
   debugPrint('[Main] ✅ Supabase 客户端就绪');
 
-  // ══════════════════════════════════════════════════════════
-  // 阶段 4：安全检查（非阻塞）
-  // ══════════════════════════════════════════════════════════
+  // ═══ 阶段 4：安全检查 ═══
   if (!SecurityCheck.isSecure) {
-    debugPrint('[Security] ⚠️ 检测到不安全环境，应用继续运行但需警惕');
+    debugPrint('[Security] ⚠️ 检测到不安全环境');
   }
 
-  // ══════════════════════════════════════════════════════════
-  // 阶段 5：启动 UI
-  //   此时本地一切就绪，首帧 + 服务端请求都是最优路径
-  // ══════════════════════════════════════════════════════════
+  // ═══ 阶段 5：启动 UI（权限页立刻显示）═══
   runApp(BiliGlassApp(initialSnapshot: snapshot));
 
-  // ══════════════════════════════════════════════════════════
-  // 阶段 6：其他后台初始化（不阻塞 UI）
-  // ══════════════════════════════════════════════════════════
-  unawaited(BootstrapManager.init());
+  // ★ BootstrapManager 已挪到授权后（PermissionGate._check）
 }
 
 class BiliGlassApp extends StatefulWidget {
@@ -80,19 +63,19 @@ class BiliGlassApp extends StatefulWidget {
 
 class _BiliGlassAppState extends State<BiliGlassApp> {
   final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
-  bool _updateCheckStarted = false;
+  bool _onGrantedStarted = false;
 
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _reportOpen();
-    });
-  }
+  /// ★ 授权后启动业务服务（BootstrapManager 已由 PermissionGate 启动）
+  Future<void> _onPermissionGranted() async {
+    if (_onGrantedStarted) return;
+    _onGrantedStarted = true;
 
-  void _onPermissionGranted() {
-    if (_updateCheckStarted) return;
-    _updateCheckStarted = true;
+    debugPrint('[Main] 权限已授予 → 启动业务服务');
+
+    // ① 上报打开记录
+    unawaited(_reportOpen());
+
+    // ② 延迟 500ms 后检查更新
     Future.delayed(const Duration(milliseconds: 500), () {
       if (!mounted) return;
       _checkUpdate();
@@ -140,7 +123,6 @@ class _BiliGlassAppState extends State<BiliGlassApp> {
           theme: AppTheme.darkTheme,
           builder: (context, child) {
             return RemoteGate(
-              // ★ 关键：传入 navigatorKey，让 AppDisabledScreen 能 showDialog
               navigatorKey: _navigatorKey,
               initialDisabledReason:
                   widget.initialSnapshot.initialDisabledReason,

