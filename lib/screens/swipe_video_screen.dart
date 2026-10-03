@@ -2,6 +2,7 @@
 library;
 
 import 'dart:async';
+import 'dart:ui' show ImageFilter;                    // ★ 新增
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -279,11 +280,19 @@ class _SwipeVideoScreenState extends State<SwipeVideoScreen> {
 }
 
 // ══════════════════════════════════════════════════════════════
-// 视频显示：BoxFit.cover（满屏，无黑边）
+// 视频显示：原比例前景（轻微放大）+ 左右模糊填充
+// - 竖屏/窄比例视频：左右黑边 → 模糊填充
+// - 横屏视频：上下黑边 → 保持纯黑
 // ══════════════════════════════════════════════════════════════
 class _FitVideo extends StatelessWidget {
   final VideoPlayerController controller;
   const _FitVideo({required this.controller});
+
+  /// 前景视频放大系数
+  /// 1.00 = 原始大小（不裁切）
+  /// 1.06 = 轻微放大（约裁 6% 边缘）
+  /// 1.15 = 明显放大
+  static const double _kForegroundScale = 1.06;
 
   @override
   Widget build(BuildContext context) {
@@ -291,17 +300,63 @@ class _FitVideo extends StatelessWidget {
     if (size.width == 0 || size.height == 0) {
       return const ColoredBox(color: Colors.black);
     }
-    return ClipRect(
-      child: SizedBox.expand(
-        child: FittedBox(
-          fit: BoxFit.cover,
-          child: SizedBox(
-            width: size.width,
-            height: size.height,
-            child: VideoPlayer(controller),
-          ),
+
+    final videoAR = size.width / size.height;
+
+    // 前景：原比例 + 轻微放大裁边
+    final Widget foreground = ClipRect(
+      child: Transform.scale(
+        scale: _kForegroundScale,
+        child: AspectRatio(
+          aspectRatio: videoAR,
+          child: VideoPlayer(controller),
         ),
       ),
+    );
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final screenAR = constraints.maxWidth / constraints.maxHeight;
+
+        // 视频比屏幕"窄" → 左右有黑边 → 用模糊填充
+        // 视频比屏幕"宽/扁"（横屏）→ 上下黑边 → 保持纯黑
+        final hasSideBlank = videoAR < screenAR;
+
+        if (!hasSideBlank) {
+          // 上下黑边 → 纯黑
+          return ColoredBox(
+            color: Colors.black,
+            child: Center(child: foreground),
+          );
+        }
+
+        // 左右黑边 → 模糊背景 + 放大的前景
+        return Stack(
+          fit: StackFit.expand,
+          children: [
+            // 底层：模糊铺满全屏
+            ClipRect(
+              child: ImageFiltered(
+                imageFilter: ImageFilter.blur(
+                  sigmaX: 30,
+                  sigmaY: 30,
+                  tileMode: TileMode.clamp,
+                ),
+                child: FittedBox(
+                  fit: BoxFit.cover,
+                  child: SizedBox(
+                    width: size.width,
+                    height: size.height,
+                    child: VideoPlayer(controller),
+                  ),
+                ),
+              ),
+            ),
+            // 前景：原比例（略放大）居中
+            Center(child: foreground),
+          ],
+        );
+      },
     );
   }
 }
