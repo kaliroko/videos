@@ -4,21 +4,13 @@ import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../config/debug_secret.dart';                    // ★
 import '../managers/remote_config_manager.dart';
 import '../models/app_config.dart';
 import '../screens/app_disabled_screen.dart';
 import 'announcement_dialog.dart';
 
-/// 全局远程配置网关（非阻塞 + 粘性禁用）：
-///
-///   1. 启动时先读本地缓存
-///      - 缓存禁用 → 立即显示禁用页（不等远程）
-///      - 缓存正常 → 立即显示 child（正常 App）
-///   2. 延迟 1.2 秒后拉远程配置
-///      - 拉到 app_enabled=false → 禁用页 + 写入缓存
-///      - 拉到 app_enabled=true  → 清除缓存 + 正常 UI
-///      - 拉取失败（null）       → 保持现状（不误放行）
-///   3. Realtime 订阅 + 60 秒轮询
+/// 全局远程配置网关（非阻塞 + 粘性禁用 + 调试解锁 + 时限放行）
 class RemoteGate extends StatefulWidget {
   final Widget child;
   const RemoteGate({super.key, required this.child});
@@ -28,29 +20,36 @@ class RemoteGate extends StatefulWidget {
 }
 
 class _RemoteGateState extends State<RemoteGate> {
-  /// 当前禁用原因（非 null 表示被禁用）
-  String? _disabledReason;
-
-  /// 首次缓存是否已读完
-  bool _cacheLoaded = false;
-
+  AppConfig? _disabledConfig;
   Timer? _pollTimer;
+  Timer? _bypassExpireTimer;
   RealtimeChannel? _channel;
   bool _showingAnnouncement = false;
   bool _firstCheckDone = false;
   bool _retrying = false;
 
+  /// ★ 调试放行：本次会话 + 缓存期间绕过远程禁用
+  bool _debugBypass = false;
+
+  /// ★ 放行缓存是否已加载（未加载前不显示禁用页，避免闪屏）
+  bool _bypassLoaded = false;
+
+  /// 是否需要在首屏时弹公告（bypass 加载完后处理）
+  bool _pendingAnnouncementCheck = false;
+
   @override
   void initState() {
     super.initState();
 
-    // ★ 第一步：读本地缓存（同步很快，几乎无感）
-    _loadCacheThenStart();
+    // ★ 先加载放行缓存，再决定是否检查服务端
+    _loadBypassThenStart();
 
     _pollTimer = Timer.periodic(
       const Duration(seconds: 60),
       (_) {
-        if (_firstCheckDone) _runCheck(showAnnouncement: false);
+        if (_firstCheckDone && !_debugBypass) {
+          _runCheck(showAnnouncement: false);
+        }
       },
     );
   }
@@ -58,36 +57,43 @@ class _RemoteGateState extends State<RemoteGate> {
   @override
   void dispose() {
     _pollTimer?.cancel();
+    _bypassExpireTimer?.cancel();
     _channel?.unsubscribe();
     super.dispose();
   }
 
-  /// 读缓存 → 决定首屏展示 → 1.2s 后拉远程
-  Future<void> _loadCacheThenStart() async {
-    final cachedDisabled = await RemoteConfigManager.isCachedDisabled();
-    final cachedReason = await RemoteConfigManager.cachedDisabledReason();
-
+  /// 加载放行缓存 → 决定是否 bypass
+  Future<void> _loadBypassThenStart() async {
+    final remaining = await getActiveBypassRemaining();
     if (!mounted) return;
+
     setState(() {
-      _cacheLoaded = true;
-      if (cachedDisabled) {
-        _disabledReason = cachedReason;
+      _bypassLoaded = true;
+      if (remaining != null) {
+        _debugBypass = true;
+        _scheduleBypassExpiry(remaining);
       }
     });
 
-    debugPrint('[RemoteGate] 缓存状态: disabled=$cachedDisabled, '
-        'reason=$cachedReason');
+    debugPrint('[RemoteGate] bypass 缓存: '
+        '${remaining == null ? "无" : "${remaining.inMinutes} 分钟"}');
 
-    // ★ 无论缓存是什么状态，都要在 UI 稳定后拉一次远程做最终确认
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _scheduleFirstCheck();
-    });
+    // 缓存加载完，再延迟 1.2 秒拉服务端
+    WidgetsBinding.instance.addPostFrameCallback((_) => _scheduleFirstCheck());
   }
 
   void _scheduleFirstCheck() {
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       await Future.delayed(const Duration(milliseconds: 1200));
       if (!mounted) return;
+
+      if (_debugBypass) {
+        // 放行中，不做服务端检查；但仍要允许公告
+        _firstCheckDone = true;
+        _pendingAnnouncementCheck = true;
+        _subscribeRealtime();
+        return;
+      }
 
       await _runCheck(showAnnouncement: true);
       _firstCheckDone = true;
@@ -97,40 +103,44 @@ class _RemoteGateState extends State<RemoteGate> {
     });
   }
 
-  // ── 拉一次配置 ──────────────────────────────────────────────────
+  /// 定时清除过期放行
+  void _scheduleBypassExpiry(Duration remaining) {
+    _bypassExpireTimer?.cancel();
+    _bypassExpireTimer = Timer(remaining, () async {
+      if (!mounted) return;
+      debugPrint('[RemoteGate]  放行到期，恢复服务端控制');
+      await clearBypass();
+      setState(() => _debugBypass = false);
+      // 立即检查服务端
+      await _runCheck(showAnnouncement: false);
+    });
+  }
+
   Future<void> _runCheck({required bool showAnnouncement}) async {
     final cfg = await RemoteConfigManager.fetch();
+    if (cfg == null) return;
+    if (!mounted) return;
 
-    // ★ 拉取失败 → 保持现状（不误放行，也不误禁）
-    if (cfg == null) {
-      debugPrint('[RemoteGate] 未拉到配置，保持现状');
+    // ★ 放行中 → 忽略禁用
+    if (_debugBypass) {
+      debugPrint('[RemoteGate]  放行中，忽略禁用指令');
       return;
     }
-
-    if (!mounted) return;
 
     if (!cfg.appEnabled) {
-      // 禁用 → 写缓存 + 显示禁用页
-      await RemoteConfigManager.saveDisabledState(cfg.disabledReason);
-      if (!mounted) return;
-      setState(() => _disabledReason = cfg.disabledReason);
+      setState(() => _disabledConfig = cfg);
       return;
     }
 
-    // 启用 → 清缓存 + 恢复正常
-    await RemoteConfigManager.clearDisabledState();
-    if (!mounted) return;
-    if (_disabledReason != null) {
-      setState(() => _disabledReason = null);
+    if (_disabledConfig != null) {
+      setState(() => _disabledConfig = null);
     }
 
-    // 弹公告
     if (showAnnouncement && !_showingAnnouncement) {
       _maybeShowAnnouncement(cfg);
     }
   }
 
-  // ── 手动"重新加载" ─────────────────────────────────────────────
   Future<void> _manualRetry() async {
     if (_retrying) return;
     setState(() => _retrying = true);
@@ -141,7 +151,29 @@ class _RemoteGateState extends State<RemoteGate> {
     }
   }
 
-  // ── Realtime 订阅 ───────────────────────────────────────────────
+  /// ★ 调试解锁（带时长）
+  Future<bool> _onDebugUnlock(Duration duration) async {
+    debugPrint('[RemoteGate]  调试密钥验证通过，'
+        '放行 ${duration.inHours} 小时');
+
+    // 写入缓存
+    await saveBypassUntil(duration);
+
+    // 立即生效
+    setState(() {
+      _debugBypass = true;
+      _disabledConfig = null;
+    });
+
+    // 设置到期定时器
+    final clamped = duration > kMaxBypassDuration
+        ? kMaxBypassDuration
+        : duration;
+    _scheduleBypassExpiry(clamped);
+
+    return true;
+  }
+
   void _subscribeRealtime() {
     try {
       _channel = Supabase.instance.client
@@ -150,21 +182,23 @@ class _RemoteGateState extends State<RemoteGate> {
             event: PostgresChangeEvent.update,
             schema: 'public',
             table: 'app_config',
-            callback: (payload) async {
+            callback: (payload) {
               final row = payload.newRecord;
               if (row.isEmpty) return;
               final cfg = AppConfig.fromMap(row);
               if (!mounted) return;
 
+              // ★ 放行中 → 忽略
+              if (_debugBypass) {
+                debugPrint('[RemoteGate]  放行中，忽略推送');
+                return;
+              }
+
               if (!cfg.appEnabled) {
-                await RemoteConfigManager.saveDisabledState(cfg.disabledReason);
-                if (!mounted) return;
-                setState(() => _disabledReason = cfg.disabledReason);
+                setState(() => _disabledConfig = cfg);
               } else {
-                await RemoteConfigManager.clearDisabledState();
-                if (!mounted) return;
-                if (_disabledReason != null) {
-                  setState(() => _disabledReason = null);
+                if (_disabledConfig != null) {
+                  setState(() => _disabledConfig = null);
                 }
               }
             },
@@ -177,7 +211,6 @@ class _RemoteGateState extends State<RemoteGate> {
     }
   }
 
-  // ── 弹公告 ─────────────────────────────────────────────────────
   Future<void> _maybeShowAnnouncement(AppConfig cfg) async {
     final show = await RemoteConfigManager.shouldShowAnnouncement(cfg);
     if (!mounted || !show) return;
@@ -200,16 +233,17 @@ class _RemoteGateState extends State<RemoteGate> {
 
   @override
   Widget build(BuildContext context) {
-    // 缓存还没读完 → 显示空黑屏（<50ms，肉眼无感）
-    if (!_cacheLoaded) {
-      return const SizedBox.shrink();
+    // ★ 放行缓存未加载完 → 显示 child（避免闪禁用页）
+    if (!_bypassLoaded) {
+      return widget.child;
     }
 
-    if (_disabledReason != null) {
+    if (_disabledConfig != null) {
       return AppDisabledScreen(
-        reason: _disabledReason!,
+        reason: _disabledConfig!.disabledReason,
         onRetry: _manualRetry,
         retrying: _retrying,
+        onDebugUnlock: _onDebugUnlock,
       );
     }
     return widget.child;
