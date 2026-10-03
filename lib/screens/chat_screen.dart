@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter/material.dart';
 import 'package:flutter/physics.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -344,8 +345,50 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
+  // ══════════════════════════════════════════════════════════════
+  // ★ 头像上传（权限 + 相册 + Storage）
+  // ══════════════════════════════════════════════════════════════
   Future<bool> _pickAndUploadAvatar() async {
     try {
+      // ─── 1. 申请权限 ───
+      debugPrint('[Chat] 🔐 检查权限...');
+
+      final permissions = <Permission>[
+        Permission.photos,
+        Permission.videos,
+        Permission.storage,
+      ];
+
+      final statuses = await permissions.request();
+
+      bool hasPermission = false;
+      statuses.forEach((perm, status) {
+        debugPrint('[Chat]   $perm → $status');
+        if (status.isGranted || status.isLimited) hasPermission = true;
+      });
+
+      if (!hasPermission) {
+        debugPrint('[Chat] ❌ 权限全部被拒绝');
+
+        final anyPermanentlyDenied =
+            statuses.values.any((s) => s.isPermanentlyDenied);
+
+        if (anyPermanentlyDenied) {
+          if (mounted) {
+            _snack('请到设置中开启相册权限');
+            await openAppSettings();
+          }
+        } else {
+          if (mounted) _snack('需要相册权限才能上传头像');
+        }
+        return false;
+      }
+
+      debugPrint('[Chat] ✅ 权限已授予');
+
+      // ─── 2. 打开相册 ───
+      debugPrint('[Chat] 📂 打开相册...');
+
       final picker = ImagePicker();
       final picked = await picker.pickImage(
         source: ImageSource.gallery,
@@ -353,12 +396,20 @@ class _ChatScreenState extends State<ChatScreen> {
         maxHeight: 512,
         imageQuality: 80,
       );
-      if (picked == null) return false;
 
+      debugPrint('[Chat] 📷 用户选择: ${picked?.path}');
+      if (picked == null) {
+        debugPrint('[Chat] ⏹ 用户取消');
+        return false;
+      }
+
+      // ─── 3. 上传到 Supabase Storage ───
       final bytes = await picked.readAsBytes();
       final ext = _pickExtension(picked.path);
       final filename =
           '${_myDeviceId}_${DateTime.now().millisecondsSinceEpoch}.$ext';
+
+      debugPrint('[Chat] ⬆️ 上传 $filename (${bytes.length} bytes)');
 
       await Supabase.instance.client.storage.from(_kBucket).uploadBinary(
             filename,
@@ -373,14 +424,16 @@ class _ChatScreenState extends State<ChatScreen> {
           .from(_kBucket)
           .getPublicUrl(filename);
 
+      debugPrint('[Chat] ✅ 上传成功: $url');
+
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString(_kAvatarKey, url);
       if (mounted) setState(() => _myAvatarUrl = url);
 
       if (_myNickname != null) await _syncMyProfile();
       return true;
-    } catch (e) {
-      debugPrint('[Chat] 上传头像失败: $e');
+    } catch (e, st) {
+      debugPrint('[Chat] ❌ 上传失败: $e\n$st');
       if (mounted) _snack('上传失败: $e');
       return false;
     }
@@ -842,7 +895,6 @@ class _ChatScreenState extends State<ChatScreen> {
                   )
                 : ListView.builder(
                     controller: _scrollController,
-                    // ★ iOS 风格弹簧滚动物理
                     physics: const BouncingScrollPhysics(
                       parent: AlwaysScrollableScrollPhysics(),
                     ),
@@ -871,9 +923,7 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   // ══════════════════════════════════════════════════════════════
-  // ★ Telegram 风
-    // ══════════════════════════════════════════════════════════════
-  // ★ Telegram 风格输入栏
+  // Telegram 风格输入栏
   // ══════════════════════════════════════════════════════════════
   Widget _buildInputBar(double bottomInset) {
     return Container(
@@ -887,7 +937,6 @@ class _ChatScreenState extends State<ChatScreen> {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
-          // 输入框胶囊
           Expanded(
             child: Container(
               decoration: BoxDecoration(
@@ -899,7 +948,6 @@ class _ChatScreenState extends State<ChatScreen> {
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
-                  // 表情
                   _SpringScale(
                     child: const Padding(
                       padding: EdgeInsets.only(left: 8, bottom: 12),
@@ -907,7 +955,6 @@ class _ChatScreenState extends State<ChatScreen> {
                           color: Colors.white54, size: 22),
                     ),
                   ),
-                  // 输入
                   Expanded(
                     child: TextField(
                       controller: _inputController,
@@ -928,7 +975,6 @@ class _ChatScreenState extends State<ChatScreen> {
                       ),
                     ),
                   ),
-                  // 附件
                   if (!_hasText)
                     _SpringScale(
                       child: const Padding(
@@ -942,7 +988,6 @@ class _ChatScreenState extends State<ChatScreen> {
             ),
           ),
           const SizedBox(width: 8),
-          // ★ 发送按钮（弹簧动效 + 有文字才显示）
           AnimatedScale(
             scale: _hasText ? 1.0 : 0.0,
             duration: const Duration(milliseconds: 220),
@@ -960,7 +1005,7 @@ class _ChatScreenState extends State<ChatScreen> {
 }
 
 // ══════════════════════════════════════════════════════════════
-// ★ 物理弹簧：按下缩放
+// 物理弹簧：按下缩放
 // ══════════════════════════════════════════════════════════════
 class _SpringScale extends StatefulWidget {
   final Widget child;
@@ -1004,7 +1049,7 @@ class _SpringScaleState extends State<_SpringScale>
 }
 
 // ══════════════════════════════════════════════════════════════
-// ★ 物理弹簧按钮
+// 物理弹簧按钮
 // ══════════════════════════════════════════════════════════════
 class _SpringButton extends StatefulWidget {
   final VoidCallback onTap;
@@ -1052,7 +1097,7 @@ class _SpringButtonState extends State<_SpringButton>
 }
 
 // ══════════════════════════════════════════════════════════════
-// ★ 发送按钮（MD3 弹簧回弹）
+// 发送按钮（MD3 弹簧回弹）
 // ══════════════════════════════════════════════════════════════
 class _SendButton extends StatefulWidget {
   final VoidCallback onTap;
@@ -1128,7 +1173,7 @@ class _SendButtonState extends State<_SendButton>
 }
 
 // ══════════════════════════════════════════════════════════════
-// ★ 消息气泡（MD3 Emphasized 入场 + 弹簧）
+// 消息气泡（MD3 Emphasized 入场 + 弹簧）
 // ══════════════════════════════════════════════════════════════
 class _MessageBubble extends StatefulWidget {
   final _ChatMessage msg;
