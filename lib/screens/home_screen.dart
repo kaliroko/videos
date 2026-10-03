@@ -11,6 +11,7 @@ import 'package:bilibili_glass/widgets/video_card.dart';
 import 'package:bilibili_glass/theme/app_theme.dart';
 import 'package:bilibili_glass/screens/video_player_screen.dart';
 import 'package:bilibili_glass/screens/swipe_video_screen.dart';
+import 'package:bilibili_glass/screens/chat_screen.dart';   // ★ 新增
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -20,7 +21,7 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
-  /// ★ 0 = 老API（网格）；1 = 新API（视频）
+  /// 0 = 老API（网格）；1 = 新API（视频）；2 = 聊天室
   int _bottomTab = 0;
 
   final PageController _pageController = PageController(initialPage: 0);
@@ -44,7 +45,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       background: Container(color: AppTheme.surfaceColor),
       content: Scaffold(
         backgroundColor: AppTheme.surfaceColor,
-        // ★ 已删除 appBar
         body: PageView(
           controller: _pageController,
           onPageChanged: _onPageChanged,
@@ -55,6 +55,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
             // ── Page 1: 新API（全屏视频）──
             SwipeVideoScreen(active: _bottomTab == 1),
+
+            // ── Page 2: 聊天室 ──
+            const ChatScreen(),   // ★ 新增
           ],
         ),
         extendBody: true,
@@ -65,6 +68,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           child: _buildBottomNav(),
         ),
         floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
+        // FAB 只在老API页显示
         floatingActionButton: _bottomTab == 0 ? _buildFab() : null,
       ),
     );
@@ -124,7 +128,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           },
           child: GridView.builder(
             controller: _scrollController,
-            // ★ 顶部只留状态栏高度（避免被状态栏图标压住）
             padding: EdgeInsets.fromLTRB(
               10,
               MediaQuery.of(context).padding.top + 8,
@@ -167,7 +170,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     );
   }
 
-  // ── 底部导航 ─────────────────────────────────────────────────────────────
+  // ── 底部导航 ★ 三个 tab ─────────────────────────────────────────────
   Widget _buildBottomNav() {
     final bottomInset = MediaQuery.of(context).padding.bottom;
     return RepaintBoundary(
@@ -193,6 +196,13 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               label: '白丝宝宝',
               icon: Icons.auto_awesome,
               selectedIcon: Icons.auto_awesome_outlined,
+              glowColor: AppTheme.accentColor,
+            ),
+            // ★ 第三个 tab：聊天室
+            GlassBottomBarTab(
+              label: '聊天室',
+              icon: Icons.chat_bubble,
+              selectedIcon: Icons.chat_bubble_outline,
               glowColor: AppTheme.accentColor,
             ),
           ],
