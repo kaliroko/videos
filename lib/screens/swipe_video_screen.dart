@@ -1,4 +1,7 @@
 /// 上下滑动视频播放器（仿抖音上下滑动）
+/// - 当前视频秒开
+/// - 后台预加载后 4 个视频
+/// - 不抢带宽，不限流
 library;
 
 import 'dart:async';
@@ -36,44 +39,29 @@ class _SwipeVideoScreenState extends State<SwipeVideoScreen> {
   NavBarVisibility? _nav;
 
   // ══════════════════════════════════════════════════════════
-  // ★ 预加载 + 节流配置
+  // 配置
   // ══════════════════════════════════════════════════════════
 
-  /// 目标预加载视频总数（URL 层面）
-  static const int _kTargetPreloadCount = 30;
+  /// URL 缓存数量（当前页 + 后 4 个 + 前 2 = 至少 7 条）
+  static const int _kUrlBuffer = 6;
 
-  /// 首屏立即初始化播放器的数量
-  static const int _kInitialPlayerCount = 3;
-
-  /// 翻页时向前预初始化播放器的数量
-  static const int _kForwardPreloadRange = 3;
-
-  /// 保留播放器范围
+  /// 播放器保留范围（前后各 N 个）
   static const int _kPlayerKeepRange = 4;
 
-  // ── 节流参数 ──────────────────────────────────────────────
-  /// 每条之间的基础间隔（毫秒），避免请求过密被限流
-  static const Duration _kPreloadItemDelay =
-      Duration(milliseconds: 450);
+  /// 预加载后面几个播放器
+  static const int _kPreloadAheadCount = 4;
 
-  /// 每拉 N 条后，长休息一次
-  static const int _kPreloadBatchSize = 5;
+  /// 懒加载 URL 的间隔（防限流）
+  static const Duration _kFetchInterval = Duration(milliseconds: 1200);
 
-  /// 长休息间隔
-  static const Duration _kPreloadBatchDelay =
-      Duration(milliseconds: 1200);
+  /// 预加载启动延迟（等当前视频先稳）
+  static const Duration _kPreloadStartDelay = Duration(seconds: 2);
 
-  /// 单次请求失败时的退避起始值
-  static const Duration _kPreloadRetryBase =
-      Duration(milliseconds: 800);
-
-  /// 连续失败达到此值时，停止预加载（避免死循环打接口）
-  static const int _kPreloadMaxRetry = 3;
+  /// 每次预初始化之间间隔
+  static const Duration _kPreloadGap = Duration(milliseconds: 500);
 
   // ── 运行时状态 ──────────────────────────────────────────────
-  bool _preloading = false;
-  bool _preloadPaused = false;
-  Timer? _preloadResumeTimer;
+  bool _fetchingNext = false;
 
   @override
   void initState() {
@@ -107,7 +95,6 @@ class _SwipeVideoScreenState extends State<SwipeVideoScreen> {
   @override
   void dispose() {
     _nav?.show();
-    _preloadResumeTimer?.cancel();
     _controller.dispose();
     for (final p in _players.values) {
       p.dispose();
@@ -116,86 +103,38 @@ class _SwipeVideoScreenState extends State<SwipeVideoScreen> {
     super.dispose();
   }
 
-  // ── 首屏加载 ──────────────────────────────────────────────────────
+  // ── 首屏：立即拉第 1 条 ────────────────────────────────────────────
   Future<void> _initialLoad() async {
-    await _loadNext();
-    if (!mounted || _error != null) return;
-    await _loadNext();
+    await _loadNext();           // 第 1 条：立即初始化播放器
     if (!mounted || _error != null) return;
 
-    // 后台静默预加载到 30 条
-    unawaited(_preloadRest());
+    // 后台补齐 URL 到 (currentPage + _kUrlBuffer) 条
+    unawaited(_ensureUrlBuffer());
   }
 
-  // ── ★ 后台静默预加载（带节流 + 用户操作时暂停）────────────────────
-  Future<void> _preloadRest() async {
-    if (_preloading) return;    // 已经在跑就忽略
-    _preloading = true;
-
-    int sinceLastBatch = 0;
-    int consecutiveFailures = 0;
-
+  // ── 确保 URL 缓存足够 ─────────────────────────────────────────────
+  Future<void> _ensureUrlBuffer() async {
+    if (_fetchingNext) return;
+    _fetchingNext = true;
     try {
       while (mounted &&
-          _videos.length < _kTargetPreloadCount &&
+          _videos.length < _currentPage + _kUrlBuffer &&
           _error == null) {
-
-        // ① 用户正在滑动 / 页面不活跃 → 暂停预加载
-        if (_preloadPaused || !widget.active) {
-          await Future.delayed(const Duration(milliseconds: 300));
-          continue;
-        }
-
-        // ② 连续失败太多 → 停止预加载
-        if (consecutiveFailures >= _kPreloadMaxRetry) {
-          debugPrint('[SwipeVideo] 连续失败 $consecutiveFailures 次，'
-              '停止预加载（已有 ${_videos.length} 条）');
-          break;
-        }
-
-        // ③ 真正拉一条
         final before = _videos.length;
         await _loadNext();
         if (!mounted) break;
 
         if (_videos.length == before) {
-          // 没拉到（并发被跳过 / 拉取失败）
-          consecutiveFailures++;
-          // 指数退避：800ms → 1600ms → 3200ms
-          final backoff = _kPreloadRetryBase *
-              (1 << (consecutiveFailures - 1));
-          debugPrint('[SwipeVideo] 预加载失败 '
-              '(第 $consecutiveFailures 次)，等待 ${backoff.inMilliseconds}ms');
-          await Future.delayed(backoff);
+          // 拉失败 → 退避重试
+          await Future.delayed(const Duration(seconds: 2));
           continue;
         }
-
-        // 拉到新的 → 重置失败计数
-        consecutiveFailures = 0;
-        sinceLastBatch++;
-
-        // ④ 每批之间休息更久（防触发分钟级限流）
-        if (sinceLastBatch >= _kPreloadBatchSize) {
-          sinceLastBatch = 0;
-          await Future.delayed(_kPreloadBatchDelay);
-        } else {
-          await Future.delayed(_kPreloadItemDelay);
-        }
+        // 每条之间休息（防限流）
+        await Future.delayed(_kFetchInterval);
       }
     } finally {
-      _preloading = false;
-      debugPrint('[SwipeVideo] 预加载结束，共 ${_videos.length} 条');
+      _fetchingNext = false;
     }
-  }
-
-  /// 用户开始操作时暂停预加载
-  void _pausePreload() {
-    _preloadPaused = true;
-    _preloadResumeTimer?.cancel();
-    // 2 秒后自动恢复
-    _preloadResumeTimer = Timer(const Duration(seconds: 2), () {
-      if (mounted) _preloadPaused = false;
-    });
   }
 
   // ── 加载下一条视频 ────────────────────────────────────────────────
@@ -220,7 +159,9 @@ class _SwipeVideoScreenState extends State<SwipeVideoScreen> {
       });
 
       final newIndex = _videos.length - 1;
-      if (newIndex < _kInitialPlayerCount) {
+
+      // ★ 只初始化「当前页」的播放器
+      if (newIndex == _currentPage) {
         unawaited(_ensurePlayer(newIndex));
       }
     } finally {
@@ -271,9 +212,6 @@ class _SwipeVideoScreenState extends State<SwipeVideoScreen> {
   void _onPageChanged(int index) {
     final oldPage = _currentPage;
 
-    // ★ 用户翻页 → 暂停后台预加载 2 秒（优先保证当前体验）
-    _pausePreload();
-
     if (index > oldPage) {
       _nav?.hide();
     } else if (index < oldPage) {
@@ -282,20 +220,20 @@ class _SwipeVideoScreenState extends State<SwipeVideoScreen> {
 
     setState(() => _currentPage = index);
 
+    // 暂停所有非当前页
     _players.forEach((i, p) {
       if (i != index && p.value.isInitialized && p.value.isPlaying) {
         p.pause();
       }
     });
 
-    // 预初始化当前页 + 后面 3 页
-    for (int i = index; i <= index + _kForwardPreloadRange; i++) {
-      if (i >= 0 && i < _videos.length) {
-        unawaited(_ensurePlayer(i));
-      }
-    }
+    // ★ 立即初始化当前页（秒开）
+    unawaited(_ensurePlayer(index));
 
-    // 释放距离太远的播放器
+    // ★ 后台预初始化后 4 个（串行，不抢带宽）
+    unawaited(_preloadNextFour(index));
+
+    // 释放距离太远的播放器（保留 ±4）
     final toRemove = _players.keys
         .where((i) => (i - index).abs() > _kPlayerKeepRange)
         .toList();
@@ -304,10 +242,27 @@ class _SwipeVideoScreenState extends State<SwipeVideoScreen> {
       _players.remove(i);
     }
 
-    // 接近末尾 → 补充预加载
-    if (index >= _videos.length - 3 &&
-        _videos.length < _kTargetPreloadCount) {
-      unawaited(_preloadRest());
+    // 确保 URL 缓存
+    unawaited(_ensureUrlBuffer());
+  }
+
+  // ── 预初始化后 4 个播放器（后台串行，不抢当前带宽）──────────────
+  Future<void> _preloadNextFour(int currentIndex) async {
+    // 等当前视频先稳住
+    await Future.delayed(_kPreloadStartDelay);
+    if (!mounted) return;
+
+    for (int offset = 1; offset <= _kPreloadAheadCount; offset++) {
+      final idx = currentIndex + offset;
+      if (idx >= _videos.length) break;
+      if (_players.containsKey(idx)) continue;
+
+      await _ensurePlayer(idx);
+      if (!mounted) return;
+
+      // 两个预加载之间再等一下
+      await Future.delayed(_kPreloadGap);
+      if (!mounted) return;
     }
   }
 
