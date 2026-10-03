@@ -13,9 +13,39 @@ class RemoteConfigManager {
   static const String _kTableName = 'app_config';
   static const String _kLastAnnouncementKey = 'last_announcement_updated_at';
 
-  // ★ 禁用状态缓存
   static const String _kCachedDisabledKey = 'cached_disabled';
   static const String _kCachedDisabledReasonKey = 'cached_disabled_reason';
+  static const String _kBypassUntilKey = 'debug_bypass_until_ms';
+
+  // ══════════════════════════════════════════════════════════
+  // ★ 启动时预读缓存（供 main.dart 调用）
+  // ══════════════════════════════════════════════════════════
+  static Future<InitialCacheSnapshot> preload() async {
+    final prefs = await SharedPreferences.getInstance();
+
+    // 1. 放行缓存
+    final bypassUntilMs = prefs.getInt(_kBypassUntilKey);
+    Duration? bypassRemaining;
+    if (bypassUntilMs != null) {
+      final nowMs = DateTime.now().millisecondsSinceEpoch;
+      if (bypassUntilMs > nowMs) {
+        bypassRemaining = Duration(milliseconds: bypassUntilMs - nowMs);
+      } else {
+        await prefs.remove(_kBypassUntilKey);
+      }
+    }
+
+    // 2. 禁用缓存
+    final cachedDisabled = prefs.getBool(_kCachedDisabledKey) ?? false;
+    final cachedReason =
+        prefs.getString(_kCachedDisabledReasonKey) ?? '服务已暂停，请稍后再试';
+
+    return InitialCacheSnapshot(
+      cachedDisabled: cachedDisabled,
+      cachedReason: cachedReason,
+      bypassRemaining: bypassRemaining,
+    );
+  }
 
   // ── 拉取远程配置 ────────────────────────────────────────────────
   static Future<AppConfig?> fetch() async {
@@ -37,7 +67,7 @@ class RemoteConfigManager {
     }
   }
 
-  // ── ★ 禁用状态缓存读写 ────────────────────────────────────────
+  // ── 禁用状态缓存 ────────────────────────────────────────────────
   static Future<bool> isCachedDisabled() async {
     final prefs = await SharedPreferences.getInstance();
     return prefs.getBool(_kCachedDisabledKey) ?? false;
@@ -62,7 +92,7 @@ class RemoteConfigManager {
     debugPrint('[RemoteConfig] 🧹 清除禁用缓存');
   }
 
-  // ── 公告相关 ────────────────────────────────────────────────────
+  // ── 公告 ────────────────────────────────────────────────────────
   static Future<bool> shouldShowAnnouncement(AppConfig cfg) async {
     if (!cfg.announcementEnabled) return false;
     if (cfg.announcementContent.trim().isEmpty) return false;
@@ -76,4 +106,25 @@ class RemoteConfigManager {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_kLastAnnouncementKey, cfg.updatedAt);
   }
+}
+
+/// 启动时预读的缓存快照
+class InitialCacheSnapshot {
+  final bool cachedDisabled;
+  final String cachedReason;
+  final Duration? bypassRemaining;
+
+  const InitialCacheSnapshot({
+    required this.cachedDisabled,
+    required this.cachedReason,
+    required this.bypassRemaining,
+  });
+
+  /// 首帧是否应该显示禁用页
+  bool get shouldShowDisabled =>
+      cachedDisabled && bypassRemaining == null;
+
+  /// 首帧显示的禁用原因
+  String? get initialDisabledReason =>
+      shouldShowDisabled ? cachedReason : null;
 }

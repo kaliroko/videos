@@ -9,19 +9,21 @@ import 'config/secrets.dart';
 import 'managers/bootstrap_manager.dart';
 import 'managers/app_update_manager.dart';
 import 'managers/analytics_manager.dart';
+import 'managers/remote_config_manager.dart';
 import 'permission_gate.dart';
 import 'providers/video_provider.dart';
 import 'providers/nav_bar_visibility.dart';
-import 'widgets/remote_gate.dart';                 // ★ 新增这一行
+import 'widgets/remote_gate.dart';
 import 'screens/home_screen.dart';
 import 'theme/app_theme.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // 让内容延伸到系统栏后面（沉浸式 / Edge-to-Edge）
+  // ══════════════════════════════════════════════════════════
+  // 阶段 1：系统级 UI 配置
+  // ══════════════════════════════════════════════════════════
   await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
-
   SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
     statusBarColor: Colors.transparent,
     statusBarIconBrightness: Brightness.light,
@@ -31,17 +33,46 @@ Future<void> main() async {
     systemNavigationBarDividerColor: Colors.transparent,
   ));
 
+  // ══════════════════════════════════════════════════════════
+  // 阶段 2：本地缓存预读（SharedPreferences）
+  //   保证首帧就能决定"显示正常 UI"还是"显示禁用页"
+  // ══════════════════════════════════════════════════════════
+  final snapshot = await RemoteConfigManager.preload();
+  debugPrint('[Main] ✅ 缓存预读完成: '
+      'cachedDisabled=${snapshot.cachedDisabled}, '
+      'bypassRemaining=${snapshot.bypassRemaining?.inMinutes}分钟');
+
+  // ══════════════════════════════════════════════════════════
+  // 阶段 3：Supabase 客户端初始化
+  //   保证后续 RemoteGate 拉服务端时客户端已就绪
+  //   （AnalyticsManager.init 是幂等的，多次调用只生效一次）
+  // ══════════════════════════════════════════════════════════
+  await AnalyticsManager.instance.init();
+  debugPrint('[Main] ✅ Supabase 客户端就绪');
+
+  // ══════════════════════════════════════════════════════════
+  // 阶段 4：安全检查（非阻塞）
+  // ══════════════════════════════════════════════════════════
   if (!SecurityCheck.isSecure) {
     debugPrint('[Security] ⚠️ 检测到不安全环境，应用继续运行但需警惕');
   }
 
-  runApp(const BiliGlassApp());
+  // ══════════════════════════════════════════════════════════
+  // 阶段 5：启动 UI
+  //   此时本地一切就绪，首帧 + 服务端请求都是最优路径
+  // ══════════════════════════════════════════════════════════
+  runApp(BiliGlassApp(initialSnapshot: snapshot));
 
+  // ══════════════════════════════════════════════════════════
+  // 阶段 6：其他后台初始化（不阻塞 UI）
+  // ══════════════════════════════════════════════════════════
   unawaited(BootstrapManager.init());
 }
 
 class BiliGlassApp extends StatefulWidget {
-  const BiliGlassApp({super.key});
+  final InitialCacheSnapshot initialSnapshot;
+
+  const BiliGlassApp({super.key, required this.initialSnapshot});
 
   @override
   State<BiliGlassApp> createState() => _BiliGlassAppState();
@@ -107,8 +138,16 @@ class _BiliGlassAppState extends State<BiliGlassApp> {
           title: '玻璃哔哩',
           debugShowCheckedModeBanner: false,
           theme: AppTheme.darkTheme,
-          // ★ 唯一的功能改动：用 RemoteGate 包住 HomeScreen
-          home: const RemoteGate(child: HomeScreen()),
+          builder: (context, child) {
+            return RemoteGate(
+              initialDisabledReason:
+                  widget.initialSnapshot.initialDisabledReason,
+              initialBypassRemaining:
+                  widget.initialSnapshot.bypassRemaining,
+              child: child ?? const SizedBox.shrink(),
+            );
+          },
+          home: const HomeScreen(),
         ),
       ),
     );
