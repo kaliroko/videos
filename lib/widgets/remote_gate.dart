@@ -1,6 +1,5 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -15,7 +14,7 @@ class RemoteGate extends StatefulWidget {
   final String? initialDisabledReason;
   final Duration? initialBypassRemaining;
 
-  /// ★ 传入 MaterialApp 的 navigatorKey，用于 showDialog
+  /// ★ 只用于公告弹窗（AppDisabledScreen 用 Stack 版，不需要）
   final GlobalKey<NavigatorState>? navigatorKey;
 
   const RemoteGate({
@@ -94,7 +93,6 @@ class _RemoteGateState extends State<RemoteGate> {
     });
   }
 
-  // ── 拉一次配置 ──────────────────────────────────────────────────
   Future<void> _runCheck({required bool showAnnouncement}) async {
     final cfg = await RemoteConfigManager.fetch();
 
@@ -131,7 +129,6 @@ class _RemoteGateState extends State<RemoteGate> {
     }
   }
 
-  // ── 手动重新加载 ────────────────────────────────────────────────
   Future<void> _manualRetry() async {
     if (_retrying) return;
     setState(() => _retrying = true);
@@ -142,7 +139,6 @@ class _RemoteGateState extends State<RemoteGate> {
     }
   }
 
-  // ── 调试解锁 ────────────────────────────────────────────────────
   Future<bool> _onDebugUnlock(Duration duration) async {
     debugPrint('[RemoteGate] 🔓 调试解锁 ${duration.inHours} 小时');
 
@@ -164,7 +160,6 @@ class _RemoteGateState extends State<RemoteGate> {
     return true;
   }
 
-  // ── 放行到期 ────────────────────────────────────────────────────
   void _scheduleBypassExpiry(Duration remaining) {
     _bypassExpireTimer?.cancel();
     _bypassExpireTimer = Timer(remaining, () async {
@@ -198,7 +193,6 @@ class _RemoteGateState extends State<RemoteGate> {
     });
   }
 
-  // ── Realtime ────────────────────────────────────────────────────
   void _subscribeRealtime() {
     try {
       _channel = Supabase.instance.client
@@ -250,16 +244,16 @@ class _RemoteGateState extends State<RemoteGate> {
       return;
     }
 
-    // ★ 使用 navigatorKey.currentContext（builder 之上没有 Navigator）
-    final dialogCtx = widget.navigatorKey?.currentContext;
-    if (dialogCtx == null) {
+    // ★ 用 navigatorKey 的 context（本 widget 位于 builder 层，自身 context 拿不到 Navigator）
+    final navCtx = widget.navigatorKey?.currentContext;
+    if (navCtx == null || !navCtx.mounted) {
       debugPrint('[RemoteGate] navigatorKey 未就绪，跳过公告');
       _showingAnnouncement = false;
       return;
     }
 
     await showDialog(
-      context: dialogCtx,
+      context: navCtx,
       barrierDismissible: false,
       builder: (_) => AnnouncementDialog(config: cfg),
     );
@@ -275,7 +269,7 @@ class _RemoteGateState extends State<RemoteGate> {
         onRetry: _manualRetry,
         retrying: _retrying,
         onDebugUnlock: _onDebugUnlock,
-        navigatorKey: widget.navigatorKey,   // ★ 传给禁用页
+        // ★ 不传 navigatorKey（Stack 版 AppDisabledScreen 不需要）
       );
     }
     return widget.child;
