@@ -112,7 +112,7 @@ class _BiliGlassAppState extends State<BiliGlassApp> {
         ],
         child: MaterialApp(
           navigatorKey: _navigatorKey,
-          title: '玻璃哔哩',
+          title: 'Glass哔哩',
           debugShowCheckedModeBanner: false,
           theme: AppTheme.darkTheme,
           builder: (context, child) {

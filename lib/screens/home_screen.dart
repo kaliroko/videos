@@ -1,6 +1,8 @@
 /// 首页 — 液态玻璃主题 + 统一深灰色 MD3 背景
 library;
 
+import 'dart:ui' show ImageFilter;
+
 import 'package:flutter/material.dart';
 import 'package:liquid_glass_widgets/liquid_glass_widgets.dart';
 import 'package:provider/provider.dart';
@@ -42,11 +44,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     final topInset = MediaQuery.of(context).padding.top;
 
     return LiquidGlassScope.stack(
-      // 网格模式背景为深灰；视频页自己会盖一层黑色
       background: Container(color: AppTheme.surfaceColor),
       content: Scaffold(
         backgroundColor: AppTheme.surfaceColor,
-        // ★ 水平 PageView —— 左右滑切换两个 tab
         body: PageView(
           controller: _pageController,
           onPageChanged: _onPageChanged,
@@ -72,7 +72,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           child: _buildBottomNav(),
         ),
         floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
-        // ★ FAB 只在老API页显示（视频页不需要刷新按钮）
         floatingActionButton: _bottomTab == 0 ? _buildFab() : null,
       ),
     );
@@ -83,60 +82,84 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     setState(() => _bottomTab = i);
     context.read<NavBarVisibility>().show();
 
-    // ★ 索引 0 = 老API → 需要 Provider 参与
     if (i == 0) {
       context.read<VideoProvider>().setSource(VideoSource.oldApi);
     }
   }
 
-  // ── 顶部栏 ★ 优化 4：加 RepaintBoundary ─────────────────────────────────
+  // ── 顶部栏 ★ 与底部液态玻璃参数一致 ──────────────────────────────────
   Widget _buildAppBar({required double topInset}) {
-    return RepaintBoundary(   // ★ 优化 4
-      child: Padding(
-        padding: EdgeInsets.fromLTRB(14, topInset + 10, 14, 8),
-        child: Row(
-          children: [
-            Row(
+    return RepaintBoundary(
+      child: ClipRRect(
+        borderRadius: const BorderRadius.vertical(
+          bottom: Radius.circular(20),
+        ),
+        child: BackdropFilter(
+          // ★ 模糊强度 12
+          filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+          child: Container(
+            padding: EdgeInsets.fromLTRB(14, topInset + 10, 14, 12),
+            decoration: BoxDecoration(
+              // 与底栏 glassColor: 0x3DFFFFFF 一致
+              color: const Color(0x3DFFFFFF),
+              border: Border(
+                bottom: BorderSide(
+                  color: Colors.white.withValues(alpha: 0.12),
+                  width: 0.5,
+                ),
+              ),
+            ),
+            child: Row(
               children: [
+                Row(
+                  children: [
+                    Container(
+                      width: 32,
+                      height: 32,
+                      decoration: BoxDecoration(
+                        color: AppTheme.accentColor,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: const Icon(
+                        Icons.movie,
+                        color: Colors.black,
+                        size: 18,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    const Text(
+                      'Github Glass',
+                      style: TextStyle(
+                        color: AppTheme.accentColor,
+                        fontSize: 15,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 0.5,
+                      ),
+                    ),
+                  ],
+                ),
+                const Spacer(),
                 Container(
-                  width: 32, height: 32,
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 8, vertical: 3),
                   decoration: BoxDecoration(
-                    color: AppTheme.accentColor,
-                    borderRadius: BorderRadius.circular(8),
+                    color: AppTheme.primaryColor.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(10),
                   ),
-                  child: const Icon(Icons.movie, color: Colors.black, size: 18),
-                ),
-                const SizedBox(width: 6),
-                const Text(
-                  '玻璃哔哩',
-                  style: TextStyle(
-                    color: AppTheme.accentColor,
-                    fontSize: 15,
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: 0.5,
+                  child: Text(
+                    'Flask',
+                    style: TextStyle(
+                      color: AppTheme.primaryColor,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ),
+                const SizedBox(width: 8),
+                _iconBtn(Icons.refresh, _refresh),
               ],
             ),
-            const Spacer(),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-              decoration: BoxDecoration(
-                color: AppTheme.primaryColor.withValues(alpha: 0.15),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Text(
-                'Flask',
-                style: TextStyle(
-                  color: AppTheme.primaryColor,
-                  fontSize: 10,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ),
-            const SizedBox(width: 8),
-            _iconBtn(Icons.refresh, _refresh),
-          ],
+          ),
         ),
       ),
     );
@@ -146,10 +169,15 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        width: 34, height: 34,
+        width: 34,
+        height: 34,
         decoration: BoxDecoration(
-          color: AppTheme.cardColor,
+          color: Colors.white.withValues(alpha: 0.08),
           borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+            color: Colors.white.withValues(alpha: 0.10),
+            width: 0.5,
+          ),
         ),
         child: Icon(icon, size: 17, color: AppTheme.textSecondary),
       ),
@@ -217,8 +245,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                   ),
                 );
               }
-              // ★ 优化 3：每个卡片独立 RepaintBoundary
-              //   滚动时一个卡片变化不影响其它卡片
               return RepaintBoundary(
                 child: VideoCard(
                   video: provider.videos[index],
@@ -239,16 +265,15 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     );
   }
 
-  // ── 底部导航 ★ 优化 4：加 RepaintBoundary + 玻璃参数减负 ────────────────
+  // ── 底部导航 ─────────────────────────────────────────────────────────────
   Widget _buildBottomNav() {
     final bottomInset = MediaQuery.of(context).padding.bottom;
-    return RepaintBoundary(   // ★ 优化 4
+    return RepaintBoundary(
       child: Padding(
         padding: EdgeInsets.fromLTRB(16, 0, 16, 16 + bottomInset),
         child: GlassBottomBar(
           selectedIndex: _bottomTab,
           onTabSelected: (i) {
-            // ★ 点 tab → 动画翻页；_onPageChanged 会同步状态
             _pageController.animateToPage(
               i,
               duration: const Duration(milliseconds: 280),
@@ -256,14 +281,12 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             );
           },
           tabs: [
-            // ★ 第一个：老API（默认）
             GlassBottomBarTab(
               label: 'JK纯欲',
               icon: Icons.cloud,
               selectedIcon: Icons.cloud_outlined,
               glowColor: AppTheme.primaryColor,
             ),
-            // ★ 第二个：新API
             GlassBottomBarTab(
               label: '白丝宝宝',
               icon: Icons.auto_awesome,
@@ -275,15 +298,13 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           iconSize: 24,
           selectedIconColor: AppTheme.accentColor,
           unselectedIconColor: AppTheme.textTertiary,
-          // ★ 性能减负：保留折射（thickness / refractiveIndex），
-          //   只削减性能大头（blur / chromaticAberration）
           glassSettings: const LiquidGlassSettings(
-            thickness:           26,     // 30 → 26（保留玻璃厚度感）
-            blur:                3,      // 6 → 3（★ 性能大头）
-            refractiveIndex:     1.55,   // 1.59 → 1.55（★ 保留折射）
+            thickness:           26,
+            blur:                3,
+            refractiveIndex:     1.55,
             saturation:          0.7,
             lightIntensity:      0.55,
-            chromaticAberration: 0.05,   // 0.3 → 0.05（★ 性能大头）
+            chromaticAberration: 0.05,
             ambientStrength:     0.9,
             lightAngle:          0.785,
             glassColor:          Color(0x3DFFFFFF),
@@ -293,24 +314,22 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     );
   }
 
-  // ── FAB（液态玻璃，性能减负）───────────────────────────────────────────
+  // ── FAB ─────────────────────────────────────────────────────────────────
   Widget _buildFab() {
     return GlassIconButton(
-      quality:       GlassQuality.standard,   // ★ standard → standard
-      icon:          Icons.refresh,
-      size:          46,
-      useOwnLayer:   false,                  // ★ true → false
-      onPressed:     _refresh,
-      glowColor:     AppTheme.accentColor,
+      quality:     GlassQuality.standard,
+      icon:        Icons.refresh,
+      size:        46,
+      useOwnLayer: false,
+      onPressed:   _refresh,
+      glowColor:   AppTheme.accentColor,
     );
   }
 
   void _refresh() {
     if (_bottomTab == 0) {
-      // 老API → Provider 重新拉
       context.read<VideoProvider>().fetchVideos();
     } else {
-      // 新API → 强制重建 SwipeVideoScreen（跳走再跳回）
       _pageController.jumpToPage(0);
       _pageController.jumpToPage(1);
     }
