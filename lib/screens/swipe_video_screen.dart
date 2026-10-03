@@ -6,7 +6,7 @@
 /// - 两级释放：超范围 + 超上限
 /// - 竖屏模糊 sigma 15 / 横屏 sigma 8
 /// - ★ 视频播完自动滑到下一条
-/// - ★ 低并发：预加载后 3 个、间隔 1s、翻页即中止预加载
+/// - ★ 修复：用户往上滑回已播完的页 → 从头播（不再被弹回）
 library;
 
 import 'dart:async';
@@ -41,10 +41,8 @@ class _SwipeVideoScreenState extends State<SwipeVideoScreen> {
   int _currentPage = 0;
   bool _loading = true;
   bool _fetching = false;
-  String? _error;
-
-  /// ★ 补充声明：URL 缓存补齐中标志（上次重构时漏了）
   bool _fetchingNext = false;
+  String? _error;
 
   bool _autoAdvancing = false;
   bool _pendingAutoAdvance = false;
@@ -61,16 +59,10 @@ class _SwipeVideoScreenState extends State<SwipeVideoScreen> {
   static const int _kPlayerKeepAfter = 4;
   static const int _kMaxTotalPlayers = 20;
 
-  /// ★ 预加载后 3 个
   static const int _kPreloadAheadCount = 3;
 
-  /// URL 拉取间隔（1800ms）
   static const Duration _kFetchInterval = Duration(milliseconds: 1800);
-
-  /// 预加载启动延迟（2.5s，等当前视频稳定）
   static const Duration _kPreloadStartDelay = Duration(milliseconds: 2500);
-
-  /// 预加载间隔（1000ms）
   static const Duration _kPreloadGap = Duration(milliseconds: 1000);
 
   static const Duration _kMinSavedPosition = Duration(seconds: 1);
@@ -199,11 +191,26 @@ class _SwipeVideoScreenState extends State<SwipeVideoScreen> {
   Future<void> _ensurePlayer(int index) async {
     if (index < 0 || index >= _videos.length) return;
 
+    // ★★★ 关键修复：复用播放器时，如果已播完 → 从头播 ★★★
     if (_players.containsKey(index)) {
       debugPrint('[SwipeVideo] ♻️ 复用播放器 $index（无重新请求）');
       final p = _players[index]!;
       if (p.value.isInitialized && index == _currentPage && widget.active) {
-        p.play();
+        final v = p.value;
+        // 已播完 → seek 到 0 再播，避免"立即播完 → 立即被弹回"的 bug
+        if (v.duration > Duration.zero &&
+            (v.duration - v.position) <= _kEndThreshold) {
+          debugPrint('[SwipeVideo] ♻️ $index 已播完 → 从头播');
+          try {
+            await p.seekTo(Duration.zero);
+          } catch (e) {
+            debugPrint('[SwipeVideo] seek 到 0 失败 $index: $e');
+          }
+          if (!mounted) return;
+          await p.play();
+        } else {
+          await p.play();
+        }
       }
       return;
     }
@@ -238,7 +245,6 @@ class _SwipeVideoScreenState extends State<SwipeVideoScreen> {
         }
       }
 
-      // ★ 用函数声明替代变量赋值（消除 prefer_function_declarations_over_variables）
       void onTick() => _onPlayerTick(index, player);
       _listeners[index] = onTick;
       player.addListener(onTick);
@@ -354,6 +360,7 @@ class _SwipeVideoScreenState extends State<SwipeVideoScreen> {
       }
     });
 
+    // 立即初始化当前页（含"已播完 → 从头播"的逻辑）
     unawaited(_ensurePlayer(index));
 
     if (!isBackward) {
@@ -384,7 +391,7 @@ class _SwipeVideoScreenState extends State<SwipeVideoScreen> {
     unawaited(_ensureUrlBuffer());
   }
 
-  // ── ★ 预加载后 3 个 ──────────────────────────────────────────────
+  // ── 预加载后 3 个 ────────────────────────────────────────────────
   Future<void> _preloadAhead(int snapshotPage) async {
     await Future.delayed(_kPreloadStartDelay);
     if (!mounted) return;
@@ -411,7 +418,6 @@ class _SwipeVideoScreenState extends State<SwipeVideoScreen> {
       await Future.delayed(_kPreloadGap);
     }
 
-    // ★ 修复 unnecessary_brace_in_string_interps
     debugPrint('[SwipeVideo] 预加载 $snapshotPage 完成（共 $_kPreloadAheadCount 个）');
   }
 

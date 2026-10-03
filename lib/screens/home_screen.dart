@@ -258,14 +258,14 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           tabs: [
             // ★ 第一个：老API（默认）
             GlassBottomBarTab(
-              label: '老API',
+              label: 'JK纯欲',
               icon: Icons.cloud,
               selectedIcon: Icons.cloud_outlined,
               glowColor: AppTheme.primaryColor,
             ),
             // ★ 第二个：新API
             GlassBottomBarTab(
-              label: '新API',
+              label: '白丝宝宝',
               icon: Icons.auto_awesome,
               selectedIcon: Icons.auto_awesome_outlined,
               glowColor: AppTheme.accentColor,
