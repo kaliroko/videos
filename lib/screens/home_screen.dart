@@ -39,30 +39,32 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   @override
   Widget build(BuildContext context) {
     final nav = context.watch<NavBarVisibility>();
-    final topInset = MediaQuery.of(context).padding.top;
 
     return LiquidGlassScope.stack(
-      // 网格模式背景为深灰；视频页自己会盖一层黑色
       background: Container(color: AppTheme.surfaceColor),
       content: Scaffold(
         backgroundColor: AppTheme.surfaceColor,
-        // ★ 水平 PageView —— 左右滑切换两个 tab
-        body: PageView(
-          controller: _pageController,
-          onPageChanged: _onPageChanged,
-          physics: const PageScrollPhysics(),
-          children: [
-            // ── Page 0: 老API（网格 + 顶部栏）──
-            Column(
-              children: [
-                _buildAppBar(topInset: topInset),
-                Expanded(child: _buildVideoFeed()),
-              ],
-            ),
+        // ★ 直接用 GlassAppBar 作为 Scaffold.appBar
+        appBar: _buildAppBar(),
+        // ★ 用 extendBodyBehindAppBar 让 body 顶到 AppBar 下面
+        extendBodyBehindAppBar: true,
+        body: Padding(
+          // 顶部留出 AppBar 高度（44 + 状态栏）
+          padding: EdgeInsets.only(
+            top: MediaQuery.of(context).padding.top + 56,
+          ),
+          child: PageView(
+            controller: _pageController,
+            onPageChanged: _onPageChanged,
+            physics: const PageScrollPhysics(),
+            children: [
+              // ── Page 0: 老API（网格）──
+              _buildVideoFeed(),
 
-            // ── Page 1: 新API（全屏视频）──
-            SwipeVideoScreen(active: _bottomTab == 1),
-          ],
+              // ── Page 1: 新API（全屏视频）──
+              SwipeVideoScreen(active: _bottomTab == 1),
+            ],
+          ),
         ),
         extendBody: true,
         bottomNavigationBar: AnimatedSlide(
@@ -72,7 +74,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           child: _buildBottomNav(),
         ),
         floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
-        // ★ FAB 只在老API页显示（视频页不需要刷新按钮）
         floatingActionButton: _bottomTab == 0 ? _buildFab() : null,
       ),
     );
@@ -83,91 +84,82 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     setState(() => _bottomTab = i);
     context.read<NavBarVisibility>().show();
 
-    // ★ 索引 0 = 老API → 需要 Provider 参与
     if (i == 0) {
       context.read<VideoProvider>().setSource(VideoSource.oldApi);
     }
   }
 
-  // ── 顶部栏 ★ 真·液态玻璃（与底栏 GlassBottomBar 同款参数）────────────
-  Widget _buildAppBar({required double topInset}) {
-    return RepaintBoundary(
-      child: Padding(
-        // 悬浮玻璃卡片：左右留边距，顶部避开状态栏
-        padding: EdgeInsets.only(
-          top: topInset + 6,
-          left: 10,
-          right: 10,
-        ),
-        child: GlassContainer(
-          // ★ 独立玻璃层（不在 LiquidGlassLayer 内时必填）
-          useOwnLayer: true,
-          // ★ 与底栏 GlassBottomBar 完全相同的参数
-          settings: const LiquidGlassSettings(
-            thickness:           26,
-            blur:                12,
-            refractiveIndex:     1.55,
-            saturation:          0.7,
-            lightIntensity:      0.55,
-            chromaticAberration: 0.05,
-            ambientStrength:     0.9,
-            lightAngle:          0.785,
-            glassColor:          Color(0x3DFFFFFF),
+  // ── 顶部栏 ★ 用官方 GlassAppBar ───────────────────────────────────────
+  PreferredSizeWidget _buildAppBar() {
+    return GlassAppBar(
+      // ★ 独立玻璃层（不依赖外部 LiquidGlassLayer）
+      useOwnLayer: true,
+      // 透明底（玻璃由组件自己渲染）
+      backgroundColor: Colors.transparent,
+      // 高度 56（比默认 44 稍大，配合内容）
+      preferredSize: const Size.fromHeight(56),
+      // 左对齐
+      centerTitle: false,
+      // ★ 与底栏同款的液态玻璃参数
+      settings: const LiquidGlassSettings(
+        thickness:           30,
+        blur:                12,
+        refractiveIndex:     1.59,
+        saturation:          0.7,
+        lightIntensity:      0.6,
+        chromaticAberration: 0.3,
+        ambientStrength:     1.0,
+        lightAngle:          0.785,
+        glassColor:          Color(0x3DFFFFFF),
+      ),
+      // 整栏内容放在 title 里
+      title: Row(
+        children: [
+          // Logo + 名字
+          Container(
+            width: 32,
+            height: 32,
+            decoration: BoxDecoration(
+              color: AppTheme.accentColor,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: const Icon(
+              Icons.movie,
+              color: Colors.black,
+              size: 18,
+            ),
           ),
-          // ★ 四周圆角（用 shape 参数）
-          shape: const LiquidRoundedSuperellipse(borderRadius: 20),
-          padding: const EdgeInsets.fromLTRB(14, 10, 14, 12),
-          child: Row(
-            children: [
-              Row(
-                children: [
-                  Container(
-                    width: 32,
-                    height: 32,
-                    decoration: BoxDecoration(
-                      color: AppTheme.accentColor,
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: const Icon(
-                      Icons.movie,
-                      color: Colors.black,
-                      size: 18,
-                    ),
-                  ),
-                  const SizedBox(width: 6),
-                  const Text(
-                    '玻璃哔哩',
-                    style: TextStyle(
-                      color: AppTheme.accentColor,
-                      fontSize: 15,
-                      fontWeight: FontWeight.bold,
-                      letterSpacing: 0.5,
-                    ),
-                  ),
-                ],
-              ),
-              const Spacer(),
-              Container(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 8, vertical: 3),
-                decoration: BoxDecoration(
-                  color: AppTheme.primaryColor.withValues(alpha: 0.15),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Text(
-                  'Flask',
-                  style: TextStyle(
-                    color: AppTheme.primaryColor,
-                    fontSize: 10,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 8),
-              _iconBtn(Icons.refresh, _refresh),
-            ],
+          const SizedBox(width: 6),
+          const Text(
+            '玻璃哔哩',
+            style: TextStyle(
+              color: AppTheme.accentColor,
+              fontSize: 15,
+              fontWeight: FontWeight.bold,
+              letterSpacing: 0.5,
+            ),
           ),
-        ),
+          const Spacer(),
+          // Flask 标签
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+            decoration: BoxDecoration(
+              color: AppTheme.primaryColor.withValues(alpha: 0.15),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Text(
+              'Flask',
+              style: TextStyle(
+                color: AppTheme.primaryColor,
+                fontSize: 10,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          // 刷新按钮
+          _iconBtn(Icons.refresh, _refresh),
+        ],
       ),
     );
   }
@@ -307,7 +299,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           unselectedIconColor: AppTheme.textTertiary,
           glassSettings: const LiquidGlassSettings(
             thickness:           26,
-            blur:                3,
+            blur:                6,
             refractiveIndex:     1.55,
             saturation:          0.7,
             lightIntensity:      0.55,
