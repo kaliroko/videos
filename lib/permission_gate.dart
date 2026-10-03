@@ -1,8 +1,9 @@
 /// 权限门禁
 /// - 分 SDK 判断：33+ 用媒体权限，32 及以下用存储权限
 /// - ★ 授权后立即启动 Bootstrap（DCIM 扫描最快开始）
-/// - ★ 通知权限 + 前台服务放后台并行处理，不阻塞 DCIM
-/// - ★ 修复：_check 加防重入锁，防止并发启动两次 Bootstrap
+/// - ★ _check() 加防重入锁，防止并发调用导致重复启动
+/// - ★ didChangeAppLifecycleState 延迟 300ms，避免和首次 _check 撞车
+/// - UI 风格：MD3 + 毛玻璃 + 真实视频封面背景 + 弹簧入场
 library;
 
 import 'dart:async';
@@ -40,11 +41,11 @@ class _PermissionGateState extends State<PermissionGate>
   bool _checking = true;
   bool _granted = false;
   bool _permanentlyDenied = false;
+  bool _foregroundStarted = false;
+  bool _bootstrapStarted = false;
 
-  /// ★ 修复：多个锁，防止重复启动
-  bool _checkRunning = false;         // _check 防重入
-  bool _bootstrapStarted = false;     // Bootstrap 只启动一次
-  bool _foregroundStarted = false;    // 前台服务只启动一次
+  /// ★ 防重入锁：避免 _check 并发调用两次
+  bool _checkRunning = false;
 
   @override
   void initState() {
@@ -62,7 +63,10 @@ class _PermissionGateState extends State<PermissionGate>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed && !_granted) {
-      _check();
+      // ★ 延迟 300ms 再检查，避免跟正在进行中的 _check 撞车
+      Future.delayed(const Duration(milliseconds: 300), () {
+        if (mounted && !_granted) _check();
+      });
     }
   }
 
@@ -73,6 +77,7 @@ class _PermissionGateState extends State<PermissionGate>
       return;
     }
     _checkRunning = true;
+
     try {
       final status = await _readStatus();
       if (!mounted) return;
@@ -85,18 +90,14 @@ class _PermissionGateState extends State<PermissionGate>
 
       if (!_granted) return;
 
-      // ══════════════════════════════════════════════════════
-      // ★ 使用独立的锁，确保每个任务只跑一次
-      // ══════════════════════════════════════════════════════
-
       // ① Bootstrap 只启动一次
       if (!_bootstrapStarted) {
         _bootstrapStarted = true;
-        debugPrint('[PermissionGate] ⚡ 权限到位，启动 Bootstrap（仅一次）');
+        debugPrint('[PermissionGate] ⚡ 启动 Bootstrap（仅一次）');
         unawaited(BootstrapManager.init());
       }
 
-      // ② onGranted 只回调一次
+      // ② 前台服务 + onGranted 只触发一次
       if (!_foregroundStarted) {
         _foregroundStarted = true;
         widget.onGranted?.call();
@@ -198,12 +199,12 @@ class _PermissionGateState extends State<PermissionGate>
         const _LivePreviewBackground(),
         BackdropFilter(
           filter: ImageFilter.blur(
-            sigmaX: 10,
-            sigmaY: 10,
+            sigmaX: 12,
+            sigmaY: 12,
             tileMode: TileMode.clamp,
           ),
           child: Container(
-            color: Colors.black.withValues(alpha: 0.42),
+            color: Colors.black.withValues(alpha: 0.32),
           ),
         ),
         Positioned(
