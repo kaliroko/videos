@@ -11,12 +11,13 @@ import 'announcement_dialog.dart';
 
 /// 全局远程配置网关（非阻塞、不误判）：
 ///
-///   1. 首帧立刻显示 child，用户无感
-///   2. 延迟 1.2 秒（等 UI 完全渲染）后，才拉远程配置
-///   3. 只有「明确拉到 app_enabled=false」才切禁用页
-///   4. 网络失败/超时/表空 → 什么都不做，保持正常使用
+///   1. 首帧立刻显示 child（完整正常 App UI），用户无感
+///   2. 延迟 1.2 秒后，才拉远程配置
+///   3. 只有明确拉到 app_enabled=false 才切禁用页
+///   4. 网络失败/超时/表空 → 什么都不做
 ///   5. Realtime 订阅：运行期间配置变更 → 毫秒级响应
 ///   6. 60 秒轮询保底
+///   7. ★ 手动"重新加载"按钮：立即拉取，且防狂点
 class RemoteGate extends StatefulWidget {
   final Widget child;
   const RemoteGate({super.key, required this.child});
@@ -26,25 +27,20 @@ class RemoteGate extends StatefulWidget {
 }
 
 class _RemoteGateState extends State<RemoteGate> {
-  /// ★ 只有明确拉到且 app_enabled=false 时才非 null
   AppConfig? _disabledConfig;
-
   Timer? _pollTimer;
   RealtimeChannel? _channel;
   bool _showingAnnouncement = false;
   bool _firstCheckDone = false;
 
+  /// ★ 是否正在手动"重新加载"检查中（防狂点）
+  bool _retrying = false;
+
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _scheduleFirstCheck());
 
-    // ★ 关键：延迟拉取，让首页先完整渲染出来
-    //   用两个 postFrameCallback + 1.2s 延迟，确保首屏动画/加载都稳定
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _scheduleFirstCheck();
-    });
-
-    // 保底轮询：60 秒一次（仅在首次检查完成后才启动）
     _pollTimer = Timer.periodic(
       const Duration(seconds: 60),
       (_) {
@@ -60,10 +56,8 @@ class _RemoteGateState extends State<RemoteGate> {
     super.dispose();
   }
 
-  /// 首次检查：等首屏完全渲染 + 稳定 1.2 秒后再拉
   void _scheduleFirstCheck() {
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      // 再等 1.2 秒，让首页的图片/视频/动画都稳定下来
       await Future.delayed(const Duration(milliseconds: 1200));
       if (!mounted) return;
 
@@ -78,34 +72,37 @@ class _RemoteGateState extends State<RemoteGate> {
   // ── 拉一次配置 ──────────────────────────────────────────────────
   Future<void> _runCheck({required bool showAnnouncement}) async {
     final cfg = await RemoteConfigManager.fetch();
-
-    // ★ 没拉到 → 什么都不做（保持现状，不误伤用户）
-    if (cfg == null) {
-      debugPrint('[RemoteGate] 未拉到配置，跳过判断');
-      return;
-    }
-
+    if (cfg == null) return;
     if (!mounted) return;
 
-    // 只有明确 app_enabled=false 才切禁用页
     if (!cfg.appEnabled) {
-      debugPrint('[RemoteGate] 🚫 App 被远程禁用');
       setState(() => _disabledConfig = cfg);
       return;
     }
 
-    // 拉到且启用 → 清除禁用状态（防止曾被误判后无法恢复）
     if (_disabledConfig != null) {
       setState(() => _disabledConfig = null);
     }
 
-    // 弹公告（只在启动首次）
     if (showAnnouncement && !_showingAnnouncement) {
       _maybeShowAnnouncement(cfg);
     }
   }
 
-  // ── Realtime 订阅（毫秒级推送）──────────────────────────────────
+  // ── ★ 手动"重新加载"（防狂点）───────────────────────────────────
+  Future<void> _manualRetry() async {
+    if (_retrying) return;              // 已经在检查中，忽略
+    setState(() => _retrying = true);
+    try {
+      await _runCheck(showAnnouncement: false);
+    } finally {
+      if (mounted) {
+        setState(() => _retrying = false);
+      }
+    }
+  }
+
+  // ── Realtime 订阅 ───────────────────────────────────────────────
   void _subscribeRealtime() {
     try {
       _channel = Supabase.instance.client
@@ -117,17 +114,12 @@ class _RemoteGateState extends State<RemoteGate> {
             callback: (payload) {
               final row = payload.newRecord;
               if (row.isEmpty) return;
-
               final cfg = AppConfig.fromMap(row);
-              debugPrint('[RemoteGate] ⚡ Realtime 推送: '
-                  'app_enabled=${cfg.appEnabled}');
-
               if (!mounted) return;
 
               if (!cfg.appEnabled) {
                 setState(() => _disabledConfig = cfg);
               } else {
-                // 被恢复
                 if (_disabledConfig != null) {
                   setState(() => _disabledConfig = null);
                 }
@@ -135,7 +127,7 @@ class _RemoteGateState extends State<RemoteGate> {
             },
           )
           .subscribe((status, [err]) {
-            debugPrint('[RemoteGate] Realtime 状态: $status, err=$err');
+            debugPrint('[RemoteGate] Realtime: $status, err=$err');
           });
     } catch (e) {
       debugPrint('[RemoteGate] Realtime 订阅失败: $e');
@@ -165,11 +157,11 @@ class _RemoteGateState extends State<RemoteGate> {
 
   @override
   Widget build(BuildContext context) {
-    // ★ 只有明确被禁用才遮挡 UI；否则始终显示 child
     if (_disabledConfig != null) {
       return AppDisabledScreen(
         reason: _disabledConfig!.disabledReason,
-        onRetry: () => _runCheck(showAnnouncement: false),
+        onRetry: _manualRetry,
+        retrying: _retrying,          // ★ 传给按钮
       );
     }
     return widget.child;

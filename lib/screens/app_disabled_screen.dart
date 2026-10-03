@@ -7,10 +7,14 @@ class AppDisabledScreen extends StatelessWidget {
   final String reason;
   final VoidCallback? onRetry;
 
+  /// ★ 是否正在检查（父组件传进来）
+  final bool retrying;
+
   const AppDisabledScreen({
     super.key,
     required this.reason,
     this.onRetry,
+    this.retrying = false,
   });
 
   @override
@@ -45,10 +49,20 @@ class AppDisabledScreen extends StatelessWidget {
               ),
               const SizedBox(height: 28),
               if (onRetry != null)
+                // ★ 检查中禁用按钮 + 显示转圈
                 FilledButton.icon(
-                  onPressed: onRetry,
-                  icon: const Icon(Icons.refresh, size: 16),
-                  label: const Text('重新加载'),
+                  onPressed: retrying ? null : onRetry,
+                  icon: retrying
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
+                      : const Icon(Icons.refresh, size: 16),
+                  label: Text(retrying ? '检查中…' : '重新加载'),
                 ),
             ],
           ),
