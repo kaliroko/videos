@@ -1,11 +1,12 @@
 /// 上下滑动视频播放器（仿抖音上下滑动）
 /// - 当前视频秒开
-/// - 后台预加载后 4 个
+/// - 后台预加载后 3 个
 /// - 前面保留 15 个播放器（向上滑回不重新请求）
 /// - 记录播放进度，被释放后重新初始化会 seek 回去
 /// - 两级释放：超范围 + 超上限
-/// - ★ 优化 1：竖屏模糊 sigma 15 / 横屏 sigma 8
-/// - ★ 优化 2：每个视频页加 RepaintBoundary
+/// - 竖屏模糊 sigma 15 / 横屏 sigma 8
+/// - ★ 视频播完自动滑到下一条
+/// - ★ 低并发：预加载后 3 个、间隔 1s、翻页即中止预加载
 library;
 
 import 'dart:async';
@@ -34,8 +35,7 @@ class _SwipeVideoScreenState extends State<SwipeVideoScreen> {
 
   final List<VideoItem> _videos = [];
   final Map<int, VideoPlayerController> _players = {};
-
-  /// 已释放播放器的播放进度（index → position）
+  final Map<int, VoidCallback> _listeners = {};
   final Map<int, Duration> _savedPositions = {};
 
   int _currentPage = 0;
@@ -43,41 +43,35 @@ class _SwipeVideoScreenState extends State<SwipeVideoScreen> {
   bool _fetching = false;
   String? _error;
 
+  bool _autoAdvancing = false;
+  bool _pendingAutoAdvance = false;
+  int? _pendingAutoAdvanceForPage;
+
   NavBarVisibility? _nav;
 
   // ══════════════════════════════════════════════════════════
   // 配置
   // ══════════════════════════════════════════════════════════
 
-  /// URL 缓存数量（当前页 + 后 4 个 + 前 2）
   static const int _kUrlBuffer = 6;
-
-  /// 播放器保留：前面 N 个（回看用，越大越不容易重新请求）
   static const int _kPlayerKeepBefore = 15;
-
-  /// 播放器保留：后面 N 个（预加载用）
   static const int _kPlayerKeepAfter = 4;
-
-  /// 播放器总数上限（超过这个数，从最远的开始释放）
   static const int _kMaxTotalPlayers = 20;
 
-  /// 预加载后面几个播放器
-  static const int _kPreloadAheadCount = 4;
+  /// ★ 预加载后 3 个
+  static const int _kPreloadAheadCount = 3;
 
-  /// 懒加载 URL 的间隔（防限流）
-  static const Duration _kFetchInterval = Duration(milliseconds: 1200);
+  /// URL 拉取间隔（1800ms）
+  static const Duration _kFetchInterval = Duration(milliseconds: 1800);
 
-  /// 预加载启动延迟（等当前视频先稳）
-  static const Duration _kPreloadStartDelay = Duration(seconds: 2);
+  /// 预加载启动延迟（2.5s，等当前视频稳定）
+  static const Duration _kPreloadStartDelay = Duration(milliseconds: 2500);
 
-  /// 每次预初始化之间间隔
-  static const Duration _kPreloadGap = Duration(milliseconds: 500);
+  /// 预加载间隔（1000ms）
+  static const Duration _kPreloadGap = Duration(milliseconds: 1000);
 
-  /// 进度记录的最小有效值（小于这个不记录）
   static const Duration _kMinSavedPosition = Duration(seconds: 1);
-
-  // ── 运行时状态 ──────────────────────────────────────────────
-  bool _fetchingNext = false;
+  static const Duration _kEndThreshold = Duration(milliseconds: 300);
 
   @override
   void initState() {
@@ -112,19 +106,27 @@ class _SwipeVideoScreenState extends State<SwipeVideoScreen> {
   void dispose() {
     _nav?.show();
     _controller.dispose();
-    for (final p in _players.values) {
-      p.dispose();
+    for (final entry in _players.entries) {
+      final listener = _listeners.remove(entry.key);
+      if (listener != null) entry.value.removeListener(listener);
+      entry.value.dispose();
     }
     _players.clear();
+    _listeners.clear();
     _savedPositions.clear();
     super.dispose();
   }
 
-  // ── 首屏：立即拉第 1 条 ────────────────────────────────────────────
+  // ── 首屏 ──────────────────────────────────────────────────────────
   Future<void> _initialLoad() async {
     await _loadNext();
     if (!mounted || _error != null) return;
+
+    // URL 缓存（慢速补齐）
     unawaited(_ensureUrlBuffer());
+
+    // 首屏也预加载后 3 个
+    unawaited(_preloadAhead(0));
   }
 
   // ── 确保 URL 缓存足够 ─────────────────────────────────────────────
@@ -175,6 +177,19 @@ class _SwipeVideoScreenState extends State<SwipeVideoScreen> {
       if (newIndex == _currentPage) {
         unawaited(_ensurePlayer(newIndex));
       }
+
+      // 最后一页播完 → 新视频就绪后自动滑
+      if (_pendingAutoAdvance && _videos.length > _currentPage + 1) {
+        final triggerPage = _pendingAutoAdvanceForPage;
+        _pendingAutoAdvance = false;
+        _pendingAutoAdvanceForPage = null;
+
+        if (triggerPage != null && triggerPage == _currentPage) {
+          Future.delayed(const Duration(milliseconds: 300), () {
+            if (mounted) _autoAdvanceToNext(_currentPage);
+          });
+        }
+      }
     } finally {
       _fetching = false;
     }
@@ -184,7 +199,6 @@ class _SwipeVideoScreenState extends State<SwipeVideoScreen> {
   Future<void> _ensurePlayer(int index) async {
     if (index < 0 || index >= _videos.length) return;
 
-    // ★ 已存在 → 直接复用，不重新请求
     if (_players.containsKey(index)) {
       debugPrint('[SwipeVideo] ♻️ 复用播放器 $index（无重新请求）');
       final p = _players[index]!;
@@ -206,7 +220,7 @@ class _SwipeVideoScreenState extends State<SwipeVideoScreen> {
 
     try {
       await player.initialize();
-      await player.setLooping(true);
+      await player.setLooping(false);
 
       if (!mounted) {
         player.dispose();
@@ -214,7 +228,6 @@ class _SwipeVideoScreenState extends State<SwipeVideoScreen> {
         return;
       }
 
-      // ★ 恢复上次的播放进度
       final savedPos = _savedPositions[index];
       if (savedPos != null && savedPos > _kMinSavedPosition) {
         try {
@@ -225,24 +238,88 @@ class _SwipeVideoScreenState extends State<SwipeVideoScreen> {
         }
       }
 
+      final listener = () => _onPlayerTick(index, player);
+      _listeners[index] = listener;
+      player.addListener(listener);
+
       if (index == _currentPage && widget.active) {
         player.play();
       }
       if (mounted) setState(() {});
     } catch (e) {
       debugPrint('[SwipeVideo] init $index failed: $e');
+      _players.remove(index);
+      _listeners.remove(index);
     }
   }
 
-  // ── 释放播放器（先记录进度）────────────────────────────────────
+  // ★ 播放器 tick
+  void _onPlayerTick(int index, VideoPlayerController player) {
+    if (!mounted) return;
+    if (_autoAdvancing) return;
+    if (index != _currentPage) return;
+    if (!widget.active) return;
+
+    final v = player.value;
+    if (!v.isInitialized) return;
+    if (v.duration <= Duration.zero) return;
+    if (v.position <= Duration.zero) return;
+
+    final remaining = v.duration - v.position;
+    if (remaining <= _kEndThreshold) {
+      debugPrint('[SwipeVideo] 🎬 视频 $index 播完，自动滑到下一个');
+      _autoAdvanceToNext(index);
+    }
+  }
+
+  // ★ 自动滑到下一个
+  void _autoAdvanceToNext(int index) {
+    if (!mounted) return;
+    if (_autoAdvancing) return;
+    if (index != _currentPage) return;
+
+    if (index >= _videos.length - 1) {
+      if (!_pendingAutoAdvance) {
+        debugPrint('[SwipeVideo] 最后一页，等待新视频...');
+        _pendingAutoAdvance = true;
+        _pendingAutoAdvanceForPage = index;
+        _players[index]?.pause();
+        unawaited(_ensureUrlBuffer());
+      }
+      return;
+    }
+
+    _autoAdvancing = true;
+    _players[index]?.pause();
+
+    if (_controller.hasClients) {
+      _controller.nextPage(
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeOut,
+      );
+    }
+
+    Future.delayed(const Duration(milliseconds: 500), () {
+      if (mounted) _autoAdvancing = false;
+    });
+  }
+
+  // ── 释放播放器 ────────────────────────────────────────────────────
   void _releasePlayer(int index) {
     final p = _players[index];
     if (p == null) return;
 
-    // 记录当前进度
+    final listener = _listeners.remove(index);
+    if (listener != null) p.removeListener(listener);
+
     if (p.value.isInitialized) {
       final pos = p.value.position;
-      if (pos > _kMinSavedPosition) {
+      final dur = p.value.duration;
+      final isFinished = dur > Duration.zero &&
+          (dur - pos) <= _kEndThreshold;
+      if (isFinished) {
+        _savedPositions.remove(index);
+      } else if (pos > _kMinSavedPosition) {
         _savedPositions[index] = pos;
       }
     }
@@ -255,35 +332,38 @@ class _SwipeVideoScreenState extends State<SwipeVideoScreen> {
   void _onPageChanged(int index) {
     final oldPage = _currentPage;
 
+    if (_pendingAutoAdvance) {
+      _pendingAutoAdvance = false;
+      _pendingAutoAdvanceForPage = null;
+    }
+
+    final isBackward = index < oldPage;
+
     if (index > oldPage) {
       _nav?.hide();
-    } else if (index < oldPage) {
+    } else if (isBackward) {
       _nav?.show();
     }
 
     setState(() => _currentPage = index);
 
-    // 暂停所有非当前页
     _players.forEach((i, p) {
       if (i != index && p.value.isInitialized && p.value.isPlaying) {
         p.pause();
       }
     });
 
-    // ★ 立即初始化当前页（秒开）
+    // 立即初始化当前页（秒开，高优先级）
     unawaited(_ensurePlayer(index));
 
-    // ★ 后台预初始化后 4 个
-    unawaited(_preloadNextFour(index));
+    // ★ 只在用户往下翻时预加载；往上翻（回看）跳过
+    if (!isBackward) {
+      unawaited(_preloadAhead(index));
+    } else {
+      debugPrint('[SwipeVideo] 用户回看，跳过预加载');
+    }
 
-    // ══════════════════════════════════════════════════════
-    // ★ 两级释放：
-    //   第一级：释放明显超出范围的
-    //   第二级：如果总数还是超上限，从最远的开始释放
-    //   效果：只要没超上限，前面的播放器永远保留 → 不重新请求
-    // ══════════════════════════════════════════════════════
-
-    // 第一级：超出「前 15 / 后 4」范围的
+    // 两级释放
     final farAway = _players.keys
         .where((i) =>
             i < index - _kPlayerKeepBefore ||
@@ -293,47 +373,67 @@ class _SwipeVideoScreenState extends State<SwipeVideoScreen> {
       _releasePlayer(i);
     }
 
-    // 第二级：总数还是超上限 → 释放最远的（前面优先被释放）
     if (_players.length > _kMaxTotalPlayers) {
       final sorted = _players.keys.toList()
         ..sort((a, b) =>
             (a - index).abs().compareTo((b - index).abs()));
-      // 保留最近的 _kMaxTotalPlayers 个
       for (int i = _kMaxTotalPlayers; i < sorted.length; i++) {
         _releasePlayer(sorted[i]);
       }
     }
 
-    // 确保 URL 缓存
     unawaited(_ensureUrlBuffer());
   }
 
-  // ── 预初始化后 4 个播放器 ────────────────────────────────────────
-  Future<void> _preloadNextFour(int currentIndex) async {
+  // ── ★ 预加载后 3 个（低并发 + 页码校验）─────────────────────────
+  Future<void> _preloadAhead(int snapshotPage) async {
+    // 延迟启动，等当前视频稳定
     await Future.delayed(_kPreloadStartDelay);
     if (!mounted) return;
 
+    // 用户已翻走 → 放弃
+    if (_currentPage != snapshotPage) {
+      debugPrint('[SwipeVideo] 预加载延迟结束，用户已翻走，放弃');
+      return;
+    }
+
     for (int offset = 1; offset <= _kPreloadAheadCount; offset++) {
-      final idx = currentIndex + offset;
+      // ★ 每轮都检查用户是否已翻走
+      if (!mounted) return;
+      if (_currentPage != snapshotPage) {
+        debugPrint('[SwipeVideo] 预加载中途用户翻走，停止');
+        return;
+      }
+
+      final idx = snapshotPage + offset;
       if (idx >= _videos.length) break;
       if (_players.containsKey(idx)) continue;
 
       await _ensurePlayer(idx);
       if (!mounted) return;
 
+      // 每次预加载之间间隔 1s
       await Future.delayed(_kPreloadGap);
-      if (!mounted) return;
     }
+
+    debugPrint('[SwipeVideo] 预加载 $snapshotPage 完成（共 ${_kPreloadAheadCount} 个）');
   }
 
   // ── 点击暂停/播放 ─────────────────────────────────────────────────
   void _onTap(int index) {
     final p = _players[index];
     if (p == null || !p.value.isInitialized) return;
+
     if (p.value.isPlaying) {
       p.pause();
     } else {
-      p.play();
+      final v = p.value;
+      if (v.duration > Duration.zero &&
+          (v.duration - v.position) <= _kEndThreshold) {
+        p.seekTo(Duration.zero).then((_) => p.play());
+      } else {
+        p.play();
+      }
     }
     setState(() {});
   }
@@ -402,7 +502,6 @@ class _SwipeVideoScreenState extends State<SwipeVideoScreen> {
           final player = _players[index];
           final ready = player != null && player.value.isInitialized;
 
-          // ★ 优化 2：每个视频页加 RepaintBoundary
           return RepaintBoundary(
             child: GestureDetector(
               onTap: () => _onTap(index),
@@ -430,19 +529,13 @@ class _SwipeVideoScreenState extends State<SwipeVideoScreen> {
 
 // ══════════════════════════════════════════════════════════════
 // 视频显示：原比例前景（轻微放大）+ 四周模糊填充
-// - 竖屏视频 → 左右黑边模糊（sigma 15）
-// - 横屏视频 → 上下黑边模糊（sigma 8，更低省性能）
 // ══════════════════════════════════════════════════════════════
 class _FitVideo extends StatelessWidget {
   final VideoPlayerController controller;
   const _FitVideo({required this.controller});
 
   static const double _kForegroundScale = 1.06;
-
-  /// 竖屏视频模糊强度
   static const double _kBlurPortrait = 15.0;
-
-  /// 横屏视频模糊强度（更低，减少 GPU 负担）
   static const double _kBlurLandscape = 8.0;
 
   @override
@@ -456,7 +549,6 @@ class _FitVideo extends StatelessWidget {
     final isPortrait = videoAR < 1.0;
     final blurSigma = isPortrait ? _kBlurPortrait : _kBlurLandscape;
 
-    // 前景：原比例 + 轻微放大裁边
     final Widget foreground = ClipRect(
       child: Transform.scale(
         scale: _kForegroundScale,
@@ -467,11 +559,9 @@ class _FitVideo extends StatelessWidget {
       ),
     );
 
-    // 统一：四周都模糊背景（横屏 sigma 更低）
     return Stack(
       fit: StackFit.expand,
       children: [
-        // ① 底层：视频模糊铺满全屏
         ClipRect(
           child: ImageFiltered(
             imageFilter: ImageFilter.blur(
@@ -489,8 +579,6 @@ class _FitVideo extends StatelessWidget {
             ),
           ),
         ),
-
-        // ② 前景：原比例居中
         Center(child: foreground),
       ],
     );
