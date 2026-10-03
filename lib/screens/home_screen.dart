@@ -105,7 +105,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           // ★ 与底栏 GlassBottomBar 完全相同的参数
           settings: const LiquidGlassSettings(
             thickness:           26,
-            blur:                3,
+            blur:                12,
             refractiveIndex:     1.55,
             saturation:          0.7,
             lightIntensity:      0.55,
