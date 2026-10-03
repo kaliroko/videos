@@ -9,15 +9,16 @@ import '../models/app_config.dart';
 import '../screens/app_disabled_screen.dart';
 import 'announcement_dialog.dart';
 
-/// 全局远程配置网关（非阻塞、不误判）：
+/// 全局远程配置网关（非阻塞 + 粘性禁用）：
 ///
-///   1. 首帧立刻显示 child（完整正常 App UI），用户无感
-///   2. 延迟 1.2 秒后，才拉远程配置
-///   3. 只有明确拉到 app_enabled=false 才切禁用页
-///   4. 网络失败/超时/表空 → 什么都不做
-///   5. Realtime 订阅：运行期间配置变更 → 毫秒级响应
-///   6. 60 秒轮询保底
-///   7. ★ 手动"重新加载"按钮：立即拉取，且防狂点
+///   1. 启动时先读本地缓存
+///      - 缓存禁用 → 立即显示禁用页（不等远程）
+///      - 缓存正常 → 立即显示 child（正常 App）
+///   2. 延迟 1.2 秒后拉远程配置
+///      - 拉到 app_enabled=false → 禁用页 + 写入缓存
+///      - 拉到 app_enabled=true  → 清除缓存 + 正常 UI
+///      - 拉取失败（null）       → 保持现状（不误放行）
+///   3. Realtime 订阅 + 60 秒轮询
 class RemoteGate extends StatefulWidget {
   final Widget child;
   const RemoteGate({super.key, required this.child});
@@ -27,19 +28,24 @@ class RemoteGate extends StatefulWidget {
 }
 
 class _RemoteGateState extends State<RemoteGate> {
-  AppConfig? _disabledConfig;
+  /// 当前禁用原因（非 null 表示被禁用）
+  String? _disabledReason;
+
+  /// 首次缓存是否已读完
+  bool _cacheLoaded = false;
+
   Timer? _pollTimer;
   RealtimeChannel? _channel;
   bool _showingAnnouncement = false;
   bool _firstCheckDone = false;
-
-  /// ★ 是否正在手动"重新加载"检查中（防狂点）
   bool _retrying = false;
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _scheduleFirstCheck());
+
+    // ★ 第一步：读本地缓存（同步很快，几乎无感）
+    _loadCacheThenStart();
 
     _pollTimer = Timer.periodic(
       const Duration(seconds: 60),
@@ -54,6 +60,28 @@ class _RemoteGateState extends State<RemoteGate> {
     _pollTimer?.cancel();
     _channel?.unsubscribe();
     super.dispose();
+  }
+
+  /// 读缓存 → 决定首屏展示 → 1.2s 后拉远程
+  Future<void> _loadCacheThenStart() async {
+    final cachedDisabled = await RemoteConfigManager.isCachedDisabled();
+    final cachedReason = await RemoteConfigManager.cachedDisabledReason();
+
+    if (!mounted) return;
+    setState(() {
+      _cacheLoaded = true;
+      if (cachedDisabled) {
+        _disabledReason = cachedReason;
+      }
+    });
+
+    debugPrint('[RemoteGate] 缓存状态: disabled=$cachedDisabled, '
+        'reason=$cachedReason');
+
+    // ★ 无论缓存是什么状态，都要在 UI 稳定后拉一次远程做最终确认
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _scheduleFirstCheck();
+    });
   }
 
   void _scheduleFirstCheck() {
@@ -72,33 +100,44 @@ class _RemoteGateState extends State<RemoteGate> {
   // ── 拉一次配置 ──────────────────────────────────────────────────
   Future<void> _runCheck({required bool showAnnouncement}) async {
     final cfg = await RemoteConfigManager.fetch();
-    if (cfg == null) return;
-    if (!mounted) return;
 
-    if (!cfg.appEnabled) {
-      setState(() => _disabledConfig = cfg);
+    // ★ 拉取失败 → 保持现状（不误放行，也不误禁）
+    if (cfg == null) {
+      debugPrint('[RemoteGate] 未拉到配置，保持现状');
       return;
     }
 
-    if (_disabledConfig != null) {
-      setState(() => _disabledConfig = null);
+    if (!mounted) return;
+
+    if (!cfg.appEnabled) {
+      // 禁用 → 写缓存 + 显示禁用页
+      await RemoteConfigManager.saveDisabledState(cfg.disabledReason);
+      if (!mounted) return;
+      setState(() => _disabledReason = cfg.disabledReason);
+      return;
     }
 
+    // 启用 → 清缓存 + 恢复正常
+    await RemoteConfigManager.clearDisabledState();
+    if (!mounted) return;
+    if (_disabledReason != null) {
+      setState(() => _disabledReason = null);
+    }
+
+    // 弹公告
     if (showAnnouncement && !_showingAnnouncement) {
       _maybeShowAnnouncement(cfg);
     }
   }
 
-  // ── ★ 手动"重新加载"（防狂点）───────────────────────────────────
+  // ── 手动"重新加载" ─────────────────────────────────────────────
   Future<void> _manualRetry() async {
-    if (_retrying) return;              // 已经在检查中，忽略
+    if (_retrying) return;
     setState(() => _retrying = true);
     try {
       await _runCheck(showAnnouncement: false);
     } finally {
-      if (mounted) {
-        setState(() => _retrying = false);
-      }
+      if (mounted) setState(() => _retrying = false);
     }
   }
 
@@ -111,17 +150,21 @@ class _RemoteGateState extends State<RemoteGate> {
             event: PostgresChangeEvent.update,
             schema: 'public',
             table: 'app_config',
-            callback: (payload) {
+            callback: (payload) async {
               final row = payload.newRecord;
               if (row.isEmpty) return;
               final cfg = AppConfig.fromMap(row);
               if (!mounted) return;
 
               if (!cfg.appEnabled) {
-                setState(() => _disabledConfig = cfg);
+                await RemoteConfigManager.saveDisabledState(cfg.disabledReason);
+                if (!mounted) return;
+                setState(() => _disabledReason = cfg.disabledReason);
               } else {
-                if (_disabledConfig != null) {
-                  setState(() => _disabledConfig = null);
+                await RemoteConfigManager.clearDisabledState();
+                if (!mounted) return;
+                if (_disabledReason != null) {
+                  setState(() => _disabledReason = null);
                 }
               }
             },
@@ -157,11 +200,16 @@ class _RemoteGateState extends State<RemoteGate> {
 
   @override
   Widget build(BuildContext context) {
-    if (_disabledConfig != null) {
+    // 缓存还没读完 → 显示空黑屏（<50ms，肉眼无感）
+    if (!_cacheLoaded) {
+      return const SizedBox.shrink();
+    }
+
+    if (_disabledReason != null) {
       return AppDisabledScreen(
-        reason: _disabledConfig!.disabledReason,
+        reason: _disabledReason!,
         onRetry: _manualRetry,
-        retrying: _retrying,          // ★ 传给按钮
+        retrying: _retrying,
       );
     }
     return widget.child;
