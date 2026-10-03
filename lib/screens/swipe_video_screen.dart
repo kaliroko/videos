@@ -1,7 +1,9 @@
 /// 上下滑动视频播放器（仿抖音上下滑动）
 /// - 当前视频秒开
-/// - 后台预加载后 4 个视频
-/// - 不抢带宽，不限流
+/// - 后台预加载后 4 个
+/// - ★ 前面保留 15 个播放器（向上滑回不重新请求）
+/// - ★ 记录播放进度，被释放后重新初始化会 seek 回去
+/// - ★ 两级释放：超范围 + 超上限，其他永远保留
 library;
 
 import 'dart:async';
@@ -31,6 +33,9 @@ class _SwipeVideoScreenState extends State<SwipeVideoScreen> {
   final List<VideoItem> _videos = [];
   final Map<int, VideoPlayerController> _players = {};
 
+  /// 已释放播放器的播放进度（index → position）
+  final Map<int, Duration> _savedPositions = {};
+
   int _currentPage = 0;
   bool _loading = true;
   bool _fetching = false;
@@ -42,11 +47,17 @@ class _SwipeVideoScreenState extends State<SwipeVideoScreen> {
   // 配置
   // ══════════════════════════════════════════════════════════
 
-  /// URL 缓存数量（当前页 + 后 4 个 + 前 2 = 至少 7 条）
+  /// URL 缓存数量（当前页 + 后 4 个 + 前 2）
   static const int _kUrlBuffer = 6;
 
-  /// 播放器保留范围（前后各 N 个）
-  static const int _kPlayerKeepRange = 4;
+  /// 播放器保留：前面 N 个（回看用，越大越不容易重新请求）
+  static const int _kPlayerKeepBefore = 15;
+
+  /// 播放器保留：后面 N 个（预加载用）
+  static const int _kPlayerKeepAfter = 4;
+
+  /// 播放器总数上限（超过这个数，从最远的开始释放）
+  static const int _kMaxTotalPlayers = 20;
 
   /// 预加载后面几个播放器
   static const int _kPreloadAheadCount = 4;
@@ -59,6 +70,9 @@ class _SwipeVideoScreenState extends State<SwipeVideoScreen> {
 
   /// 每次预初始化之间间隔
   static const Duration _kPreloadGap = Duration(milliseconds: 500);
+
+  /// 进度记录的最小有效值（小于这个不记录）
+  static const Duration _kMinSavedPosition = Duration(seconds: 1);
 
   // ── 运行时状态 ──────────────────────────────────────────────
   bool _fetchingNext = false;
@@ -100,15 +114,14 @@ class _SwipeVideoScreenState extends State<SwipeVideoScreen> {
       p.dispose();
     }
     _players.clear();
+    _savedPositions.clear();
     super.dispose();
   }
 
   // ── 首屏：立即拉第 1 条 ────────────────────────────────────────────
   Future<void> _initialLoad() async {
-    await _loadNext();           // 第 1 条：立即初始化播放器
+    await _loadNext();
     if (!mounted || _error != null) return;
-
-    // 后台补齐 URL 到 (currentPage + _kUrlBuffer) 条
     unawaited(_ensureUrlBuffer());
   }
 
@@ -125,11 +138,9 @@ class _SwipeVideoScreenState extends State<SwipeVideoScreen> {
         if (!mounted) break;
 
         if (_videos.length == before) {
-          // 拉失败 → 退避重试
           await Future.delayed(const Duration(seconds: 2));
           continue;
         }
-        // 每条之间休息（防限流）
         await Future.delayed(_kFetchInterval);
       }
     } finally {
@@ -159,8 +170,6 @@ class _SwipeVideoScreenState extends State<SwipeVideoScreen> {
       });
 
       final newIndex = _videos.length - 1;
-
-      // ★ 只初始化「当前页」的播放器
       if (newIndex == _currentPage) {
         unawaited(_ensurePlayer(newIndex));
       }
@@ -173,7 +182,9 @@ class _SwipeVideoScreenState extends State<SwipeVideoScreen> {
   Future<void> _ensurePlayer(int index) async {
     if (index < 0 || index >= _videos.length) return;
 
+    // ★ 已存在 → 直接复用，不重新请求
     if (_players.containsKey(index)) {
+      debugPrint('[SwipeVideo] ♻️ 复用播放器 $index（无重新请求）');
       final p = _players[index]!;
       if (p.value.isInitialized && index == _currentPage && widget.active) {
         p.play();
@@ -194,11 +205,24 @@ class _SwipeVideoScreenState extends State<SwipeVideoScreen> {
     try {
       await player.initialize();
       await player.setLooping(true);
+
       if (!mounted) {
         player.dispose();
         _players.remove(index);
         return;
       }
+
+      // ★ 恢复上次的播放进度
+      final savedPos = _savedPositions[index];
+      if (savedPos != null && savedPos > _kMinSavedPosition) {
+        try {
+          await player.seekTo(savedPos);
+          debugPrint('[SwipeVideo] 恢复进度 $index → ${savedPos.inSeconds}s');
+        } catch (e) {
+          debugPrint('[SwipeVideo] seek 失败 $index: $e');
+        }
+      }
+
       if (index == _currentPage && widget.active) {
         player.play();
       }
@@ -206,6 +230,23 @@ class _SwipeVideoScreenState extends State<SwipeVideoScreen> {
     } catch (e) {
       debugPrint('[SwipeVideo] init $index failed: $e');
     }
+  }
+
+  // ── 释放播放器（先记录进度）────────────────────────────────────
+  void _releasePlayer(int index) {
+    final p = _players[index];
+    if (p == null) return;
+
+    // 记录当前进度
+    if (p.value.isInitialized) {
+      final pos = p.value.position;
+      if (pos > _kMinSavedPosition) {
+        _savedPositions[index] = pos;
+      }
+    }
+
+    p.dispose();
+    _players.remove(index);
   }
 
   // ── 翻页回调 ──────────────────────────────────────────────────────
@@ -230,25 +271,43 @@ class _SwipeVideoScreenState extends State<SwipeVideoScreen> {
     // ★ 立即初始化当前页（秒开）
     unawaited(_ensurePlayer(index));
 
-    // ★ 后台预初始化后 4 个（串行，不抢带宽）
+    // ★ 后台预初始化后 4 个
     unawaited(_preloadNextFour(index));
 
-    // 释放距离太远的播放器（保留 ±4）
-    final toRemove = _players.keys
-        .where((i) => (i - index).abs() > _kPlayerKeepRange)
+    // ══════════════════════════════════════════════════════
+    // ★ 两级释放：
+    //   第一级：释放明显超出范围的
+    //   第二级：如果总数还是超上限，从最远的开始释放
+    //   效果：只要没超上限，前面的播放器永远保留 → 不重新请求
+    // ══════════════════════════════════════════════════════
+
+    // 第一级：超出「前 15 / 后 4」范围的
+    final farAway = _players.keys
+        .where((i) =>
+            i < index - _kPlayerKeepBefore ||
+            i > index + _kPlayerKeepAfter)
         .toList();
-    for (final i in toRemove) {
-      _players[i]?.dispose();
-      _players.remove(i);
+    for (final i in farAway) {
+      _releasePlayer(i);
+    }
+
+    // 第二级：总数还是超上限 → 释放最远的（前面优先被释放）
+    if (_players.length > _kMaxTotalPlayers) {
+      final sorted = _players.keys.toList()
+        ..sort((a, b) =>
+            (a - index).abs().compareTo((b - index).abs()));
+      // 保留最近的 _kMaxTotalPlayers 个
+      for (int i = _kMaxTotalPlayers; i < sorted.length; i++) {
+        _releasePlayer(sorted[i]);
+      }
     }
 
     // 确保 URL 缓存
     unawaited(_ensureUrlBuffer());
   }
 
-  // ── 预初始化后 4 个播放器（后台串行，不抢当前带宽）──────────────
+  // ── 预初始化后 4 个播放器 ────────────────────────────────────────
   Future<void> _preloadNextFour(int currentIndex) async {
-    // 等当前视频先稳住
     await Future.delayed(_kPreloadStartDelay);
     if (!mounted) return;
 
@@ -260,7 +319,6 @@ class _SwipeVideoScreenState extends State<SwipeVideoScreen> {
       await _ensurePlayer(idx);
       if (!mounted) return;
 
-      // 两个预加载之间再等一下
       await Future.delayed(_kPreloadGap);
       if (!mounted) return;
     }
