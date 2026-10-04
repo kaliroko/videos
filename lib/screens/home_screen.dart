@@ -29,7 +29,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   final PageController _pageController = PageController(initialPage: 0);
   final ScrollController _scrollController = ScrollController();
 
-  static const double _kNavTriggerDelta = 0.5;
+  static const double _kNavTriggerDelta = 3.0;
   static const double _kTopZone = 8.0;
 
   @override
@@ -63,7 +63,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         extendBody: true,
         bottomNavigationBar: AnimatedSlide(
           offset: nav.visible ? Offset.zero : const Offset(0, 1.3),
-          duration: const Duration(milliseconds: 260),
+          duration: const Duration(milliseconds: 450),
           curve: Curves.easeOutCubic,
           child: _buildBottomNav(),
         ),
