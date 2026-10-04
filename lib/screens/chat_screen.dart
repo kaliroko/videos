@@ -1,4 +1,4 @@
-/// 实时聊天室 —— Supabase Realtime + Telegram 简洁风
+/// 实时聊天室 —— Supabase Realtime + Telegram 完整复刻
 library;
 
 import 'dart:async';
@@ -744,7 +744,6 @@ class _ChatScreenState extends State<ChatScreen> {
                                 size: 52, color: Colors.white38)
                             : null,
                       ),
-                      // 相机角标
                       Positioned(
                         right: 2, bottom: 2,
                         child: Container(
@@ -868,66 +867,75 @@ class _ChatScreenState extends State<ChatScreen> {
     return Scaffold(
       backgroundColor: _kChatBg,
       appBar: _buildAppBar(),
-      body: Column(
+      body: Stack(
         children: [
-          Expanded(
-            child: Stack(
-              children: [
-                _messages.isEmpty
-                    ? const Center(
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              Icons.chat_bubble_outline,
-                              color: Colors.white24,
-                              size: 42,
+          // ★ 蓝黑渐变 + 几何图案背景
+          const Positioned.fill(child: _ChatBackground()),
+
+          // ★ 内容层
+          Column(
+            children: [
+              Expanded(
+                child: Stack(
+                  children: [
+                    _messages.isEmpty
+                        ? const Center(
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  Icons.chat_bubble_outline,
+                                  color: Colors.white24,
+                                  size: 42,
+                                ),
+                                SizedBox(height: 10),
+                                Text(
+                                  '还没有消息',
+                                  style: TextStyle(
+                                    color: Colors.white38,
+                                    fontSize: 14,
+                                  ),
+                                ),
+                              ],
                             ),
-                            SizedBox(height: 10),
-                            Text(
-                              '还没有消息',
-                              style: TextStyle(
-                                color: Colors.white38,
-                                fontSize: 14,
-                              ),
-                            ),
-                          ],
+                          )
+                        : _buildMessagesList(),
+                    if (_showScrollDown)
+                      Positioned(
+                        right: 16,
+                        bottom: 16,
+                        child: _ScrollToBottomButton(
+                          onTap: () => _scrollToBottom(),
                         ),
-                      )
-                    : _buildMessagesList(),
-                if (_showScrollDown)
-                  Positioned(
-                    right: 16,
-                    bottom: 16,
-                    child: _ScrollToBottomButton(
-                      onTap: () => _scrollToBottom(),
-                    ),
-                  ),
-              ],
-            ),
+                      ),
+                  ],
+                ),
+              ),
+              _buildInputBar(bottomInset),
+            ],
           ),
-          _buildInputBar(bottomInset),
         ],
       ),
     );
   }
 
-  // ── 顶栏（带群组图标 + 头像）──────────────────────────────────
+  // ── 顶栏（Telegram 风格：圆头像 + 标题 + 一行小字状态）────────
   PreferredSizeWidget _buildAppBar() {
     return AppBar(
       backgroundColor: _kBarBg,
       elevation: 0,
       scrolledUnderElevation: 0,
       titleSpacing: 8,
-      leadingWidth: 48,
+      leadingWidth: 52,
       leading: Center(
         child: Container(
-          width: 36, height: 36,
+          width: 38,
+          height: 38,
           decoration: const BoxDecoration(
             color: _kInputBg,
             shape: BoxShape.circle,
           ),
-          child: const Icon(Icons.groups, color: _kSendBtn, size: 20),
+          child: const Icon(Icons.groups, color: _kSendBtn, size: 22),
         ),
       ),
       title: Column(
@@ -942,32 +950,13 @@ class _ChatScreenState extends State<ChatScreen> {
               fontWeight: FontWeight.w600,
             ),
           ),
-          const SizedBox(height: 1),
-          Row(
-            children: [
-              if (_connected) ...[
-                Container(
-                  width: 6, height: 6,
-                  decoration: const BoxDecoration(
-                    color: _kOnline,
-                    shape: BoxShape.circle,
-                  ),
-                ),
-                const SizedBox(width: 4),
-                Text(
-                  '$_onlineCount 人在线',
-                  style: const TextStyle(
-                    color: _kOnline,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-              ] else
-                const Text(
-                  '连接中…',
-                  style: TextStyle(color: Colors.orange, fontSize: 11),
-                ),
-            ],
+          const SizedBox(height: 2),
+          Text(
+            _connected ? '$_onlineCount 人在线' : '连接中…',
+            style: TextStyle(
+              color: _connected ? _kOnline : Colors.orange,
+              fontSize: 12,
+            ),
           ),
         ],
       ),
@@ -978,10 +967,12 @@ class _ChatScreenState extends State<ChatScreen> {
               ? ClipOval(
                   child: Image.network(
                     _myAvatarUrl!,
-                    width: 32, height: 32,
+                    width: 34,
+                    height: 34,
                     fit: BoxFit.cover,
                     errorBuilder: (_, __, ___) => Container(
-                      width: 32, height: 32,
+                      width: 34,
+                      height: 34,
                       decoration: const BoxDecoration(
                         color: _kInputBg,
                         shape: BoxShape.circle,
@@ -992,7 +983,8 @@ class _ChatScreenState extends State<ChatScreen> {
                   ),
                 )
               : Container(
-                  width: 32, height: 32,
+                  width: 34,
+                  height: 34,
                   decoration: const BoxDecoration(
                     color: _kInputBg,
                     shape: BoxShape.circle,
@@ -1142,6 +1134,123 @@ class _ChatScreenState extends State<ChatScreen> {
       ),
     );
   }
+}
+
+// ══════════════════════════════════════════════════════════════
+// 聊天背景：蓝黑渐变 + 抽象几何图案
+// ══════════════════════════════════════════════════════════════
+class _ChatBackground extends StatelessWidget {
+  const _ChatBackground();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            Color(0xFF0A1826),
+            Color(0xFF0E1621),
+            Color(0xFF060A10),
+          ],
+          stops: [0.0, 0.5, 1.0],
+        ),
+      ),
+      child: CustomPaint(
+        painter: _PatternPainter(),
+        size: Size.infinite,
+      ),
+    );
+  }
+}
+
+// ══════════════════════════════════════════════════════════════
+// 几何图案绘制
+// ══════════════════════════════════════════════════════════════
+class _PatternPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final w = size.width;
+    final h = size.height;
+
+    // 右上大圆
+    canvas.drawCircle(
+      Offset(w * 0.85, h * 0.15),
+      w * 0.5,
+      Paint()
+        ..color = const Color(0xFF64B5EF).withValues(alpha: 0.06)
+        ..style = PaintingStyle.fill,
+    );
+
+    // 左下大圆
+    canvas.drawCircle(
+      Offset(w * 0.1, h * 0.85),
+      w * 0.6,
+      Paint()
+        ..color = const Color(0xFF64B5EF).withValues(alpha: 0.04)
+        ..style = PaintingStyle.fill,
+    );
+
+    // 斜线纹理
+    final linePaint = Paint()
+      ..color = const Color(0xFF64B5EF).withValues(alpha: 0.025)
+      ..strokeWidth = 0.8
+      ..style = PaintingStyle.stroke;
+
+    const spacing = 40.0;
+    for (double i = -h; i < w + h; i += spacing) {
+      canvas.drawLine(Offset(i, 0), Offset(i + h, h), linePaint);
+    }
+
+    // 小圆点
+    final dotPaint = Paint()
+      ..color = const Color(0xFF64B5EF).withValues(alpha: 0.08)
+      ..style = PaintingStyle.fill;
+
+    final dots = <Offset>[
+      Offset(w * 0.2, h * 0.25),
+      Offset(w * 0.75, h * 0.55),
+      Offset(w * 0.35, h * 0.7),
+      Offset(w * 0.9, h * 0.85),
+      Offset(w * 0.5, h * 0.1),
+      Offset(w * 0.05, h * 0.5),
+    ];
+    for (final dot in dots) {
+      canvas.drawCircle(dot, 3.0, dotPaint);
+    }
+
+    // 三角形
+    final triPath = Path()
+      ..moveTo(w * 0.7, h * 0.3)
+      ..lineTo(w * 0.8, h * 0.45)
+      ..lineTo(w * 0.6, h * 0.45)
+      ..close();
+    canvas.drawPath(
+      triPath,
+      Paint()
+        ..color = const Color(0xFF64B5EF).withValues(alpha: 0.04)
+        ..style = PaintingStyle.fill,
+    );
+
+    // 中心径向光晕
+    final glowPaint = Paint()
+      ..shader = RadialGradient(
+        colors: [
+          const Color(0xFF64B5EF).withValues(alpha: 0.05),
+          Colors.transparent,
+        ],
+      ).createShader(
+        Rect.fromCircle(
+          center: Offset(w * 0.5, h * 0.4),
+          radius: w * 0.7,
+        ),
+      );
+    canvas.drawRect(Rect.fromLTWH(0, 0, w, h), glowPaint);
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -1305,8 +1414,6 @@ class _SendButtonState extends State<_SendButton>
 }
 
 // ══════════════════════════════════════════════════════════════
-// 日期分隔线
-// ══════════════════════════════════════════════════════════════
 class _DateSeparator extends StatelessWidget {
   final DateTime date;
   const _DateSeparator({required this.date});
@@ -1347,8 +1454,6 @@ class _DateSeparator extends StatelessWidget {
   }
 }
 
-// ══════════════════════════════════════════════════════════════
-// 滚动到底部按钮
 // ══════════════════════════════════════════════════════════════
 class _ScrollToBottomButton extends StatefulWidget {
   final VoidCallback onTap;
@@ -1658,6 +1763,8 @@ class _MessageBubbleState extends State<_MessageBubble>
 }
 
 // ══════════════════════════════════════════════════════════════
+// 消息气泡（完全模仿 Telegram：整条 Path 绘制 + 曲线尾巴）
+// ══════════════════════════════════════════════════════════════
 class _Bubble extends StatelessWidget {
   final String text;
   final String time;
@@ -1673,139 +1780,158 @@ class _Bubble extends StatelessWidget {
     this.replyToContent,
   });
 
+  static const double _tailH = 10.0;
+
   @override
   Widget build(BuildContext context) {
     final hasReply = replyToNickname != null;
 
-    return Stack(
-      children: [
-        Container(
-          padding: const EdgeInsets.fromLTRB(12, 7, 12, 7),
-          decoration: BoxDecoration(
-            color: isMine ? _kMyBubble : _kOtherBubble,
-            borderRadius: BorderRadius.only(
-              topLeft: const Radius.circular(18),
-              topRight: const Radius.circular(18),
-              bottomLeft: Radius.circular(isMine ? 18 : 4),
-              bottomRight: Radius.circular(isMine ? 4 : 18),
-            ),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (hasReply)
-                Container(
-                  margin: const EdgeInsets.only(bottom: 6),
-                  padding: const EdgeInsets.fromLTRB(8, 4, 8, 4),
-                  decoration: BoxDecoration(
-                    color: Colors.black.withValues(alpha: 0.2),
-                    borderRadius: BorderRadius.circular(6),
-                    border: const Border(
-                      left: BorderSide(color: _kSendBtn, width: 3),
-                    ),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        replyToNickname!,
-                        style: const TextStyle(
-                          color: _kSendBtn,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      const SizedBox(height: 1),
-                      Text(
-                        replyToContent ?? '',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: Colors.white70,
-                          fontSize: 12,
-                        ),
-                      ),
-                    ],
+    return CustomPaint(
+      painter: _TelegramBubblePainter(
+        color: isMine ? _kMyBubble : _kOtherBubble,
+        isMine: isMine,
+      ),
+      child: Padding(
+        padding: EdgeInsets.only(
+          left: 12,
+          right: 12,
+          top: 7,
+          bottom: 7 + _tailH - 2,
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (hasReply)
+              Container(
+                margin: const EdgeInsets.only(bottom: 6),
+                padding: const EdgeInsets.fromLTRB(8, 4, 8, 4),
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.2),
+                  borderRadius: BorderRadius.circular(6),
+                  border: const Border(
+                    left: BorderSide(color: _kSendBtn, width: 3),
                   ),
                 ),
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  Flexible(
-                    child: Padding(
-                      padding: const EdgeInsets.only(right: 8),
-                      child: Text(
-                        text,
-                        style: TextStyle(
-                          color: isMine ? _kMyText : _kOtherText,
-                          fontSize: 15,
-                          height: 1.35,
-                        ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      replyToNickname!,
+                      style: const TextStyle(
+                        color: _kSendBtn,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.only(top: 6),
-                    child: Text(
-                      time,
-                      style: TextStyle(
-                        color: isMine ? _kTimeMine : _kTimeOther,
-                        fontSize: 10,
-                        height: 1,
+                    const SizedBox(height: 1),
+                    Text(
+                      replyToContent ?? '',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Colors.white70,
+                        fontSize: 12,
                       ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ],
-          ),
-        ),
-        Positioned(
-          bottom: 0,
-          right: isMine ? -6 : null,
-          left: isMine ? null : -6,
-          child: CustomPaint(
-            size: const Size(8, 10),
-            painter: _BubbleTailPainter(
-              color: isMine ? _kMyBubble : _kOtherBubble,
-              isMine: isMine,
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Flexible(
+                  child: Text(
+                    text,
+                    style: TextStyle(
+                      color: isMine ? _kMyText : _kOtherText,
+                      fontSize: 15,
+                      height: 1.35,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Text(
+                    time,
+                    style: TextStyle(
+                      color: isMine ? _kTimeMine : _kTimeOther,
+                      fontSize: 11,
+                      height: 1,
+                    ),
+                  ),
+                ),
+              ],
             ),
-          ),
+          ],
         ),
-      ],
+      ),
     );
   }
 }
 
-class _BubbleTailPainter extends CustomPainter {
+// ══════════════════════════════════════════════════════════════
+// Telegram 气泡 Painter
+// ══════════════════════════════════════════════════════════════
+class _TelegramBubblePainter extends CustomPainter {
   final Color color;
   final bool isMine;
-  _BubbleTailPainter({required this.color, required this.isMine});
+
+  _TelegramBubblePainter({required this.color, required this.isMine});
 
   @override
   void paint(Canvas canvas, Size size) {
-    final paint = Paint()..color = color..style = PaintingStyle.fill;
+    final paint = Paint()
+      ..color = color
+      ..style = PaintingStyle.fill
+      ..isAntiAlias = true;
+
+    const r = 15.0;
+    const rSmall = 4.0;
+    const tailW = 8.0;
+    const tailH = 10.0;
+
+    final w = size.width;
+    final h = size.height - tailH;
+
     final path = Path();
+
     if (isMine) {
-      path.moveTo(0, 0);
-      path.quadraticBezierTo(
-          size.width * 0.3, size.height * 0.4, size.width, size.height);
-      path.lineTo(0, size.height * 0.6);
+      path.moveTo(0, r);
+      path.quadraticBezierTo(0, 0, r, 0);
+      path.lineTo(w - r, 0);
+      path.quadraticBezierTo(w, 0, w, r);
+      path.lineTo(w, h - rSmall);
+      path.quadraticBezierTo(w, h, w - rSmall, h);
+      path.lineTo(w - 6, h);
+      path.quadraticBezierTo(w - 1, h + 3, w + tailW, h + tailH);
+      path.quadraticBezierTo(w - 5, h - 1, w - rSmall - 6, h);
+      path.lineTo(r, h);
+      path.quadraticBezierTo(0, h, 0, h - r);
+      path.close();
     } else {
-      path.moveTo(size.width, 0);
-      path.quadraticBezierTo(
-          size.width * 0.7, size.height * 0.4, 0, size.height);
-      path.lineTo(size.width, size.height * 0.6);
+      path.moveTo(w, r);
+      path.quadraticBezierTo(w, 0, w - r, 0);
+      path.lineTo(r, 0);
+      path.quadraticBezierTo(0, 0, 0, r);
+      path.lineTo(0, h - rSmall);
+      path.quadraticBezierTo(0, h, rSmall, h);
+      path.lineTo(6, h);
+      path.quadraticBezierTo(1, h + 3, -tailW, h + tailH);
+      path.quadraticBezierTo(5, h - 1, rSmall + 6, h);
+      path.lineTo(w - r, h);
+      path.quadraticBezierTo(w, h, w, h - r);
+      path.close();
     }
-    path.close();
+
     canvas.drawPath(path, paint);
   }
 
   @override
-  bool shouldRepaint(covariant _BubbleTailPainter old) =>
+  bool shouldRepaint(covariant _TelegramBubblePainter old) =>
       old.color != color || old.isMine != isMine;
 }
 

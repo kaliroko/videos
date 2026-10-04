@@ -11,7 +11,7 @@ import 'package:bilibili_glass/widgets/video_card.dart';
 import 'package:bilibili_glass/theme/app_theme.dart';
 import 'package:bilibili_glass/screens/video_player_screen.dart';
 import 'package:bilibili_glass/screens/swipe_video_screen.dart';
-import 'package:bilibili_glass/screens/chat_screen.dart';   // ★ 新增
+import 'package:bilibili_glass/screens/chat_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -21,7 +21,9 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
-  /// 0 = 老API（网格）；1 = 新API（视频）；2 = 聊天室
+  /// ★ 只有 0/1 两个真正的 tab
+  /// 0 = 老API（网格）；1 = 新API（视频）
+  /// 2 = 聊天室入口按钮（点击 push 独立页面，不是 tab）
   int _bottomTab = 0;
 
   final PageController _pageController = PageController(initialPage: 0);
@@ -50,14 +52,12 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           onPageChanged: _onPageChanged,
           physics: const PageScrollPhysics(),
           children: [
-            // ── Page 0: 老API（网格）──
+            // ── Page 0: 老API 网格 ──
             _buildVideoFeed(),
 
-            // ── Page 1: 新API（全屏视频）──
+            // ── Page 1: 新API 视频 ──
             SwipeVideoScreen(active: _bottomTab == 1),
-
-            // ── Page 2: 聊天室 ──
-            const ChatScreen(),   // ★ 新增
+            // ★ 不再有 Page 2（聊天室改为独立路由）
           ],
         ),
         extendBody: true,
@@ -81,6 +81,23 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
     if (i == 0) {
       context.read<VideoProvider>().setSource(VideoSource.oldApi);
+    }
+  }
+
+  // ══════════════════════════════════════════════════════════════
+  // ★ 进入独立聊天室页面
+  // ══════════════════════════════════════════════════════════════
+  Future<void> _openChatRoom() async {
+    // 切换底栏的显示状态，让聊天页顶部状态栏图标可见
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        fullscreenDialog: false,
+        builder: (_) => const ChatScreen(),
+      ),
+    );
+    // 返回后恢复底栏
+    if (mounted) {
+      context.read<NavBarVisibility>().show();
     }
   }
 
@@ -170,7 +187,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     );
   }
 
-  // ── 底部导航 ★ 三个 tab ─────────────────────────────────────────────
+  // ── 底部导航 ★ 三个位置，第三个是"入口按钮"──────────────────────
   Widget _buildBottomNav() {
     final bottomInset = MediaQuery.of(context).padding.bottom;
     return RepaintBoundary(
@@ -179,6 +196,13 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         child: GlassBottomBar(
           selectedIndex: _bottomTab,
           onTabSelected: (i) {
+            // ★ 点击第三个位置 → 进入独立聊天室页面（不改变 tab）
+            if (i == 2) {
+              _openChatRoom();
+              return;
+            }
+
+            // 老API / 新API → 正常切换
             _pageController.animateToPage(
               i,
               duration: const Duration(milliseconds: 280),
@@ -198,12 +222,12 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               selectedIcon: Icons.auto_awesome_outlined,
               glowColor: AppTheme.accentColor,
             ),
-            // ★ 第三个 tab：聊天室
+            // ★ 聊天室 = 入口按钮（点击进入独立页面）
             GlassBottomBarTab(
               label: '聊天室',
               icon: Icons.chat_bubble,
               selectedIcon: Icons.chat_bubble_outline,
-              glowColor: AppTheme.accentColor,
+              glowColor: const Color(0xFF64B5EF),
             ),
           ],
           barHeight: 60,
