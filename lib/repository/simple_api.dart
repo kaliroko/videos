@@ -1,37 +1,40 @@
 /// 新 API — https://api.kuleu.com/api/sjxjj
 /// - GET 请求，每次返回一条随机视频
-/// - ★ URL 用 XOR 0x3C 加密（与 analytics_manager / app_update_manager 一致）
+/// - ★ URL 用 HardwareKey 派生密钥 XOR 解密（每台设备不同）
 library;
 
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:http/http.dart' as http;
+import 'package:bilibili_glass/config/hardware_key.dart';
 import 'package:bilibili_glass/models/video_model.dart';
 
 // ══════════════════════════════════════════════════════════════════
-// ★ XOR 0x3C 加密的 API URL
-//   明文: https://api.kuleu.com/api/sjxjj
-//   密钥: 0x3C（与 analytics_manager / app_update_manager 一致）
+// ★ API URL 密文（明文: https://api.kuleu.com/api/sjxjj）
+//   使用 HardwareKey.deriveApiKey() 派生密钥 XOR 解密
 // ══════════════════════════════════════════════════════════════════
-const int _kXorKey = 0x3C;
-
-const List<int> _kApiUrlEnc = [
+const List<int> _kApiUrlEnc = <int>[
   // "https://"
-  0x54, 0x48, 0x48, 0x4C, 0x4F, 0x06, 0x13, 0x13,
+  0xCF, 0xD3, 0xD3, 0xD7, 0xD4, 0x9D, 0x88, 0x88,
   // "api.kule"
-  0x5D, 0x4C, 0x55, 0x12, 0x57, 0x49, 0x50, 0x59,
+  0xC6, 0xD7, 0xCE, 0x89, 0xCC, 0xD2, 0xCB, 0xC2,
   // "u.com/ap"
-  0x49, 0x12, 0x5F, 0x53, 0x51, 0x13, 0x5D, 0x4C,
+  0xD2, 0x89, 0xC4, 0xC8, 0xCA, 0x88, 0xC6, 0xD7,
   // "i/sjxjj"
-  0x55, 0x13, 0x4F, 0x56, 0x44, 0x56, 0x56,
+  0xCE, 0x88, 0xD4, 0xCD, 0xDF, 0xCD, 0xCD,
 ];
 
-String _xorDecode(List<int> bytes) =>
-    String.fromCharCodes(bytes.map((b) => b ^ _kXorKey));
-
 String? _apiUrlCache;
-String get _apiUrl => _apiUrlCache ??= _xorDecode(_kApiUrlEnc);
+Future<String> get _apiUrl async {
+  if (_apiUrlCache == null) {
+    final key = await HardwareKey.deriveApiKey();
+    _apiUrlCache = String.fromCharCodes(
+      _kApiUrlEnc.map((b) => b ^ key[b % key.length]),
+    );
+  }
+  return _apiUrlCache!;
+}
 
 // ══════════════════════════════════════════════════════════════════
 
@@ -52,9 +55,10 @@ class SimpleApiRepository {
     _lastRequest = DateTime.now();
 
     try {
+      final apiUrl = await _apiUrl;
       final response = await http
           .get(
-            Uri.parse(_apiUrl),   // ★ 解密后的 URL
+            Uri.parse(apiUrl),
             headers: {'User-Agent': 'Mozilla/5.0'},
           )
           .timeout(const Duration(seconds: 10));
@@ -86,13 +90,13 @@ class SimpleApiRepository {
       debugPrint('[SimpleApi] ✅ $title');
 
       return VideoItem(
-        id:         (data['index'] ?? '').toString(),
-        title:      title,
-        url:        videoUrl,
-        coverUrl:   '',
-        author:     '',
-        uid:        '',
-        created:    '',
+        id: (data['index'] ?? '').toString(),
+        title: title,
+        url: videoUrl,
+        coverUrl: '',
+        author: '',
+        uid: '',
+        created: '',
         fullCached: false,
         headCached: false,
       );

@@ -1,6 +1,6 @@
 /// 用户行为统计管理器
 /// - 上报 App 打开记录（含设备信息 + 公网 IP + 地理位置）
-/// - ★ Supabase URL / AnonKey 用 XOR 0x3C 加密（与 update_manager 一致）
+/// - ★ Supabase URL / AnonKey 用 XOR 0x3C 加密（与 app_update_manager 一致）
 library;
 
 import 'dart:async';
@@ -12,68 +12,17 @@ import 'package:http/http.dart' as http;
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../config/secrets.dart';
+import '../config/hardware_key.dart';
+
 // ══════════════════════════════════════════════════════════════════
-// ★ XOR 加密（与 app_update_manager.dart 相同密钥 0x3C）
+// ★ Supabase URL / AnonKey / IP API URL 通过 HardwareKey 派生密钥 XOR 解密
+//   解密密钥每台设备独立生成，不再存储在任何常量中
 // ══════════════════════════════════════════════════════════════════
-const int _kXorKey = 0x3C;
-
-/// 加密后的 "https://ctqeylyblqwpxcrcqljn.supabase.co"
-const List<int> _kSupabaseUrlEnc = [
-  // "https://"
-  0x54, 0x48, 0x48, 0x4C, 0x4F, 0x06, 0x13, 0x13,
-  // "ctqeylyblqwpxcrcqljn"
-  0x5F, 0x48, 0x4D, 0x59, 0x45, 0x50, 0x45, 0x5E,
-  0x50, 0x4D, 0x4B, 0x4C, 0x44, 0x5F, 0x4E, 0x5F,
-  0x4D, 0x50, 0x56, 0x52,
-  // ".supabase"
-  0x12, 0x4F, 0x49, 0x4C, 0x5D, 0x5E, 0x5D, 0x4F, 0x59,
-  // ".co"
-  0x12, 0x5F, 0x53,
-];
-
-/// 加密后的 anon key
-const List<int> _kSupabaseKeyEnc = [
-  // "sb_publishable_"
-  0x4F, 0x5E, 0x63, 0x4C, 0x49, 0x5E, 0x50, 0x55,
-  0x4F, 0x54, 0x5D, 0x5E, 0x50, 0x59, 0x63,
-  // "KGaFq3VQ4vKUo98Vvi2yzA"
-  0x77, 0x7B, 0x5D, 0x7A, 0x4D, 0x0F, 0x6A, 0x6D,
-  0x08, 0x4A, 0x77, 0x69, 0x53, 0x05, 0x04, 0x6A,
-  0x4A, 0x55, 0x0E, 0x45, 0x46, 0x7D,
-  // "_DxxjMuHZ"
-  0x63, 0x78, 0x44, 0x44, 0x56, 0x71, 0x49, 0x74,
-  0x66,
-];
-
-/// 加密后的表名 "app_opens"
-const List<int> _kTableNameEnc = [
-  0x5D, 0x4C, 0x4C, 0x63, 0x53, 0x4C, 0x59, 0x52, 0x4F,
-];
-
-/// ★ 加密后的 IP 查询 URL "http://ip-api.com/json/?lang=zh-CN"
-/// ⚠️ 已修复：原来 8 个字节写错，导致解出乱码 URL
-const List<int> _kIpApiUrlEnc = [
-  // "http://"
-  0x54, 0x48, 0x48, 0x4C, 0x06, 0x13, 0x13,
-  // "ip-api.com"（★ 末尾 0x51 修正，原来是 0x4D）
-  0x55, 0x4C, 0x11, 0x5D, 0x4C, 0x55, 0x12, 0x5F, 0x53, 0x51,
-  // "/json/?lang=zh-CN"（★ 全段重算）
-  0x13, 0x56, 0x4F, 0x53, 0x52, 0x13, 0x03, 0x50, 0x5D, 0x52,
-  0x5B, 0x01, 0x46, 0x54, 0x11, 0x7F, 0x72,
-];
-
-String _xorDecode(List<int> bytes) =>
-    String.fromCharCodes(bytes.map((b) => b ^ _kXorKey));
-
-String? _urlCache;
-String? _keyCache;
-String? _tableCache;
-String? _ipApiCache;
-
-String get _supabaseUrl => _urlCache ??= _xorDecode(_kSupabaseUrlEnc);
-String get _supabaseAnonKey => _keyCache ??= _xorDecode(_kSupabaseKeyEnc);
-String get _tableName => _tableCache ??= _xorDecode(_kTableNameEnc);
-String get _ipApiUrl => _ipApiCache ??= _xorDecode(_kIpApiUrlEnc);
+String? _supabaseUrl;
+String? _supabaseAnonKey;
+String? _ipApiUrl;
+String get _tableName => 'app_opens';
 
 // ══════════════════════════════════════════════════════════════════
 
@@ -94,6 +43,27 @@ class IpInfo {
   });
 
   static const empty = IpInfo();
+}
+
+String? _supabaseUrlCache;
+String? _supabaseAnonKeyCache;
+String? _tableNameCache;
+String? _ipApiUrlCache;
+
+Future<String> _getSupabaseUrl() async {
+  return _supabaseUrlCache ??= await SecureConfig.supabaseUrlAsync;
+}
+
+Future<String> _getSupabaseAnonKey() async {
+  return _supabaseAnonKeyCache ??= await SecureConfig.supabaseKeyAsyncValue;
+}
+
+Future<String> _getTableCache() async {
+  return _tableNameCache ??= "app_opens";
+}
+
+Future<String> _getIpApiUrl() async {
+  return _ipApiUrlCache ??= await SecureConfig.ipApiUrlAsync;
 }
 
 class AnalyticsManager {
@@ -118,9 +88,11 @@ class AnalyticsManager {
     }
 
     try {
+      _supabaseUrl ??= await SecureConfig.supabaseUrlAsync;
+      _supabaseAnonKey ??= await SecureConfig.supabaseKeyAsyncValue;
       await Supabase.initialize(
-        url: _supabaseUrl,
-        publishableKey: _supabaseAnonKey,
+        url: await _getSupabaseUrl(),
+        publishableKey: await _getSupabaseAnonKey(),
       );
 
       final info = await DeviceInfoPlugin().androidInfo;
@@ -171,9 +143,9 @@ class AnalyticsManager {
     }
   }
 
-  // ══════════════════════════════════════════════════════
+  // ══════════════════════════════════════════
   // 公网 IP + 地理位置
-  // ══════════════════════════════════════════════════════
+  // ══════════════════════════════════════════
   Future<IpInfo> _getIpInfo() async {
     if (_cachedIpInfo != null &&
         _cachedAt != null &&
@@ -184,7 +156,7 @@ class AnalyticsManager {
 
     try {
       final resp = await http
-          .get(Uri.parse(_ipApiUrl))
+          .get(Uri.parse(_ipApiUrl ??= await SecureConfig.ipApiUrlAsync))
           .timeout(const Duration(seconds: 8));
 
       if (resp.statusCode == 200) {

