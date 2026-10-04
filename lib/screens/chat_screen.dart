@@ -1,8 +1,11 @@
 /// 实时聊天室 —— Supabase Realtime + Telegram 完整复刻
+/// - 用 Android ID 作为唯一用户标识
+/// - 每个设备只能注册一次（服务器校验）
 library;
 
 import 'dart:async';
 
+import 'package:device_info_plus/device_info_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/physics.dart';
 import 'package:flutter/services.dart';
@@ -107,18 +110,28 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
+  // ══════════════════════════════════════════════════════════════
+  // 初始化
+  // ══════════════════════════════════════════════════════════════
   Future<void> _init() async {
     await AnalyticsManager.instance.init();
-    _myDeviceId = AnalyticsManager.instance.deviceId;
-    if (_myDeviceId == null || _myDeviceId!.isEmpty) {
-      _myDeviceId = 'anon-${DateTime.now().millisecondsSinceEpoch}';
+
+    // ★ 1. 用 Android ID 作为唯一标识
+    final androidId = await _getAndroidId();
+    if (androidId == null || androidId.isEmpty) {
+      _myDeviceId = 'u_${DateTime.now().microsecondsSinceEpoch}';
+      debugPrint('[Chat] ⚠️ 拿不到 Android ID，用兜底 ID: $_myDeviceId');
+    } else {
+      _myDeviceId = androidId;
+      debugPrint('[Chat] 🆔 Android ID: $_myDeviceId');
     }
 
-    final prefs = await SharedPreferences.getInstance();
-    final savedName = prefs.getString(_kNicknameKey);
-    _myAvatarUrl = prefs.getString(_kAvatarKey);
+    // ★ 2. 查服务器看是否已注册
+    final serverProfile = await _fetchProfileFromServer(_myDeviceId!);
 
-    if (savedName == null || savedName.isEmpty) {
+    if (serverProfile == null) {
+      // 服务器无记录 → 显示注册页
+      debugPrint('[Chat] 🆕 未注册 → 显示引导页');
       if (mounted) {
         setState(() {
           _loading = false;
@@ -128,13 +141,53 @@ class _ChatScreenState extends State<ChatScreen> {
       return;
     }
 
-    _myNickname = savedName;
-    await _syncMyProfile();
+    // ★ 3. 已注册 → 用服务器数据
+    debugPrint('[Chat] ✅ 已注册: ${serverProfile.nickname}');
+    _myNickname = serverProfile.nickname;
+    _myAvatarUrl = serverProfile.avatarUrl;
+
+    // 缓存到本地
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_kNicknameKey, _myNickname!);
+    if (_myAvatarUrl != null) {
+      await prefs.setString(_kAvatarKey, _myAvatarUrl!);
+    }
+
     await _loadHistory();
     _subscribeRealtime();
     if (mounted) setState(() => _loading = false);
   }
 
+  /// 获取 Android ID
+  Future<String?> _getAndroidId() async {
+    try {
+      final info = await DeviceInfoPlugin().androidInfo;
+      return info.id;
+    } catch (e) {
+      debugPrint('[Chat] ❌ 获取 Android ID 失败: $e');
+      return null;
+    }
+  }
+
+  /// 从服务器查询用户档案
+  Future<_UserProfile?> _fetchProfileFromServer(String deviceId) async {
+    try {
+      final data = await Supabase.instance.client
+          .from(_kProfileTable)
+          .select()
+          .eq('device_id', deviceId)
+          .maybeSingle();
+      if (data == null) return null;
+      return _UserProfile.fromMap(data);
+    } catch (e) {
+      debugPrint('[Chat] 查询档案失败: $e');
+      return null;
+    }
+  }
+
+  // ══════════════════════════════════════════════════════════════
+  // 完成注册（首次）
+  // ══════════════════════════════════════════════════════════════
   Future<void> _finishSetup() async {
     final name = _setupNameController.text.trim();
     if (name.isEmpty) {
@@ -146,12 +199,46 @@ class _ChatScreenState extends State<ChatScreen> {
       return;
     }
 
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_kNicknameKey, name);
+    // ★ 再次校验服务器（防止并发 / 缓存问题）
+    final existing = await _fetchProfileFromServer(_myDeviceId!);
+    if (existing != null) {
+      debugPrint('[Chat] ⚠️ 该设备已注册过，直接加载');
+      _myNickname = existing.nickname;
+      _myAvatarUrl = existing.avatarUrl;
+      setState(() => _needsSetup = false);
+
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_kNicknameKey, _myNickname!);
+      if (_myAvatarUrl != null) {
+        await prefs.setString(_kAvatarKey, _myAvatarUrl!);
+      }
+
+      await _loadHistory();
+      _subscribeRealtime();
+      return;
+    }
+
+    // ★ 首次注册 → INSERT（不是 upsert）
+    try {
+      await Supabase.instance.client.from(_kProfileTable).insert({
+        'device_id': _myDeviceId,
+        'nickname': name,
+        'avatar_url': _myAvatarUrl,
+        'updated_at': DateTime.now().toIso8601String(),
+      });
+      debugPrint('[Chat] ✅ 注册成功: $name');
+    } catch (e) {
+      debugPrint('[Chat] ❌ 注册失败: $e');
+      _snack('注册失败，请重试');
+      return;
+    }
+
     _myNickname = name;
 
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_kNicknameKey, name);
+
     setState(() => _needsSetup = false);
-    await _syncMyProfile();
     await _loadHistory();
     _subscribeRealtime();
   }
@@ -168,19 +255,27 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
+  /// 修改昵称/头像时同步（UPDATE，不是 upsert）
   Future<void> _syncMyProfile() async {
+    if (_myNickname == null || _myDeviceId == null) return;
     try {
-      await Supabase.instance.client.from(_kProfileTable).upsert({
-        'device_id': _myDeviceId,
-        'nickname': _myNickname,
-        if (_myAvatarUrl != null) 'avatar_url': _myAvatarUrl,
-        'updated_at': DateTime.now().toIso8601String(),
-      });
+      await Supabase.instance.client
+          .from(_kProfileTable)
+          .update({
+            'nickname': _myNickname,
+            if (_myAvatarUrl != null) 'avatar_url': _myAvatarUrl,
+            'updated_at': DateTime.now().toIso8601String(),
+          })
+          .eq('device_id', _myDeviceId!);
+      debugPrint('[Chat] ✅ 档案已更新');
     } catch (e) {
-      debugPrint('[Chat] 同步档案失败: $e');
+      debugPrint('[Chat] ❌ 同步档案失败: $e');
     }
   }
 
+  // ══════════════════════════════════════════════════════════════
+  // 加载历史
+  // ══════════════════════════════════════════════════════════════
   Future<void> _loadHistory() async {
     try {
       final data = await Supabase.instance.client
@@ -239,6 +334,9 @@ class _ChatScreenState extends State<ChatScreen> {
     } catch (_) {}
   }
 
+  // ══════════════════════════════════════════════════════════════
+  // Realtime + Presence
+  // ══════════════════════════════════════════════════════════════
   void _subscribeRealtime() {
     _channel?.unsubscribe();
 
@@ -311,6 +409,9 @@ class _ChatScreenState extends State<ChatScreen> {
     });
   }
 
+  // ══════════════════════════════════════════════════════════════
+  // 发送
+  // ══════════════════════════════════════════════════════════════
   Future<void> _send() async {
     final text = _inputController.text.trim();
     if (text.isEmpty || _sending) return;
@@ -374,6 +475,9 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
+  // ══════════════════════════════════════════════════════════════
+  // 长按菜单
+  // ══════════════════════════════════════════════════════════════
   Future<void> _showMessageMenu(_ChatMessage msg, bool isMine) async {
     HapticFeedback.mediumImpact();
 
@@ -428,6 +532,9 @@ class _ChatScreenState extends State<ChatScreen> {
     setState(() => _replyTo = null);
   }
 
+  // ══════════════════════════════════════════════════════════════
+  // 头像上传
+  // ══════════════════════════════════════════════════════════════
   Future<bool> _pickAndUploadAvatar() async {
     try {
       final permissions = <Permission>[
@@ -487,7 +594,10 @@ class _ChatScreenState extends State<ChatScreen> {
       await prefs.setString(_kAvatarKey, url);
       if (mounted) setState(() => _myAvatarUrl = url);
 
-      if (_myNickname != null) await _syncMyProfile();
+      // 已注册用户 → 直接更新服务器
+      if (_myNickname != null && !_needsSetup) {
+        await _syncMyProfile();
+      }
       return true;
     } catch (e, st) {
       debugPrint('[Chat] ❌ 上传失败: $e\n$st');
@@ -504,6 +614,9 @@ class _ChatScreenState extends State<ChatScreen> {
     return 'jpg';
   }
 
+  // ══════════════════════════════════════════════════════════════
+  // 设置面板
+  // ══════════════════════════════════════════════════════════════
   Future<void> _showSettings() async {
     final nameController = TextEditingController(text: _myNickname);
     await showModalBottomSheet(
@@ -869,10 +982,7 @@ class _ChatScreenState extends State<ChatScreen> {
       appBar: _buildAppBar(),
       body: Stack(
         children: [
-          // ★ 蓝黑渐变 + 几何图案背景
           const Positioned.fill(child: _ChatBackground()),
-
-          // ★ 内容层
           Column(
             children: [
               Expanded(
@@ -919,7 +1029,7 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
-  // ── 顶栏（Telegram 风格：圆头像 + 标题 + 一行小字状态）────────
+  // ── 顶栏 ────────────────────────────────────────────────────
   PreferredSizeWidget _buildAppBar() {
     return AppBar(
       backgroundColor: _kBarBg,
@@ -1137,7 +1247,7 @@ class _ChatScreenState extends State<ChatScreen> {
 }
 
 // ══════════════════════════════════════════════════════════════
-// 聊天背景：蓝黑渐变 + 抽象几何图案
+// 聊天背景：蓝黑渐变 + 几何图案
 // ══════════════════════════════════════════════════════════════
 class _ChatBackground extends StatelessWidget {
   const _ChatBackground();
@@ -1165,16 +1275,12 @@ class _ChatBackground extends StatelessWidget {
   }
 }
 
-// ══════════════════════════════════════════════════════════════
-// 几何图案绘制
-// ══════════════════════════════════════════════════════════════
 class _PatternPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final w = size.width;
     final h = size.height;
 
-    // 右上大圆
     canvas.drawCircle(
       Offset(w * 0.85, h * 0.15),
       w * 0.5,
@@ -1183,7 +1289,6 @@ class _PatternPainter extends CustomPainter {
         ..style = PaintingStyle.fill,
     );
 
-    // 左下大圆
     canvas.drawCircle(
       Offset(w * 0.1, h * 0.85),
       w * 0.6,
@@ -1192,7 +1297,6 @@ class _PatternPainter extends CustomPainter {
         ..style = PaintingStyle.fill,
     );
 
-    // 斜线纹理
     final linePaint = Paint()
       ..color = const Color(0xFF64B5EF).withValues(alpha: 0.025)
       ..strokeWidth = 0.8
@@ -1203,7 +1307,6 @@ class _PatternPainter extends CustomPainter {
       canvas.drawLine(Offset(i, 0), Offset(i + h, h), linePaint);
     }
 
-    // 小圆点
     final dotPaint = Paint()
       ..color = const Color(0xFF64B5EF).withValues(alpha: 0.08)
       ..style = PaintingStyle.fill;
@@ -1220,7 +1323,6 @@ class _PatternPainter extends CustomPainter {
       canvas.drawCircle(dot, 3.0, dotPaint);
     }
 
-    // 三角形
     final triPath = Path()
       ..moveTo(w * 0.7, h * 0.3)
       ..lineTo(w * 0.8, h * 0.45)
@@ -1233,7 +1335,6 @@ class _PatternPainter extends CustomPainter {
         ..style = PaintingStyle.fill,
     );
 
-    // 中心径向光晕
     final glowPaint = Paint()
       ..shader = RadialGradient(
         colors: [
@@ -1763,8 +1864,6 @@ class _MessageBubbleState extends State<_MessageBubble>
 }
 
 // ══════════════════════════════════════════════════════════════
-// 消息气泡（完全模仿 Telegram：整条 Path 绘制 + 曲线尾巴）
-// ══════════════════════════════════════════════════════════════
 class _Bubble extends StatelessWidget {
   final String text;
   final String time;
@@ -1873,9 +1972,6 @@ class _Bubble extends StatelessWidget {
   }
 }
 
-// ══════════════════════════════════════════════════════════════
-// Telegram 气泡 Painter
-// ══════════════════════════════════════════════════════════════
 class _TelegramBubblePainter extends CustomPainter {
   final Color color;
   final bool isMine;
