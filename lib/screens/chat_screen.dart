@@ -1,11 +1,11 @@
 /// 实时聊天室 —— Supabase Realtime + Telegram 完整复刻
-/// - 用 Android ID 作为唯一用户标识
-/// - 每个设备只能注册一次（服务器校验）
 library;
 
 import 'dart:async';
 
 import 'package:device_info_plus/device_info_plus.dart';
+import 'package:emoji_picker_flutter/emoji_picker_flutter.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/physics.dart';
 import 'package:flutter/services.dart';
@@ -13,6 +13,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../managers/analytics_manager.dart';
 
@@ -59,6 +60,7 @@ class _ChatScreenState extends State<ChatScreen> {
   bool _connected = true;
   bool _hasText = false;
   bool _showScrollDown = false;
+  bool _showEmojiPicker = false;
 
   int _onlineCount = 1;
   _ChatMessage? _replyTo;
@@ -72,6 +74,7 @@ class _ChatScreenState extends State<ChatScreen> {
   static const _kTable = 'chat_messages';
   static const _kProfileTable = 'user_profiles';
   static const _kBucket = 'avatars';
+  static const _kFileBucket = 'chat_files';
   static const _kNicknameKey = 'chat_nickname';
   static const _kAvatarKey = 'chat_avatar_url';
   static const _kHistoryLimit = 100;
@@ -116,22 +119,19 @@ class _ChatScreenState extends State<ChatScreen> {
   Future<void> _init() async {
     await AnalyticsManager.instance.init();
 
-    // ★ 1. 用 Android ID 作为唯一标识
     final androidId = await _getAndroidId();
     if (androidId == null || androidId.isEmpty) {
       _myDeviceId = 'u_${DateTime.now().microsecondsSinceEpoch}';
-      debugPrint('[Chat] ⚠️ 拿不到 Android ID，用兜底 ID: $_myDeviceId');
+      debugPrint('[Chat] ⚠️ 兜底 ID: $_myDeviceId');
     } else {
       _myDeviceId = androidId;
       debugPrint('[Chat] 🆔 Android ID: $_myDeviceId');
     }
 
-    // ★ 2. 查服务器看是否已注册
     final serverProfile = await _fetchProfileFromServer(_myDeviceId!);
 
     if (serverProfile == null) {
-      // 服务器无记录 → 显示注册页
-      debugPrint('[Chat] 🆕 未注册 → 显示引导页');
+      debugPrint('[Chat] 🆕 未注册');
       if (mounted) {
         setState(() {
           _loading = false;
@@ -141,12 +141,10 @@ class _ChatScreenState extends State<ChatScreen> {
       return;
     }
 
-    // ★ 3. 已注册 → 用服务器数据
     debugPrint('[Chat] ✅ 已注册: ${serverProfile.nickname}');
     _myNickname = serverProfile.nickname;
     _myAvatarUrl = serverProfile.avatarUrl;
 
-    // 缓存到本地
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_kNicknameKey, _myNickname!);
     if (_myAvatarUrl != null) {
@@ -158,18 +156,16 @@ class _ChatScreenState extends State<ChatScreen> {
     if (mounted) setState(() => _loading = false);
   }
 
-  /// 获取 Android ID
   Future<String?> _getAndroidId() async {
     try {
       final info = await DeviceInfoPlugin().androidInfo;
       return info.id;
     } catch (e) {
-      debugPrint('[Chat] ❌ 获取 Android ID 失败: $e');
+      debugPrint('[Chat] ❌ Android ID 失败: $e');
       return null;
     }
   }
 
-  /// 从服务器查询用户档案
   Future<_UserProfile?> _fetchProfileFromServer(String deviceId) async {
     try {
       final data = await Supabase.instance.client
@@ -185,9 +181,6 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
-  // ══════════════════════════════════════════════════════════════
-  // 完成注册（首次）
-  // ══════════════════════════════════════════════════════════════
   Future<void> _finishSetup() async {
     final name = _setupNameController.text.trim();
     if (name.isEmpty) {
@@ -199,10 +192,8 @@ class _ChatScreenState extends State<ChatScreen> {
       return;
     }
 
-    // ★ 再次校验服务器（防止并发 / 缓存问题）
     final existing = await _fetchProfileFromServer(_myDeviceId!);
     if (existing != null) {
-      debugPrint('[Chat] ⚠️ 该设备已注册过，直接加载');
       _myNickname = existing.nickname;
       _myAvatarUrl = existing.avatarUrl;
       setState(() => _needsSetup = false);
@@ -218,7 +209,6 @@ class _ChatScreenState extends State<ChatScreen> {
       return;
     }
 
-    // ★ 首次注册 → INSERT（不是 upsert）
     try {
       await Supabase.instance.client.from(_kProfileTable).insert({
         'device_id': _myDeviceId,
@@ -226,7 +216,6 @@ class _ChatScreenState extends State<ChatScreen> {
         'avatar_url': _myAvatarUrl,
         'updated_at': DateTime.now().toIso8601String(),
       });
-      debugPrint('[Chat] ✅ 注册成功: $name');
     } catch (e) {
       debugPrint('[Chat] ❌ 注册失败: $e');
       _snack('注册失败，请重试');
@@ -255,7 +244,6 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
-  /// 修改昵称/头像时同步（UPDATE，不是 upsert）
   Future<void> _syncMyProfile() async {
     if (_myNickname == null || _myDeviceId == null) return;
     try {
@@ -267,15 +255,11 @@ class _ChatScreenState extends State<ChatScreen> {
             'updated_at': DateTime.now().toIso8601String(),
           })
           .eq('device_id', _myDeviceId!);
-      debugPrint('[Chat] ✅ 档案已更新');
     } catch (e) {
       debugPrint('[Chat] ❌ 同步档案失败: $e');
     }
   }
 
-  // ══════════════════════════════════════════════════════════════
-  // 加载历史
-  // ══════════════════════════════════════════════════════════════
   Future<void> _loadHistory() async {
     try {
       final data = await Supabase.instance.client
@@ -334,9 +318,6 @@ class _ChatScreenState extends State<ChatScreen> {
     } catch (_) {}
   }
 
-  // ══════════════════════════════════════════════════════════════
-  // Realtime + Presence
-  // ══════════════════════════════════════════════════════════════
   void _subscribeRealtime() {
     _channel?.unsubscribe();
 
@@ -364,12 +345,11 @@ class _ChatScreenState extends State<ChatScreen> {
           if (mounted) setState(() => _onlineCount = count);
         })
         .subscribe((status, [err]) async {
-          debugPrint('[Chat] Realtime 状态: $status, err=$err');
+          debugPrint('[Chat] Realtime: $status, err=$err');
 
           if (status == RealtimeSubscribeStatus.subscribed) {
             _connected = true;
             _reconnectTimer?.cancel();
-
             await _channel?.track({
               'device_id': _myDeviceId,
               'nickname': _myNickname,
@@ -410,7 +390,7 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   // ══════════════════════════════════════════════════════════════
-  // 发送
+  // 发送文本
   // ══════════════════════════════════════════════════════════════
   Future<void> _send() async {
     final text = _inputController.text.trim();
@@ -450,6 +430,7 @@ class _ChatScreenState extends State<ChatScreen> {
             'device_id': _myDeviceId,
             'nickname': _myNickname,
             'content': text,
+            'message_type': 'text',
             if (replyTo != null) 'reply_to_id': replyTo.id,
             if (replyTo != null) 'reply_to_nickname': replyTo.nickname,
             if (replyTo != null) 'reply_to_content': replyTo.content,
@@ -472,6 +453,283 @@ class _ChatScreenState extends State<ChatScreen> {
       _snack('发送失败，请重试');
     } finally {
       _sending = false;
+    }
+  }
+
+  // ══════════════════════════════════════════════════════════════
+  // 附件菜单
+  // ══════════════════════════════════════════════════════════════
+  Future<void> _showAttachMenu() async {
+    HapticFeedback.lightImpact();
+    FocusScope.of(context).unfocus();
+    setState(() => _showEmojiPicker = false);
+
+    final result = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: _kBarBg,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Wrap(
+          children: [
+            const SizedBox(height: 8),
+            Center(
+              child: Container(
+                width: 36, height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.white24,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            _attachItem(
+              icon: Icons.photo,
+              color: const Color(0xFF4EC9A6),
+              label: '相册',
+              onTap: () => Navigator.pop(ctx, 'photo'),
+            ),
+            _attachItem(
+              icon: Icons.insert_drive_file,
+              color: const Color(0xFF64B5EF),
+              label: '文件',
+              onTap: () => Navigator.pop(ctx, 'file'),
+            ),
+            _attachItem(
+              icon: Icons.camera_alt,
+              color: const Color(0xFFFB7299),
+              label: '拍照',
+              onTap: () => Navigator.pop(ctx, 'camera'),
+            ),
+            const SizedBox(height: 24),
+          ],
+        ),
+      ),
+    );
+
+    if (!mounted) return;
+    if (result == 'photo') await _pickAndSendImage(ImageSource.gallery);
+    if (result == 'camera') await _pickAndSendImage(ImageSource.camera);
+    if (result == 'file') await _pickAndSendFile();
+  }
+
+  Widget _attachItem({
+    required IconData icon,
+    required Color color,
+    required String label,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 24),
+        child: Row(
+          children: [
+            Container(
+              width: 44, height: 44,
+              decoration: BoxDecoration(
+                color: color.withValues(alpha: 0.15),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(icon, color: color, size: 22),
+            ),
+            const SizedBox(width: 16),
+            Text(
+              label,
+              style: const TextStyle(color: Colors.white, fontSize: 15),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _pickAndSendImage(ImageSource source) async {
+    try {
+      if (source == ImageSource.camera) {
+        final status = await Permission.camera.request();
+        if (!status.isGranted) {
+          _snack('需要相机权限');
+          return;
+        }
+      } else {
+        final statuses = await <Permission>[
+          Permission.photos,
+          Permission.storage,
+        ].request();
+        final has = statuses.values.any((s) => s.isGranted || s.isLimited);
+        if (!has) {
+          _snack('需要相册权限');
+          return;
+        }
+      }
+
+      final picker = ImagePicker();
+      final picked = await picker.pickImage(
+        source: source,
+        maxWidth: 1440,
+        maxHeight: 1440,
+        imageQuality: 85,
+      );
+      if (picked == null) return;
+
+      final bytes = await picked.readAsBytes();
+      final ext = _pickExtension(picked.path);
+      final filename =
+          '${_myDeviceId}_${DateTime.now().millisecondsSinceEpoch}.$ext';
+      final path = 'images/$filename';
+
+      _snack('正在上传…');
+
+      await Supabase.instance.client.storage.from(_kFileBucket).uploadBinary(
+            path,
+            bytes,
+            fileOptions: FileOptions(
+              contentType: 'image/$ext',
+              upsert: false,
+            ),
+          );
+
+      final url = Supabase.instance.client.storage
+          .from(_kFileBucket)
+          .getPublicUrl(path);
+
+      await _sendMediaMessage(
+        messageType: 'image',
+        fileUrl: url,
+        fileName: filename,
+      );
+    } catch (e, st) {
+      debugPrint('[Chat] ❌ 上传图片失败: $e\n$st');
+      if (mounted) _snack('上传失败: $e');
+    }
+  }
+
+  Future<void> _pickAndSendFile() async {
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        withData: true,
+        allowMultiple: false,
+      );
+      if (result == null || result.files.isEmpty) return;
+
+      final file = result.files.first;
+      final bytes = file.bytes;
+      if (bytes == null) {
+        _snack('无法读取文件');
+        return;
+      }
+
+      if (bytes.length > 50 * 1024 * 1024) {
+        _snack('文件不能超过 50 MB');
+        return;
+      }
+
+      final filename =
+          '${_myDeviceId}_${DateTime.now().millisecondsSinceEpoch}_${file.name}';
+      final path = 'files/$filename';
+
+      _snack('正在上传…');
+
+      await Supabase.instance.client.storage.from(_kFileBucket).uploadBinary(
+            path,
+            bytes,
+            fileOptions: FileOptions(
+              contentType: 'application/octet-stream',
+              upsert: false,
+            ),
+          );
+
+      final url = Supabase.instance.client.storage
+          .from(_kFileBucket)
+          .getPublicUrl(path);
+
+      await _sendMediaMessage(
+        messageType: 'file',
+        fileUrl: url,
+        fileName: file.name,
+      );
+    } catch (e, st) {
+      debugPrint('[Chat] ❌ 上传文件失败: $e\n$st');
+      if (mounted) _snack('上传失败: $e');
+    }
+  }
+
+  Future<void> _sendMediaMessage({
+    required String messageType,
+    required String fileUrl,
+    required String fileName,
+  }) async {
+    final replyTo = _replyTo;
+    if (mounted) setState(() => _replyTo = null);
+
+    final tempId = -DateTime.now().millisecondsSinceEpoch;
+    final tempMsg = _ChatMessage(
+      id: tempId,
+      deviceId: _myDeviceId ?? '',
+      nickname: _myNickname ?? '',
+      content: messageType == 'image' ? '[图片]' : '[文件]',
+      createdAt: DateTime.now(),
+      messageType: messageType,
+      fileUrl: fileUrl,
+      fileName: fileName,
+      replyToId: replyTo?.id,
+      replyToNickname: replyTo?.nickname,
+      replyToContent: replyTo?.content,
+    );
+    setState(() => _messages.add(tempMsg));
+    _scrollToBottom();
+
+    try {
+      final res = await Supabase.instance.client
+          .from(_kTable)
+          .insert({
+            'device_id': _myDeviceId,
+            'nickname': _myNickname,
+            'content': tempMsg.content,
+            'message_type': messageType,
+            'file_url': fileUrl,
+            'file_name': fileName,
+            if (replyTo != null) 'reply_to_id': replyTo.id,
+            if (replyTo != null) 'reply_to_nickname': replyTo.nickname,
+            if (replyTo != null) 'reply_to_content': replyTo.content,
+          })
+          .select()
+          .single();
+
+      final realMsg = _ChatMessage.fromMap(res);
+      if (!mounted) return;
+      setState(() {
+        final idx = _messages.indexWhere((m) => m.id == tempId);
+        if (idx >= 0) _messages[idx] = realMsg;
+        _messageIds.add(realMsg.id);
+      });
+    } catch (e) {
+      debugPrint('[Chat] 发送媒体失败: $e');
+      if (!mounted) return;
+      setState(() => _messages.removeWhere((m) => m.id == tempId));
+      _snack('发送失败，请重试');
+    }
+  }
+
+  Future<void> _openImage(String url) async {
+    await showDialog(
+      context: context,
+      barrierColor: Colors.black87,
+      builder: (_) => GestureDetector(
+        onTap: () => Navigator.pop(context),
+        child: InteractiveViewer(
+          child: Image.network(url),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openFile(String url, String name) async {
+    final uri = Uri.parse(url);
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
     }
   }
 
@@ -507,12 +765,13 @@ class _ChatScreenState extends State<ChatScreen> {
                   style: TextStyle(color: Colors.white)),
               onTap: () => Navigator.pop(ctx, 'reply'),
             ),
-            ListTile(
-              leading: const Icon(Icons.copy, color: _kSendBtn),
-              title: const Text('复制',
-                  style: TextStyle(color: Colors.white)),
-              onTap: () => Navigator.pop(ctx, 'copy'),
-            ),
+            if (msg.messageType == 'text')
+              ListTile(
+                leading: const Icon(Icons.copy, color: _kSendBtn),
+                title: const Text('复制',
+                    style: TextStyle(color: Colors.white)),
+                onTap: () => Navigator.pop(ctx, 'copy'),
+              ),
             const SizedBox(height: 8),
           ],
         ),
@@ -594,7 +853,6 @@ class _ChatScreenState extends State<ChatScreen> {
       await prefs.setString(_kAvatarKey, url);
       if (mounted) setState(() => _myAvatarUrl = url);
 
-      // 已注册用户 → 直接更新服务器
       if (_myNickname != null && !_needsSetup) {
         await _syncMyProfile();
       }
@@ -823,10 +1081,7 @@ class _ChatScreenState extends State<ChatScreen> {
               const SizedBox(height: 6),
               const Text(
                 '和全球用户实时交流',
-                style: TextStyle(
-                  color: Colors.white54,
-                  fontSize: 14,
-                ),
+                style: TextStyle(color: Colors.white54, fontSize: 14),
               ),
               const SizedBox(height: 40),
               Center(
@@ -904,10 +1159,7 @@ class _ChatScreenState extends State<ChatScreen> {
                         },
                   child: Text(
                     _myAvatarUrl == null ? '上传头像' : '更换头像',
-                    style: const TextStyle(
-                      color: _kSendBtn,
-                      fontSize: 14,
-                    ),
+                    style: const TextStyle(color: _kSendBtn, fontSize: 14),
                   ),
                 ),
               ),
@@ -915,29 +1167,24 @@ class _ChatScreenState extends State<ChatScreen> {
               TextField(
                 controller: _setupNameController,
                 maxLength: 16,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 15,
-                ),
+                style: const TextStyle(color: Colors.white, fontSize: 15),
                 decoration: InputDecoration(
                   hintText: '输入昵称',
                   hintStyle: const TextStyle(
-                    color: Colors.white38,
-                    fontSize: 15,
-                  ),
+                      color: Colors.white38, fontSize: 15),
                   counterStyle: const TextStyle(color: Colors.white24),
                   filled: true,
                   fillColor: _kInputBg,
                   contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 16, vertical: 16,
-                  ),
+                      horizontal: 16, vertical: 16),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
                     borderSide: BorderSide.none,
                   ),
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
-                    borderSide: const BorderSide(color: _kSendBtn, width: 1.5),
+                    borderSide:
+                        const BorderSide(color: _kSendBtn, width: 1.5),
                   ),
                 ),
               ),
@@ -993,19 +1240,13 @@ class _ChatScreenState extends State<ChatScreen> {
                             child: Column(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                Icon(
-                                  Icons.chat_bubble_outline,
-                                  color: Colors.white24,
-                                  size: 42,
-                                ),
+                                Icon(Icons.chat_bubble_outline,
+                                    color: Colors.white24, size: 42),
                                 SizedBox(height: 10),
-                                Text(
-                                  '还没有消息',
-                                  style: TextStyle(
-                                    color: Colors.white38,
-                                    fontSize: 14,
-                                  ),
-                                ),
+                                Text('还没有消息',
+                                    style: TextStyle(
+                                        color: Colors.white38,
+                                        fontSize: 14)),
                               ],
                             ),
                           )
@@ -1022,6 +1263,36 @@ class _ChatScreenState extends State<ChatScreen> {
                 ),
               ),
               _buildInputBar(bottomInset),
+              if (_showEmojiPicker)
+                SizedBox(
+                  height: 260,
+                  child: EmojiPicker(
+                    textEditingController: _inputController,
+                    config: Config(
+                      height: 260,
+                      checkPlatformCompatibility: true,
+                      emojiViewConfig: EmojiViewConfig(
+                        backgroundColor: _kBarBg,
+                        emojiSizeMax: 26,
+                      ),
+                      categoryViewConfig: CategoryViewConfig(
+                        backgroundColor: _kBarBg,
+                        iconColor: Colors.white38,
+                        iconColorSelected: _kSendBtn,
+                        indicatorColor: _kSendBtn,
+                      ),
+                      bottomActionBarConfig: const BottomActionBarConfig(
+                        enabled: false,
+                      ),
+                      searchViewConfig: SearchViewConfig(
+                        backgroundColor: _kBarBg,
+                        buttonIconColor: Colors.white,
+                        hintText: '搜索…',
+                        hintTextStyle: TextStyle(color: Colors.white38),
+                      ),
+                    ),
+                  ),
+                ),
             ],
           ),
         ],
@@ -1029,7 +1300,6 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
-  // ── 顶栏 ────────────────────────────────────────────────────
   PreferredSizeWidget _buildAppBar() {
     return AppBar(
       backgroundColor: _kBarBg,
@@ -1039,8 +1309,7 @@ class _ChatScreenState extends State<ChatScreen> {
       leadingWidth: 52,
       leading: Center(
         child: Container(
-          width: 38,
-          height: 38,
+          width: 38, height: 38,
           decoration: const BoxDecoration(
             color: _kInputBg,
             shape: BoxShape.circle,
@@ -1077,12 +1346,10 @@ class _ChatScreenState extends State<ChatScreen> {
               ? ClipOval(
                   child: Image.network(
                     _myAvatarUrl!,
-                    width: 34,
-                    height: 34,
+                    width: 34, height: 34,
                     fit: BoxFit.cover,
                     errorBuilder: (_, __, ___) => Container(
-                      width: 34,
-                      height: 34,
+                      width: 34, height: 34,
                       decoration: const BoxDecoration(
                         color: _kInputBg,
                         shape: BoxShape.circle,
@@ -1093,8 +1360,7 @@ class _ChatScreenState extends State<ChatScreen> {
                   ),
                 )
               : Container(
-                  width: 34,
-                  height: 34,
+                  width: 34, height: 34,
                   decoration: const BoxDecoration(
                     color: _kInputBg,
                     shape: BoxShape.circle,
@@ -1140,6 +1406,8 @@ class _ChatScreenState extends State<ChatScreen> {
                 setState(() => _replyTo = m);
                 _inputFocus.requestFocus();
               },
+              onTapImage: () => _openImage(m.fileUrl!),
+              onTapFile: () => _openFile(m.fileUrl!, m.fileName ?? ''),
             ),
           ],
         );
@@ -1164,10 +1432,7 @@ class _ChatScreenState extends State<ChatScreen> {
         mainAxisSize: MainAxisSize.min,
         children: [
           if (_replyTo != null)
-            _ReplyPreview(
-              msg: _replyTo!,
-              onCancel: _cancelReply,
-            ),
+            _ReplyPreview(msg: _replyTo!, onCancel: _cancelReply),
           Row(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
@@ -1183,9 +1448,15 @@ class _ChatScreenState extends State<ChatScreen> {
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
                       IconButton(
-                        onPressed: () {},
-                        icon: const Icon(
-                          Icons.emoji_emotions_outlined,
+                        onPressed: () {
+                          FocusScope.of(context).unfocus();
+                          setState(
+                              () => _showEmojiPicker = !_showEmojiPicker);
+                        },
+                        icon: Icon(
+                          _showEmojiPicker
+                              ? Icons.keyboard
+                              : Icons.emoji_emotions_outlined,
                           color: Colors.white54, size: 22,
                         ),
                         padding: const EdgeInsets.all(8),
@@ -1195,6 +1466,11 @@ class _ChatScreenState extends State<ChatScreen> {
                         child: TextField(
                           controller: _inputController,
                           focusNode: _inputFocus,
+                          onTap: () {
+                            if (_showEmojiPicker) {
+                              setState(() => _showEmojiPicker = false);
+                            }
+                          },
                           style: const TextStyle(
                               color: Colors.white, fontSize: 15),
                           maxLines: 5,
@@ -1213,16 +1489,15 @@ class _ChatScreenState extends State<ChatScreen> {
                           ),
                         ),
                       ),
-                      if (!_hasText)
-                        IconButton(
-                          onPressed: () {},
-                          icon: const Icon(
-                            Icons.attach_file,
-                            color: Colors.white54, size: 20,
-                          ),
-                          padding: const EdgeInsets.all(8),
-                          constraints: const BoxConstraints(),
+                      IconButton(
+                        onPressed: _showAttachMenu,
+                        icon: const Icon(
+                          Icons.attach_file,
+                          color: Colors.white54, size: 20,
                         ),
+                        padding: const EdgeInsets.all(8),
+                        constraints: const BoxConstraints(),
+                      ),
                     ],
                   ),
                 ),
@@ -1544,10 +1819,7 @@ class _DateSeparator extends StatelessWidget {
           ),
           child: Text(
             _label,
-            style: const TextStyle(
-              color: Colors.white60,
-              fontSize: 11,
-            ),
+            style: const TextStyle(color: Colors.white60, fontSize: 11),
           ),
         ),
       ),
@@ -1607,8 +1879,7 @@ class _ScrollToBottomButtonState extends State<_ScrollToBottomButton>
             ),
             child: const Icon(
               Icons.keyboard_arrow_down_rounded,
-              color: _kSendBtn,
-              size: 26,
+              color: _kSendBtn, size: 26,
             ),
           ),
         ),
@@ -1657,8 +1928,7 @@ class _ReplyPreview extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
-                    color: Colors.white70,
-                    fontSize: 13,
+                    color: Colors.white70, fontSize: 13,
                   ),
                 ),
               ],
@@ -1684,6 +1954,8 @@ class _MessageBubble extends StatefulWidget {
   final bool showAvatar;
   final VoidCallback onLongPress;
   final VoidCallback onSwipeReply;
+  final VoidCallback onTapImage;
+  final VoidCallback onTapFile;
 
   const _MessageBubble({
     super.key,
@@ -1693,6 +1965,8 @@ class _MessageBubble extends StatefulWidget {
     required this.showAvatar,
     required this.onLongPress,
     required this.onSwipeReply,
+    required this.onTapImage,
+    required this.onTapFile,
   });
 
   @override
@@ -1756,7 +2030,6 @@ class _MessageBubbleState extends State<_MessageBubble>
     final isMine = widget.isMine;
     final displayName = widget.profile?.nickname ?? widget.msg.nickname;
     final avatarUrl = widget.profile?.avatarUrl;
-
     final replyProgress = (_dragOffset / _kDragThreshold).clamp(0.0, 1.0);
 
     return FadeTransition(
@@ -1769,13 +2042,16 @@ class _MessageBubbleState extends State<_MessageBubble>
             onLongPress: widget.onLongPress,
             onHorizontalDragUpdate: _onDragUpdate,
             onHorizontalDragEnd: _onDragEnd,
+            onTap: widget.msg.messageType == 'image'
+                ? widget.onTapImage
+                : widget.msg.messageType == 'file'
+                    ? widget.onTapFile
+                    : null,
             child: Stack(
               children: [
                 if (_dragOffset > 0)
                   Positioned(
-                    left: 8,
-                    top: 0,
-                    bottom: 0,
+                    left: 8, top: 0, bottom: 0,
                     child: Center(
                       child: Opacity(
                         opacity: replyProgress,
@@ -1786,9 +2062,7 @@ class _MessageBubbleState extends State<_MessageBubble>
                             shape: BoxShape.circle,
                           ),
                           child: const Icon(
-                            Icons.reply,
-                            color: Colors.white,
-                            size: 16,
+                            Icons.reply, color: Colors.white, size: 16,
                           ),
                         ),
                       ),
@@ -1841,11 +2115,9 @@ class _MessageBubbleState extends State<_MessageBubble>
                                   ),
                                 ),
                               _Bubble(
-                                text: widget.msg.content,
+                                msg: widget.msg,
                                 time: time,
                                 isMine: isMine,
-                                replyToNickname: widget.msg.replyToNickname,
-                                replyToContent: widget.msg.replyToContent,
                               ),
                             ],
                           ),
@@ -1865,25 +2137,22 @@ class _MessageBubbleState extends State<_MessageBubble>
 
 // ══════════════════════════════════════════════════════════════
 class _Bubble extends StatelessWidget {
-  final String text;
+  final _ChatMessage msg;
   final String time;
   final bool isMine;
-  final String? replyToNickname;
-  final String? replyToContent;
 
   const _Bubble({
-    required this.text,
+    required this.msg,
     required this.time,
     required this.isMine,
-    this.replyToNickname,
-    this.replyToContent,
   });
 
   static const double _tailH = 10.0;
 
   @override
   Widget build(BuildContext context) {
-    final hasReply = replyToNickname != null;
+    final hasReply = msg.replyToNickname != null;
+    final type = msg.messageType;
 
     return CustomPaint(
       painter: _TelegramBubblePainter(
@@ -1892,10 +2161,10 @@ class _Bubble extends StatelessWidget {
       ),
       child: Padding(
         padding: EdgeInsets.only(
-          left: 12,
-          right: 12,
-          top: 7,
-          bottom: 7 + _tailH - 2,
+          left: type == 'image' ? 4 : 12,
+          right: type == 'image' ? 4 : 12,
+          top: type == 'image' ? 4 : 7,
+          bottom: (type == 'image' ? 4 : 7) + _tailH - 2,
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -1903,7 +2172,8 @@ class _Bubble extends StatelessWidget {
           children: [
             if (hasReply)
               Container(
-                margin: const EdgeInsets.only(bottom: 6),
+                margin: EdgeInsets.only(
+                    bottom: 6, left: type == 'image' ? 8 : 0),
                 padding: const EdgeInsets.fromLTRB(8, 4, 8, 4),
                 decoration: BoxDecoration(
                   color: Colors.black.withValues(alpha: 0.2),
@@ -1917,7 +2187,7 @@ class _Bubble extends StatelessWidget {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
-                      replyToNickname!,
+                      msg.replyToNickname!,
                       style: const TextStyle(
                         color: _kSendBtn,
                         fontSize: 11,
@@ -1926,52 +2196,173 @@ class _Bubble extends StatelessWidget {
                     ),
                     const SizedBox(height: 1),
                     Text(
-                      replyToContent ?? '',
+                      msg.replyToContent ?? '',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
-                        color: Colors.white70,
-                        fontSize: 12,
+                        color: Colors.white70, fontSize: 12,
                       ),
                     ),
                   ],
                 ),
               ),
-            Row(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                Flexible(
-                  child: Text(
-                    text,
-                    style: TextStyle(
-                      color: isMine ? _kMyText : _kOtherText,
-                      fontSize: 15,
-                      height: 1.35,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Padding(
-                  padding: const EdgeInsets.only(top: 4),
-                  child: Text(
-                    time,
-                    style: TextStyle(
-                      color: isMine ? _kTimeMine : _kTimeOther,
-                      fontSize: 11,
-                      height: 1,
-                    ),
-                  ),
-                ),
-              ],
-            ),
+            if (type == 'image')
+              _buildImageContent(context)
+            else if (type == 'file')
+              _buildFileContent()
+            else
+              _buildTextContent(),
           ],
         ),
       ),
     );
   }
+
+  Widget _buildTextContent() {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        Flexible(
+          child: Text(
+            msg.content,
+            style: TextStyle(
+              color: isMine ? _kMyText : _kOtherText,
+              fontSize: 15,
+              height: 1.35,
+            ),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Padding(
+          padding: const EdgeInsets.only(top: 4),
+          child: Text(
+            time,
+            style: TextStyle(
+              color: isMine ? _kTimeMine : _kTimeOther,
+              fontSize: 11,
+              height: 1,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildImageContent(BuildContext context) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(10),
+      child: Stack(
+        children: [
+          ConstrainedBox(
+            constraints: BoxConstraints(
+              maxWidth: MediaQuery.of(context).size.width * 0.6,
+              maxHeight: MediaQuery.of(context).size.width * 0.6,
+            ),
+            child: Image.network(
+              msg.fileUrl!,
+              fit: BoxFit.cover,
+              loadingBuilder: (_, child, progress) {
+                if (progress == null) return child;
+                return Container(
+                  width: 200, height: 200,
+                  color: Colors.black26,
+                  child: const Center(
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2, color: _kSendBtn,
+                    ),
+                  ),
+                );
+              },
+              errorBuilder: (_, __, ___) => Container(
+                width: 200, height: 200,
+                color: Colors.black26,
+                child: const Icon(Icons.broken_image,
+                    color: Colors.white38, size: 40),
+              ),
+            ),
+          ),
+          Positioned(
+            right: 6, bottom: 6,
+            child: Container(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: Colors.black.withValues(alpha: 0.5),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                time,
+                style: const TextStyle(
+                  color: Colors.white, fontSize: 10, height: 1,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFileContent() {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        Container(
+          width: 40, height: 40,
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.15),
+            shape: BoxShape.circle,
+          ),
+          child: const Icon(Icons.insert_drive_file,
+              color: Colors.white, size: 20),
+        ),
+        const SizedBox(width: 10),
+        Flexible(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                msg.fileName ?? '文件',
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                '点击下载',
+                style: TextStyle(
+                  color: Colors.white.withValues(alpha: 0.6),
+                  fontSize: 11,
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(width: 8),
+        Padding(
+          padding: const EdgeInsets.only(top: 4),
+          child: Text(
+            time,
+            style: TextStyle(
+              color: isMine ? _kTimeMine : _kTimeOther,
+              fontSize: 11,
+              height: 1,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
 }
 
+// ══════════════════════════════════════════════════════════════
 class _TelegramBubblePainter extends CustomPainter {
   final Color color;
   final bool isMine;
@@ -1992,7 +2383,6 @@ class _TelegramBubblePainter extends CustomPainter {
 
     final w = size.width;
     final h = size.height - tailH;
-
     final path = Path();
 
     if (isMine) {
@@ -2100,6 +2490,9 @@ class _ChatMessage {
   final String nickname;
   final String content;
   final DateTime createdAt;
+  final String messageType;
+  final String? fileUrl;
+  final String? fileName;
   final int? replyToId;
   final String? replyToNickname;
   final String? replyToContent;
@@ -2110,6 +2503,9 @@ class _ChatMessage {
     required this.nickname,
     required this.content,
     required this.createdAt,
+    this.messageType = 'text',
+    this.fileUrl,
+    this.fileName,
     this.replyToId,
     this.replyToNickname,
     this.replyToContent,
@@ -2121,8 +2517,11 @@ class _ChatMessage {
         nickname: m['nickname'] as String? ?? '匿名',
         content: m['content'] as String? ?? '',
         createdAt:
-            DateTime.tryParse(m['created_at'] as String? ?? '') ??
+            DateTime.tryParse(m['created_at'] as String? ?? '')?.toLocal() ??
                 DateTime.now(),
+        messageType: m['message_type'] as String? ?? 'text',
+        fileUrl: m['file_url'] as String?,
+        fileName: m['file_name'] as String?,
         replyToId: (m['reply_to_id'] as num?)?.toInt(),
         replyToNickname: m['reply_to_nickname'] as String?,
         replyToContent: m['reply_to_content'] as String?,
