@@ -43,8 +43,8 @@ dependencies:
   supabase_flutter: ^2.8.0
 
   # 聊天室模块
-  emoji_picker_flutter: ^2.2.0     # ★ 新增：Emoji 面板
-  file_picker: ^8.1.4               # ★ 新增：发送文件
+  emoji_picker_flutter: ^4.4.0      # ★ 从 2.2.0 升级到 4.4.0（兼容 cached_network_image）
+  file_picker: ^8.1.4               # ★ 发送文件
 
 dev_dependencies:
   flutter_test:
