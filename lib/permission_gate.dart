@@ -10,7 +10,6 @@ import 'dart:async';
 import 'dart:ui' show ImageFilter;
 
 import 'package:app_settings/app_settings.dart';
-import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 

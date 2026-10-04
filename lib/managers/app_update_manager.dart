@@ -11,7 +11,6 @@ import 'dart:convert';
 import 'dart:ffi' show Abi;          // ★ 新增：检测设备架构
 import 'dart:ui' show ImageFilter;
 
-import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:package_info_plus/package_info_plus.dart';

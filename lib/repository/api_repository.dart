@@ -26,7 +26,7 @@ class ApiRepository {
     final keyBytes = await HardwareKey.deriveApiKey();
     final key = enc.Key(Uint8List.fromList(keyBytes));
     final encrypter = enc.Encrypter(enc.AES(key, mode: enc.AESMode.gcm));
-    final nonce = enc.IV.generator(12); // 12 字节随机 nonce
+    final nonce = enc.IV.fromSecureRandom(12);
     final encrypted = encrypter.encrypt(jsonStr, iv: nonce);
 
     // 拼接：nonce(12) + authTag(16) + ciphertext

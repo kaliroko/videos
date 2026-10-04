@@ -20,6 +20,7 @@
 library;
 
 import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:encrypt/encrypt.dart' as enc;
@@ -305,7 +306,7 @@ class SecurityCrypto {
   ) async {
     final encrypter =
         enc.Encrypter(enc.AES(enc.Key(key), mode: enc.AESMode.gcm));
-    final nonce = enc.IV.generator(12);
+    final nonce = enc.IV.fromSecureRandom(12);
     final encrypted = encrypter.encrypt(plaintext, iv: nonce);
 
     // 拼接：nonce(12) + tag(16) + ciphertext

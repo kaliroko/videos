@@ -34,10 +34,9 @@ class HardwareKey {
   static const _storage = FlutterSecureStorage(
     aOptions: AndroidOptions(
       encryptedSharedPreferences: true,
-      preferenceKeyPrefix: _kKeyAlias,
     ),
     iOptions: IOSOptions(
-      accessibility: KeychainAccessibility.firstUnlockThisDevice,
+      accessibility: KeychainAccessibility.first_unlock_this_device,
     ),
   );
 
@@ -53,18 +52,18 @@ class HardwareKey {
     }
 
     // 首次安装：生成随机密钥并写入安全存储
-    final random = List<int>.generate(32, (_) => _platformRandomByte());
-    final encoded = base64Encode(Uint8List.fromList(random));
-
+    final random = Uint8List(32);
+    for (int i = 0; i < 32; i++) random[i] = _platformRandomByte();
+    final encoded = base64Encode(random);
     await _storage.write(key: 'master_key', value: encoded);
-
     return random;
   }
 
   /// 替换主密钥（安全重置）
   static Future<void> rotateMasterKey() async {
-    final random = List<int>.generate(32, (_) => _platformRandomByte());
-    final encoded = base64Encode(Uint8List.fromList(random));
+    final random = Uint8List(32);
+    for (int i = 0; i < 32; i++) random[i] = _platformRandomByte();
+    final encoded = base64Encode(random);
     await _storage.write(key: 'master_key', value: encoded);
   }
 

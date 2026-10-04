@@ -13,15 +13,11 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../config/secrets.dart';
-import '../config/hardware_key.dart';
 
 // ══════════════════════════════════════════════════════════════════
 // ★ Supabase URL / AnonKey / IP API URL 通过 HardwareKey 派生密钥 XOR 解密
 //   解密密钥每台设备独立生成，不再存储在任何常量中
 // ══════════════════════════════════════════════════════════════════
-String? _supabaseUrl;
-String? _supabaseAnonKey;
-String? _ipApiUrl;
 String get _tableName => 'app_opens';
 
 // ══════════════════════════════════════════════════════════════════
@@ -47,8 +43,6 @@ class IpInfo {
 
 String? _supabaseUrlCache;
 String? _supabaseAnonKeyCache;
-String? _tableNameCache;
-String? _ipApiUrlCache;
 
 Future<String> _getSupabaseUrl() async {
   return _supabaseUrlCache ??= await SecureConfig.supabaseUrlAsync;
@@ -56,14 +50,6 @@ Future<String> _getSupabaseUrl() async {
 
 Future<String> _getSupabaseAnonKey() async {
   return _supabaseAnonKeyCache ??= await SecureConfig.supabaseKeyAsyncValue;
-}
-
-Future<String> _getTableCache() async {
-  return _tableNameCache ??= "app_opens";
-}
-
-Future<String> _getIpApiUrl() async {
-  return _ipApiUrlCache ??= await SecureConfig.ipApiUrlAsync;
 }
 
 class AnalyticsManager {
@@ -88,8 +74,6 @@ class AnalyticsManager {
     }
 
     try {
-      _supabaseUrl ??= await SecureConfig.supabaseUrlAsync;
-      _supabaseAnonKey ??= await SecureConfig.supabaseKeyAsyncValue;
       await Supabase.initialize(
         url: await _getSupabaseUrl(),
         publishableKey: await _getSupabaseAnonKey(),
@@ -156,7 +140,7 @@ class AnalyticsManager {
 
     try {
       final resp = await http
-          .get(Uri.parse(_ipApiUrl ??= await SecureConfig.ipApiUrlAsync))
+          .get(Uri.parse(await _getIpApiUrl()))
           .timeout(const Duration(seconds: 8));
 
       if (resp.statusCode == 200) {
