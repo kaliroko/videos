@@ -2,6 +2,7 @@
 library;
 
 import 'dart:async';
+import 'dart:ui' show ImageFilter;
 
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:emoji_picker_flutter/emoji_picker_flutter.dart';
@@ -17,7 +18,6 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../managers/analytics_manager.dart';
 
-// ══════════════════════════════════════════════════════════════
 const Color _kMyBubble = Color(0xFF2B5278);
 const Color _kOtherBubble = Color(0xFF182533);
 const Color _kMyText = Color(0xFFFFFFFF);
@@ -25,7 +25,7 @@ const Color _kOtherText = Color(0xFFFFFFFF);
 const Color _kTimeMine = Color(0xFF8FB5D6);
 const Color _kTimeOther = Color(0xFF6B7B8B);
 
-const Color _kChatBg = Color(0xFF0E1621);
+const Color _kChatBg = Color(0xFF000000);
 const Color _kBarBg = Color(0xFF17212B);
 const Color _kInputBg = Color(0xFF242F3D);
 const Color _kSendBtn = Color(0xFF64B5EF);
@@ -40,7 +40,8 @@ class ChatScreen extends StatefulWidget {
   State<ChatScreen> createState() => _ChatScreenState();
 }
 
-class _ChatScreenState extends State<ChatScreen> {
+class _ChatScreenState extends State<ChatScreen>
+    with TickerProviderStateMixin {
   final _scrollController = ScrollController();
   final _inputController = TextEditingController();
   final _inputFocus = FocusNode();
@@ -71,6 +72,10 @@ class _ChatScreenState extends State<ChatScreen> {
   Timer? _reconnectTimer;
   final _setupNameController = TextEditingController();
 
+  /// 顶栏 / 底栏动态模糊
+  late final AnimationController _blurCtrl;
+  late final Animation<double> _blurAnim;
+
   static const _kTable = 'chat_messages';
   static const _kProfileTable = 'user_profiles';
   static const _kBucket = 'avatars';
@@ -82,6 +87,16 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   void initState() {
     super.initState();
+
+    _blurCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 4),
+    )..repeat(reverse: true);
+
+    _blurAnim = Tween<double>(begin: 12.0, end: 22.0).animate(
+      CurvedAnimation(parent: _blurCtrl, curve: Curves.easeInOut),
+    );
+
     _inputController.addListener(() {
       final has = _inputController.text.trim().isNotEmpty;
       if (has != _hasText) setState(() => _hasText = has);
@@ -92,6 +107,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
   @override
   void dispose() {
+    _blurCtrl.dispose();
     _reconnectTimer?.cancel();
     _channel?.untrack();
     _channel?.unsubscribe();
@@ -105,31 +121,26 @@ class _ChatScreenState extends State<ChatScreen> {
 
   void _onScroll() {
     if (!_scrollController.hasClients) return;
-    final distanceFromBottom =
-        _scrollController.position.maxScrollExtent - _scrollController.offset;
-    final shouldShow = distanceFromBottom > 200;
+    final d = _scrollController.position.maxScrollExtent -
+        _scrollController.offset;
+    final shouldShow = d > 200;
     if (shouldShow != _showScrollDown) {
       setState(() => _showScrollDown = shouldShow);
     }
   }
 
-  // ══════════════════════════════════════════════════════════════
-  // 初始化
-  // ══════════════════════════════════════════════════════════════
   Future<void> _init() async {
     await AnalyticsManager.instance.init();
 
     final androidId = await _getAndroidId();
     if (androidId == null || androidId.isEmpty) {
       _myDeviceId = 'u_${DateTime.now().microsecondsSinceEpoch}';
-      debugPrint('[Chat] ⚠️ 兜底 ID: $_myDeviceId');
     } else {
       _myDeviceId = androidId;
-      debugPrint('[Chat] 🆔 Android ID: $_myDeviceId');
     }
+    debugPrint('[Chat] 🆔 deviceId: $_myDeviceId');
 
     final serverProfile = await _fetchProfileFromServer(_myDeviceId!);
-
     if (serverProfile == null) {
       debugPrint('[Chat] 🆕 未注册');
       if (mounted) {
@@ -161,7 +172,7 @@ class _ChatScreenState extends State<ChatScreen> {
       final info = await DeviceInfoPlugin().androidInfo;
       return info.id;
     } catch (e) {
-      debugPrint('[Chat] ❌ Android ID 失败: $e');
+      debugPrint('[Chat] ❌ Android ID: $e');
       return null;
     }
   }
@@ -237,9 +248,7 @@ class _ChatScreenState extends State<ChatScreen> {
       SnackBar(
         content: Text(msg),
         behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
-        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       ),
     );
   }
@@ -247,16 +256,13 @@ class _ChatScreenState extends State<ChatScreen> {
   Future<void> _syncMyProfile() async {
     if (_myNickname == null || _myDeviceId == null) return;
     try {
-      await Supabase.instance.client
-          .from(_kProfileTable)
-          .update({
-            'nickname': _myNickname,
-            if (_myAvatarUrl != null) 'avatar_url': _myAvatarUrl,
-            'updated_at': DateTime.now().toIso8601String(),
-          })
-          .eq('device_id', _myDeviceId!);
+      await Supabase.instance.client.from(_kProfileTable).update({
+        'nickname': _myNickname,
+        if (_myAvatarUrl != null) 'avatar_url': _myAvatarUrl,
+        'updated_at': DateTime.now().toIso8601String(),
+      }).eq('device_id', _myDeviceId!);
     } catch (e) {
-      debugPrint('[Chat] ❌ 同步档案失败: $e');
+      debugPrint('[Chat] ❌ 同步档案: $e');
     }
   }
 
@@ -338,15 +344,28 @@ class _ChatScreenState extends State<ChatScreen> {
             _loadProfile(msg.deviceId);
           },
         )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.delete,
+          schema: 'public',
+          table: _kTable,
+          callback: (payload) {
+            final row = payload.oldRecord;
+            final id = (row['id'] as num?)?.toInt();
+            if (id == null) return;
+            if (!mounted) return;
+            setState(() {
+              _messages.removeWhere((m) => m.id == id);
+              _messageIds.remove(id);
+            });
+          },
+        )
         .onPresenceSync((payload) {
           final states = _channel?.presenceState() ?? const [];
           final count = states.length;
-          debugPrint('[Chat] 👥 在线人数: $count');
           if (mounted) setState(() => _onlineCount = count);
         })
         .subscribe((status, [err]) async {
           debugPrint('[Chat] Realtime: $status, err=$err');
-
           if (status == RealtimeSubscribeStatus.subscribed) {
             _connected = true;
             _reconnectTimer?.cancel();
@@ -389,9 +408,6 @@ class _ChatScreenState extends State<ChatScreen> {
     });
   }
 
-  // ══════════════════════════════════════════════════════════════
-  // 发送文本
-  // ══════════════════════════════════════════════════════════════
   Future<void> _send() async {
     final text = _inputController.text.trim();
     if (text.isEmpty || _sending) return;
@@ -440,7 +456,6 @@ class _ChatScreenState extends State<ChatScreen> {
 
       final realMsg = _ChatMessage.fromMap(res);
       if (!mounted) return;
-
       setState(() {
         final idx = _messages.indexWhere((m) => m.id == tempId);
         if (idx >= 0) _messages[idx] = realMsg;
@@ -456,9 +471,6 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
-  // ══════════════════════════════════════════════════════════════
-  // 附件菜单
-  // ══════════════════════════════════════════════════════════════
   Future<void> _showAttachMenu() async {
     HapticFeedback.lightImpact();
     FocusScope.of(context).unfocus();
@@ -535,10 +547,8 @@ class _ChatScreenState extends State<ChatScreen> {
               child: Icon(icon, color: color, size: 22),
             ),
             const SizedBox(width: 16),
-            Text(
-              label,
-              style: const TextStyle(color: Colors.white, fontSize: 15),
-            ),
+            Text(label,
+                style: const TextStyle(color: Colors.white, fontSize: 15)),
           ],
         ),
       ),
@@ -585,10 +595,8 @@ class _ChatScreenState extends State<ChatScreen> {
       await Supabase.instance.client.storage.from(_kFileBucket).uploadBinary(
             path,
             bytes,
-            fileOptions: FileOptions(
-              contentType: 'image/$ext',
-              upsert: false,
-            ),
+            fileOptions:
+                FileOptions(contentType: 'image/$ext', upsert: false),
           );
 
       final url = Supabase.instance.client.storage
@@ -620,7 +628,6 @@ class _ChatScreenState extends State<ChatScreen> {
         _snack('无法读取文件');
         return;
       }
-
       if (bytes.length > 50 * 1024 * 1024) {
         _snack('文件不能超过 50 MB');
         return;
@@ -635,7 +642,7 @@ class _ChatScreenState extends State<ChatScreen> {
       await Supabase.instance.client.storage.from(_kFileBucket).uploadBinary(
             path,
             bytes,
-            fileOptions: FileOptions(
+            fileOptions: const FileOptions(
               contentType: 'application/octet-stream',
               upsert: false,
             ),
@@ -719,9 +726,7 @@ class _ChatScreenState extends State<ChatScreen> {
       barrierColor: Colors.black87,
       builder: (_) => GestureDetector(
         onTap: () => Navigator.pop(context),
-        child: InteractiveViewer(
-          child: Image.network(url),
-        ),
+        child: InteractiveViewer(child: Image.network(url)),
       ),
     );
   }
@@ -733,9 +738,6 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
-  // ══════════════════════════════════════════════════════════════
-  // 长按菜单
-  // ══════════════════════════════════════════════════════════════
   Future<void> _showMessageMenu(_ChatMessage msg, bool isMine) async {
     HapticFeedback.mediumImpact();
 
@@ -751,8 +753,7 @@ class _ChatScreenState extends State<ChatScreen> {
           children: [
             const SizedBox(height: 8),
             Container(
-              width: 36,
-              height: 4,
+              width: 36, height: 4,
               decoration: BoxDecoration(
                 color: Colors.white24,
                 borderRadius: BorderRadius.circular(2),
@@ -772,6 +773,13 @@ class _ChatScreenState extends State<ChatScreen> {
                     style: TextStyle(color: Colors.white)),
                 onTap: () => Navigator.pop(ctx, 'copy'),
               ),
+            if (isMine)
+              ListTile(
+                leading: const Icon(Icons.undo, color: Colors.redAccent),
+                title: const Text('撤回',
+                    style: TextStyle(color: Colors.redAccent)),
+                onTap: () => Navigator.pop(ctx, 'recall'),
+              ),
             const SizedBox(height: 8),
           ],
         ),
@@ -784,6 +792,57 @@ class _ChatScreenState extends State<ChatScreen> {
     } else if (result == 'copy') {
       await Clipboard.setData(ClipboardData(text: msg.content));
       _snack('已复制');
+    } else if (result == 'recall') {
+      await _recallMessage(msg);
+    }
+  }
+
+  Future<void> _recallMessage(_ChatMessage msg) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: _kBarBg,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+        ),
+        title: const Text('撤回消息',
+            style: TextStyle(color: Colors.white, fontSize: 16)),
+        content: const Text('确定要撤回这条消息吗？',
+            style: TextStyle(color: Colors.white70, fontSize: 14)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消',
+                style: TextStyle(color: Colors.white54)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('撤回',
+                style: TextStyle(color: Colors.redAccent)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    try {
+      await Supabase.instance.client
+          .from(_kTable)
+          .delete()
+          .eq('id', msg.id)
+          .eq('device_id', _myDeviceId!);
+
+      if (mounted) {
+        setState(() {
+          _messages.removeWhere((m) => m.id == msg.id);
+          _messageIds.remove(msg.id);
+        });
+        _snack('已撤回');
+      }
+    } catch (e) {
+      debugPrint('[Chat] ❌ 撤回失败: $e');
+      if (mounted) _snack('撤回失败，请重试');
     }
   }
 
@@ -791,27 +850,22 @@ class _ChatScreenState extends State<ChatScreen> {
     setState(() => _replyTo = null);
   }
 
-  // ══════════════════════════════════════════════════════════════
-  // 头像上传
-  // ══════════════════════════════════════════════════════════════
   Future<bool> _pickAndUploadAvatar() async {
     try {
-      final permissions = <Permission>[
+      final statuses = await <Permission>[
         Permission.photos,
         Permission.videos,
         Permission.storage,
-      ];
-      final statuses = await permissions.request();
+      ].request();
 
-      bool hasPermission = false;
-      statuses.forEach((perm, status) {
-        if (status.isGranted || status.isLimited) hasPermission = true;
+      bool has = false;
+      statuses.forEach((_, s) {
+        if (s.isGranted || s.isLimited) has = true;
       });
 
-      if (!hasPermission) {
-        final anyPermanentlyDenied =
-            statuses.values.any((s) => s.isPermanentlyDenied);
-        if (anyPermanentlyDenied) {
+      if (!has) {
+        final denied = statuses.values.any((s) => s.isPermanentlyDenied);
+        if (denied) {
           if (mounted) {
             _snack('请到设置中开启相册权限');
             await openAppSettings();
@@ -839,10 +893,8 @@ class _ChatScreenState extends State<ChatScreen> {
       await Supabase.instance.client.storage.from(_kBucket).uploadBinary(
             filename,
             bytes,
-            fileOptions: FileOptions(
-              contentType: 'image/$ext',
-              upsert: false,
-            ),
+            fileOptions:
+                FileOptions(contentType: 'image/$ext', upsert: false),
           );
 
       final url = Supabase.instance.client.storage
@@ -872,9 +924,6 @@ class _ChatScreenState extends State<ChatScreen> {
     return 'jpg';
   }
 
-  // ══════════════════════════════════════════════════════════════
-  // 设置面板
-  // ══════════════════════════════════════════════════════════════
   Future<void> _showSettings() async {
     final nameController = TextEditingController(text: _myNickname);
     await showModalBottomSheet(
@@ -1037,7 +1086,6 @@ class _ChatScreenState extends State<ChatScreen> {
         ),
       );
     }
-
     if (_needsSetup) return _buildSetupPage();
     return _buildChatPage();
   }
@@ -1053,14 +1101,11 @@ class _ChatScreenState extends State<ChatScreen> {
         elevation: 0,
         scrolledUnderElevation: 0,
         automaticallyImplyLeading: false,
-        title: const Text(
-          '设置资料',
-          style: TextStyle(
-            color: Colors.white,
-            fontSize: 16,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
+        title: const Text('设置资料',
+            style: TextStyle(
+                color: Colors.white,
+                fontSize: 16,
+                fontWeight: FontWeight.w600)),
         centerTitle: true,
       ),
       body: SafeArea(
@@ -1070,19 +1115,14 @@ class _ChatScreenState extends State<ChatScreen> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               const SizedBox(height: 32),
-              const Text(
-                '全球联网实时聊天室',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 24,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
+              const Text('全球联网实时聊天室',
+                  style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 24,
+                      fontWeight: FontWeight.w700)),
               const SizedBox(height: 6),
-              const Text(
-                '和全球用户实时交流',
-                style: TextStyle(color: Colors.white54, fontSize: 14),
-              ),
+              const Text('和全球用户实时交流',
+                  style: TextStyle(color: Colors.white54, fontSize: 14)),
               const SizedBox(height: 40),
               Center(
                 child: _SpringScale(
@@ -1091,7 +1131,9 @@ class _ChatScreenState extends State<ChatScreen> {
                       : () async {
                           setState(() => _uploadingAvatar = true);
                           await _pickAndUploadAvatar();
-                          if (mounted) setState(() => _uploadingAvatar = false);
+                          if (mounted) {
+                            setState(() => _uploadingAvatar = false);
+                          }
                         },
                   child: Stack(
                     children: [
@@ -1155,7 +1197,9 @@ class _ChatScreenState extends State<ChatScreen> {
                       : () async {
                           setState(() => _uploadingAvatar = true);
                           await _pickAndUploadAvatar();
-                          if (mounted) setState(() => _uploadingAvatar = false);
+                          if (mounted) {
+                            setState(() => _uploadingAvatar = false);
+                          }
                         },
                   child: Text(
                     _myAvatarUrl == null ? '上传头像' : '更换头像',
@@ -1170,8 +1214,8 @@ class _ChatScreenState extends State<ChatScreen> {
                 style: const TextStyle(color: Colors.white, fontSize: 15),
                 decoration: InputDecoration(
                   hintText: '输入昵称',
-                  hintStyle: const TextStyle(
-                      color: Colors.white38, fontSize: 15),
+                  hintStyle:
+                      const TextStyle(color: Colors.white38, fontSize: 15),
                   counterStyle: const TextStyle(color: Colors.white24),
                   filled: true,
                   fillColor: _kInputBg,
@@ -1199,14 +1243,11 @@ class _ChatScreenState extends State<ChatScreen> {
                       borderRadius: BorderRadius.circular(12),
                     ),
                     alignment: Alignment.center,
-                    child: const Text(
-                      '开始聊天',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 15,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
+                    child: const Text('开始聊天',
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600)),
                   ),
                 ),
               ),
@@ -1223,15 +1264,16 @@ class _ChatScreenState extends State<ChatScreen> {
   // ══════════════════════════════════════════════════════════════
   Widget _buildChatPage() {
     final bottomInset = MediaQuery.of(context).padding.bottom;
+    final topInset = MediaQuery.of(context).padding.top;
 
     return Scaffold(
       backgroundColor: _kChatBg,
-      appBar: _buildAppBar(),
       body: Stack(
         children: [
           const Positioned.fill(child: _ChatBackground()),
           Column(
             children: [
+              SizedBox(height: topInset + 68),
               Expanded(
                 child: Stack(
                   children: [
@@ -1253,8 +1295,7 @@ class _ChatScreenState extends State<ChatScreen> {
                         : _buildMessagesList(),
                     if (_showScrollDown)
                       Positioned(
-                        right: 16,
-                        bottom: 16,
+                        right: 16, bottom: 16,
                         child: _ScrollToBottomButton(
                           onTap: () => _scrollToBottom(),
                         ),
@@ -1262,115 +1303,156 @@ class _ChatScreenState extends State<ChatScreen> {
                   ],
                 ),
               ),
-              _buildInputBar(bottomInset),
-              if (_showEmojiPicker)
-                SizedBox(
-                  height: 260,
-                  child: EmojiPicker(
-                    textEditingController: _inputController,
-                    config: Config(
-                      height: 260,
-                      checkPlatformCompatibility: true,
-                      emojiViewConfig: EmojiViewConfig(
-                        backgroundColor: _kBarBg,
-                        emojiSizeMax: 26,
-                      ),
-                      categoryViewConfig: CategoryViewConfig(
-                        backgroundColor: _kBarBg,
-                        iconColor: Colors.white38,
-                        iconColorSelected: _kSendBtn,
-                        indicatorColor: _kSendBtn,
-                      ),
-                      bottomActionBarConfig: const BottomActionBarConfig(
-                        enabled: false,
-                      ),
-                      searchViewConfig: SearchViewConfig(
-                        backgroundColor: _kBarBg,
-                        buttonIconColor: Colors.white,
-                        hintText: '搜索…',
-                        hintTextStyle: TextStyle(color: Colors.white38),
-                      ),
+              SizedBox(height: 88 + bottomInset),
+            ],
+          ),
+          Positioned(
+            top: topInset + 8,
+            left: 12,
+            right: 12,
+            child: _buildFloatingAppBar(),
+          ),
+          Positioned(
+            left: 8,
+            right: 8,
+            bottom: bottomInset + 8,
+            child: _buildInputBar(),
+          ),
+          if (_showEmojiPicker)
+            Positioned(
+              left: 0, right: 0, bottom: 0,
+              child: SizedBox(
+                height: 260,
+                child: EmojiPicker(
+                  textEditingController: _inputController,
+                  config: Config(
+                    height: 260,
+                    checkPlatformCompatibility: true,
+                    emojiViewConfig: EmojiViewConfig(
+                      backgroundColor: _kBarBg,
+                      emojiSizeMax: 26,
+                    ),
+                    categoryViewConfig: CategoryViewConfig(
+                      backgroundColor: _kBarBg,
+                      iconColor: Colors.white38,
+                      iconColorSelected: _kSendBtn,
+                      indicatorColor: _kSendBtn,
+                    ),
+                    bottomActionBarConfig:
+                        const BottomActionBarConfig(enabled: false),
+                    searchViewConfig: SearchViewConfig(
+                      backgroundColor: _kBarBg,
+                      buttonIconColor: Colors.white,
+                      hintText: '搜索…',
+                      hintTextStyle: TextStyle(color: Colors.white38),
                     ),
                   ),
                 ),
-            ],
-          ),
+              ),
+            ),
         ],
       ),
     );
   }
 
-  PreferredSizeWidget _buildAppBar() {
-    return AppBar(
-      backgroundColor: _kBarBg,
-      elevation: 0,
-      scrolledUnderElevation: 0,
-      titleSpacing: 8,
-      leadingWidth: 52,
-      leading: Center(
+  Widget _buildFloatingAppBar() {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(20),
+      child: AnimatedBuilder(
+        animation: _blurAnim,
+        builder: (context, child) {
+          return BackdropFilter(
+            filter: ImageFilter.blur(
+              sigmaX: _blurAnim.value,
+              sigmaY: _blurAnim.value,
+            ),
+            child: child,
+          );
+        },
         child: Container(
-          width: 38, height: 38,
-          decoration: const BoxDecoration(
-            color: _kInputBg,
-            shape: BoxShape.circle,
-          ),
-          child: const Icon(Icons.groups, color: _kSendBtn, size: 22),
-        ),
-      ),
-      title: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Text(
-            '公共聊天室',
-            style: TextStyle(
-              color: Colors.white,
-              fontSize: 16,
-              fontWeight: FontWeight.w600,
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+          decoration: BoxDecoration(
+            color: Colors.transparent,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: Colors.white.withValues(alpha: 0.12),
+              width: 0.5,
             ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.3),
+                blurRadius: 16,
+                offset: const Offset(0, 4),
+              ),
+            ],
           ),
-          const SizedBox(height: 2),
-          Text(
-            _connected ? '$_onlineCount 人在线' : '连接中…',
-            style: TextStyle(
-              color: _connected ? _kOnline : Colors.orange,
-              fontSize: 12,
-            ),
-          ),
-        ],
-      ),
-      actions: [
-        IconButton(
-          onPressed: _showSettings,
-          icon: _myAvatarUrl != null
-              ? ClipOval(
-                  child: Image.network(
-                    _myAvatarUrl!,
-                    width: 34, height: 34,
-                    fit: BoxFit.cover,
-                    errorBuilder: (_, __, ___) => Container(
-                      width: 34, height: 34,
-                      decoration: const BoxDecoration(
-                        color: _kInputBg,
-                        shape: BoxShape.circle,
-                      ),
-                      child: const Icon(Icons.person,
-                          size: 18, color: Colors.white54),
-                    ),
-                  ),
-                )
-              : Container(
-                  width: 34, height: 34,
-                  decoration: const BoxDecoration(
-                    color: _kInputBg,
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Icon(Icons.person,
-                      size: 18, color: Colors.white54),
+          child: Row(
+            children: [
+              Container(
+                width: 36, height: 36,
+                decoration: const BoxDecoration(
+                  color: _kInputBg,
+                  shape: BoxShape.circle,
                 ),
+                child:
+                    const Icon(Icons.groups, color: _kSendBtn, size: 20),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text('公共聊天室',
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600)),
+                    const SizedBox(height: 1),
+                    Text(
+                      _connected ? '$_onlineCount 人在线' : '连接中…',
+                      style: TextStyle(
+                        color: _connected ? _kOnline : Colors.orange,
+                        fontSize: 11,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              GestureDetector(
+                onTap: _showSettings,
+                child: _myAvatarUrl != null
+                    ? ClipOval(
+                        child: Image.network(
+                          _myAvatarUrl!,
+                          width: 32, height: 32,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, __, ___) => Container(
+                            width: 32, height: 32,
+                            decoration: const BoxDecoration(
+                              color: _kInputBg,
+                              shape: BoxShape.circle,
+                            ),
+                            child: const Icon(Icons.person,
+                                size: 18, color: Colors.white54),
+                          ),
+                        ),
+                      )
+                    : Container(
+                        width: 32, height: 32,
+                        decoration: const BoxDecoration(
+                          color: _kInputBg,
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(Icons.person,
+                            size: 18, color: Colors.white54),
+                      ),
+              ),
+              const SizedBox(width: 4),
+            ],
+          ),
         ),
-        const SizedBox(width: 4),
-      ],
+      ),
     );
   }
 
@@ -1388,7 +1470,6 @@ class _ChatScreenState extends State<ChatScreen> {
         final prev = i > 0 ? _messages[i - 1] : null;
         final showAvatar =
             !isMine && (prev == null || prev.deviceId != m.deviceId);
-
         final showDateSep =
             prev == null || !_isSameDay(prev.createdAt, m.createdAt);
 
@@ -1419,110 +1500,136 @@ class _ChatScreenState extends State<ChatScreen> {
     return a.year == b.year && a.month == b.month && a.day == b.day;
   }
 
-  Widget _buildInputBar(double bottomInset) {
-    return Container(
-      padding: EdgeInsets.fromLTRB(8, 8, 8, 8 + bottomInset),
-      decoration: const BoxDecoration(
-        color: _kBarBg,
-        border: Border(
-          top: BorderSide(color: Colors.black26, width: 0.5),
-        ),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (_replyTo != null)
-            _ReplyPreview(msg: _replyTo!, onCancel: _cancelReply),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Expanded(
-                child: Container(
-                  decoration: BoxDecoration(
-                    color: _kInputBg,
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  padding: const EdgeInsets.symmetric(horizontal: 4),
-                  constraints: const BoxConstraints(minHeight: 40),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      IconButton(
-                        onPressed: () {
-                          FocusScope.of(context).unfocus();
-                          setState(
-                              () => _showEmojiPicker = !_showEmojiPicker);
-                        },
-                        icon: Icon(
-                          _showEmojiPicker
-                              ? Icons.keyboard
-                              : Icons.emoji_emotions_outlined,
-                          color: Colors.white54, size: 22,
-                        ),
-                        padding: const EdgeInsets.all(8),
-                        constraints: const BoxConstraints(),
-                      ),
-                      Expanded(
-                        child: TextField(
-                          controller: _inputController,
-                          focusNode: _inputFocus,
-                          onTap: () {
-                            if (_showEmojiPicker) {
-                              setState(() => _showEmojiPicker = false);
-                            }
-                          },
-                          style: const TextStyle(
-                              color: Colors.white, fontSize: 15),
-                          maxLines: 5,
-                          minLines: 1,
-                          textInputAction: TextInputAction.send,
-                          onSubmitted: (_) => _send(),
-                          decoration: const InputDecoration(
-                            hintText: '消息',
-                            hintStyle: TextStyle(
-                                color: Colors.white54, fontSize: 15),
-                            filled: false,
-                            border: InputBorder.none,
-                            contentPadding: EdgeInsets.symmetric(
-                                horizontal: 4, vertical: 10),
-                            isDense: true,
-                          ),
-                        ),
-                      ),
-                      IconButton(
-                        onPressed: _showAttachMenu,
-                        icon: const Icon(
-                          Icons.attach_file,
-                          color: Colors.white54, size: 20,
-                        ),
-                        padding: const EdgeInsets.all(8),
-                        constraints: const BoxConstraints(),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(width: 6),
-              AnimatedScale(
-                scale: _hasText ? 1.0 : 0.0,
-                duration: const Duration(milliseconds: 220),
-                curve: _kEmphasizedDecel,
-                child: AnimatedOpacity(
-                  opacity: _hasText ? 1.0 : 0.0,
-                  duration: const Duration(milliseconds: 160),
-                  child: _SendButton(onTap: _send),
-                ),
+  Widget _buildInputBar() {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(24),
+      child: AnimatedBuilder(
+        animation: _blurAnim,
+        builder: (context, child) {
+          return BackdropFilter(
+            filter: ImageFilter.blur(
+              sigmaX: _blurAnim.value,
+              sigmaY: _blurAnim.value,
+            ),
+            child: child,
+          );
+        },
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(8, 8, 8, 8),
+          decoration: BoxDecoration(
+            color: Colors.transparent,
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(
+              color: Colors.white.withValues(alpha: 0.12),
+              width: 0.5,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.3),
+                blurRadius: 16,
+                offset: const Offset(0, 4),
               ),
             ],
           ),
-        ],
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (_replyTo != null)
+                _ReplyPreview(msg: _replyTo!, onCancel: _cancelReply),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Expanded(
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.08),
+                        borderRadius: BorderRadius.circular(18),
+                      ),
+                      padding: const EdgeInsets.symmetric(horizontal: 4),
+                      constraints: const BoxConstraints(minHeight: 40),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          IconButton(
+                            onPressed: () {
+                              FocusScope.of(context).unfocus();
+                              setState(() =>
+                                  _showEmojiPicker = !_showEmojiPicker);
+                            },
+                            icon: Icon(
+                              _showEmojiPicker
+                                  ? Icons.keyboard
+                                  : Icons.emoji_emotions_outlined,
+                              color: Colors.white70,
+                              size: 22,
+                            ),
+                            padding: const EdgeInsets.all(8),
+                            constraints: const BoxConstraints(),
+                          ),
+                          Expanded(
+                            child: TextField(
+                              controller: _inputController,
+                              focusNode: _inputFocus,
+                              onTap: () {
+                                if (_showEmojiPicker) {
+                                  setState(() => _showEmojiPicker = false);
+                                }
+                              },
+                              style: const TextStyle(
+                                  color: Colors.white, fontSize: 15),
+                              maxLines: 5,
+                              minLines: 1,
+                              textInputAction: TextInputAction.send,
+                              onSubmitted: (_) => _send(),
+                              decoration: const InputDecoration(
+                                hintText: '消息',
+                                hintStyle: TextStyle(
+                                    color: Colors.white54, fontSize: 15),
+                                filled: false,
+                                border: InputBorder.none,
+                                contentPadding: EdgeInsets.symmetric(
+                                    horizontal: 4, vertical: 10),
+                                isDense: true,
+                              ),
+                            ),
+                          ),
+                          IconButton(
+                            onPressed: _showAttachMenu,
+                            icon: const Icon(
+                              Icons.attach_file,
+                              color: Colors.white70,
+                              size: 20,
+                            ),
+                            padding: const EdgeInsets.all(8),
+                            constraints: const BoxConstraints(),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  AnimatedScale(
+                    scale: _hasText ? 1.0 : 0.0,
+                    duration: const Duration(milliseconds: 220),
+                    curve: _kEmphasizedDecel,
+                    child: AnimatedOpacity(
+                      opacity: _hasText ? 1.0 : 0.0,
+                      duration: const Duration(milliseconds: 160),
+                      child: _SendButton(onTap: _send),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
 }
 
 // ══════════════════════════════════════════════════════════════
-// 聊天背景：蓝黑渐变 + 几何图案
+// 背景：黑 + 紫渐变 + 几何图案
 // ══════════════════════════════════════════════════════════════
 class _ChatBackground extends StatelessWidget {
   const _ChatBackground();
@@ -1535,11 +1642,11 @@ class _ChatBackground extends StatelessWidget {
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
           colors: [
-            Color(0xFF0A1826),
-            Color(0xFF0E1621),
-            Color(0xFF060A10),
+            Color(0xFF050208),
+            Color(0xFF000000),
+            Color(0xFF0A0414),
           ],
-          stops: [0.0, 0.5, 1.0],
+          stops: [0.0, 0.55, 1.0],
         ),
       ),
       child: CustomPaint(
@@ -1555,74 +1662,148 @@ class _PatternPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final w = size.width;
     final h = size.height;
+    const purple = Color(0xFF9B8CFF);
+    const purpleDeep = Color(0xFF6B4EB5);
 
     canvas.drawCircle(
-      Offset(w * 0.85, h * 0.15),
-      w * 0.5,
+      Offset(w * 0.9, h * 0.1),
+      w * 0.55,
       Paint()
-        ..color = const Color(0xFF64B5EF).withValues(alpha: 0.06)
+        ..color = purple.withValues(alpha: 0.07)
         ..style = PaintingStyle.fill,
     );
-
     canvas.drawCircle(
-      Offset(w * 0.1, h * 0.85),
-      w * 0.6,
+      Offset(w * 0.05, h * 0.9),
+      w * 0.65,
       Paint()
-        ..color = const Color(0xFF64B5EF).withValues(alpha: 0.04)
+        ..color = purpleDeep.withValues(alpha: 0.06)
+        ..style = PaintingStyle.fill,
+    );
+    canvas.drawCircle(
+      Offset(w * 0.35, h * 0.35),
+      w * 0.25,
+      Paint()
+        ..color = purple.withValues(alpha: 0.04)
+        ..style = PaintingStyle.fill,
+    );
+    canvas.drawCircle(
+      Offset(w * 0.8, h * 0.75),
+      w * 0.3,
+      Paint()
+        ..color = purple.withValues(alpha: 0.05)
         ..style = PaintingStyle.fill,
     );
 
     final linePaint = Paint()
-      ..color = const Color(0xFF64B5EF).withValues(alpha: 0.025)
+      ..color = purple.withValues(alpha: 0.03)
       ..strokeWidth = 0.8
       ..style = PaintingStyle.stroke;
-
-    const spacing = 40.0;
+    const spacing = 32.0;
     for (double i = -h; i < w + h; i += spacing) {
       canvas.drawLine(Offset(i, 0), Offset(i + h, h), linePaint);
     }
 
-    final dotPaint = Paint()
-      ..color = const Color(0xFF64B5EF).withValues(alpha: 0.08)
-      ..style = PaintingStyle.fill;
-
-    final dots = <Offset>[
-      Offset(w * 0.2, h * 0.25),
-      Offset(w * 0.75, h * 0.55),
-      Offset(w * 0.35, h * 0.7),
-      Offset(w * 0.9, h * 0.85),
-      Offset(w * 0.5, h * 0.1),
-      Offset(w * 0.05, h * 0.5),
-    ];
-    for (final dot in dots) {
-      canvas.drawCircle(dot, 3.0, dotPaint);
+    final linePaint2 = Paint()
+      ..color = purple.withValues(alpha: 0.02)
+      ..strokeWidth = 0.6
+      ..style = PaintingStyle.stroke;
+    for (double i = -h; i < w + h; i += spacing * 1.5) {
+      canvas.drawLine(Offset(i, 0), Offset(i - h, h), linePaint2);
     }
 
-    final triPath = Path()
-      ..moveTo(w * 0.7, h * 0.3)
-      ..lineTo(w * 0.8, h * 0.45)
-      ..lineTo(w * 0.6, h * 0.45)
-      ..close();
+    final dotPaint = Paint()
+      ..color = purple.withValues(alpha: 0.1)
+      ..style = PaintingStyle.fill;
+    final dots = <Offset>[
+      Offset(w * 0.15, h * 0.12),
+      Offset(w * 0.6, h * 0.08),
+      Offset(w * 0.85, h * 0.32),
+      Offset(w * 0.25, h * 0.45),
+      Offset(w * 0.7, h * 0.5),
+      Offset(w * 0.4, h * 0.62),
+      Offset(w * 0.15, h * 0.78),
+      Offset(w * 0.9, h * 0.68),
+      Offset(w * 0.55, h * 0.88),
+      Offset(w * 0.75, h * 0.15),
+    ];
+    for (final d in dots) {
+      canvas.drawCircle(d, 2.5, dotPaint);
+    }
+
+    final bigDotPaint = Paint()
+      ..color = purple.withValues(alpha: 0.08)
+      ..style = PaintingStyle.fill;
+    for (final d in <Offset>[
+      Offset(w * 0.5, h * 0.3),
+      Offset(w * 0.2, h * 0.6),
+      Offset(w * 0.85, h * 0.45),
+    ]) {
+      canvas.drawCircle(d, 5.0, bigDotPaint);
+    }
+
+    final triPaint = Paint()
+      ..color = purple.withValues(alpha: 0.05)
+      ..style = PaintingStyle.fill;
     canvas.drawPath(
-      triPath,
+      Path()
+        ..moveTo(w * 0.15, h * 0.28)
+        ..lineTo(w * 0.25, h * 0.42)
+        ..lineTo(w * 0.05, h * 0.42)
+        ..close(),
+      triPaint,
+    );
+    canvas.drawPath(
+      Path()
+        ..moveTo(w * 0.75, h * 0.55)
+        ..lineTo(w * 0.88, h * 0.72)
+        ..lineTo(w * 0.62, h * 0.72)
+        ..close(),
+      triPaint,
+    );
+
+    canvas.drawPath(
+      Path()
+        ..moveTo(w * 0.55, h * 0.68)
+        ..lineTo(w * 0.62, h * 0.78)
+        ..lineTo(w * 0.55, h * 0.88)
+        ..lineTo(w * 0.48, h * 0.78)
+        ..close(),
       Paint()
-        ..color = const Color(0xFF64B5EF).withValues(alpha: 0.04)
+        ..color = purple.withValues(alpha: 0.04)
         ..style = PaintingStyle.fill,
     );
 
-    final glowPaint = Paint()
-      ..shader = RadialGradient(
-        colors: [
-          const Color(0xFF64B5EF).withValues(alpha: 0.05),
-          Colors.transparent,
-        ],
-      ).createShader(
-        Rect.fromCircle(
-          center: Offset(w * 0.5, h * 0.4),
-          radius: w * 0.7,
+    canvas.drawRect(
+      Rect.fromLTWH(0, 0, w, h),
+      Paint()
+        ..shader = RadialGradient(
+          colors: [
+            purple.withValues(alpha: 0.06),
+            Colors.transparent,
+          ],
+        ).createShader(
+          Rect.fromCircle(
+            center: Offset(w * 0.5, h * 0.4),
+            radius: w * 0.75,
+          ),
         ),
-      );
-    canvas.drawRect(Rect.fromLTWH(0, 0, w, h), glowPaint);
+    );
+
+    canvas.drawRect(
+      Rect.fromLTWH(0, 0, w, h),
+      Paint()
+        ..shader = RadialGradient(
+          colors: [
+            purple.withValues(alpha: 0.04),
+            Colors.transparent,
+          ],
+        ).createShader(
+          Rect.fromCircle(
+            center: Offset(w * 0.5, h),
+            radius: w * 0.6,
+          ),
+        ),
+    );
   }
 
   @override
@@ -1673,7 +1854,6 @@ class _SpringScaleState extends State<_SpringScale>
   }
 }
 
-// ══════════════════════════════════════════════════════════════
 class _SpringButton extends StatefulWidget {
   final VoidCallback onTap;
   final Widget child;
@@ -1719,7 +1899,6 @@ class _SpringButtonState extends State<_SpringButton>
   }
 }
 
-// ══════════════════════════════════════════════════════════════
 class _SendButton extends StatefulWidget {
   final VoidCallback onTap;
   const _SendButton({required this.onTap});
@@ -1789,7 +1968,6 @@ class _SendButtonState extends State<_SendButton>
   }
 }
 
-// ══════════════════════════════════════════════════════════════
 class _DateSeparator extends StatelessWidget {
   final DateTime date;
   const _DateSeparator({required this.date});
@@ -1799,7 +1977,6 @@ class _DateSeparator extends StatelessWidget {
     final today = DateTime(now.year, now.month, now.day);
     final target = DateTime(date.year, date.month, date.day);
     final diff = today.difference(target).inDays;
-
     if (diff == 0) return '今天';
     if (diff == 1) return '昨天';
     if (diff < 7) return '$diff 天前';
@@ -1817,17 +1994,14 @@ class _DateSeparator extends StatelessWidget {
             color: Colors.black.withValues(alpha: 0.25),
             borderRadius: BorderRadius.circular(10),
           ),
-          child: Text(
-            _label,
-            style: const TextStyle(color: Colors.white60, fontSize: 11),
-          ),
+          child: Text(_label,
+              style: const TextStyle(color: Colors.white60, fontSize: 11)),
         ),
       ),
     );
   }
 }
 
-// ══════════════════════════════════════════════════════════════
 class _ScrollToBottomButton extends StatefulWidget {
   final VoidCallback onTap;
   const _ScrollToBottomButton({required this.onTap});
@@ -1877,10 +2051,8 @@ class _ScrollToBottomButtonState extends State<_ScrollToBottomButton>
                 ),
               ],
             ),
-            child: const Icon(
-              Icons.keyboard_arrow_down_rounded,
-              color: _kSendBtn, size: 26,
-            ),
+            child: const Icon(Icons.keyboard_arrow_down_rounded,
+                color: _kSendBtn, size: 26),
           ),
         ),
       ),
@@ -1888,11 +2060,9 @@ class _ScrollToBottomButtonState extends State<_ScrollToBottomButton>
   }
 }
 
-// ══════════════════════════════════════════════════════════════
 class _ReplyPreview extends StatelessWidget {
   final _ChatMessage msg;
   final VoidCallback onCancel;
-
   const _ReplyPreview({required this.msg, required this.onCancel});
 
   @override
@@ -1914,29 +2084,24 @@ class _ReplyPreview extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(
-                  msg.nickname,
-                  style: const TextStyle(
-                    color: _kSendBtn,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
+                Text(msg.nickname,
+                    style: const TextStyle(
+                        color: _kSendBtn,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600)),
                 const SizedBox(height: 2),
-                Text(
-                  msg.content,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: Colors.white70, fontSize: 13,
-                  ),
-                ),
+                Text(msg.content,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                        color: Colors.white70, fontSize: 13)),
               ],
             ),
           ),
           IconButton(
             onPressed: onCancel,
-            icon: const Icon(Icons.close, color: Colors.white54, size: 20),
+            icon: const Icon(Icons.close,
+                color: Colors.white54, size: 20),
             padding: const EdgeInsets.all(8),
             constraints: const BoxConstraints(),
           ),
@@ -1946,7 +2111,6 @@ class _ReplyPreview extends StatelessWidget {
   }
 }
 
-// ══════════════════════════════════════════════════════════════
 class _MessageBubble extends StatefulWidget {
   final _ChatMessage msg;
   final _UserProfile? profile;
@@ -2028,9 +2192,11 @@ class _MessageBubbleState extends State<_MessageBubble>
     final time =
         '${widget.msg.createdAt.hour.toString().padLeft(2, '0')}:${widget.msg.createdAt.minute.toString().padLeft(2, '0')}';
     final isMine = widget.isMine;
-    final displayName = widget.profile?.nickname ?? widget.msg.nickname;
+    final displayName =
+        widget.profile?.nickname ?? widget.msg.nickname;
     final avatarUrl = widget.profile?.avatarUrl;
-    final replyProgress = (_dragOffset / _kDragThreshold).clamp(0.0, 1.0);
+    final replyProgress =
+        (_dragOffset / _kDragThreshold).clamp(0.0, 1.0);
 
     return FadeTransition(
       opacity: _fade,
@@ -2058,12 +2224,12 @@ class _MessageBubbleState extends State<_MessageBubble>
                         child: Container(
                           width: 30, height: 30,
                           decoration: BoxDecoration(
-                            color: _kSendBtn.withValues(alpha: replyProgress),
+                            color: _kSendBtn
+                                .withValues(alpha: replyProgress),
                             shape: BoxShape.circle,
                           ),
-                          child: const Icon(
-                            Icons.reply, color: Colors.white, size: 16,
-                          ),
+                          child: const Icon(Icons.reply,
+                              color: Colors.white, size: 16),
                         ),
                       ),
                     ),
@@ -2105,14 +2271,11 @@ class _MessageBubbleState extends State<_MessageBubble>
                                 Padding(
                                   padding: const EdgeInsets.only(
                                       left: 12, bottom: 2),
-                                  child: Text(
-                                    displayName,
-                                    style: const TextStyle(
-                                      color: _kSendBtn,
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
+                                  child: Text(displayName,
+                                      style: const TextStyle(
+                                          color: _kSendBtn,
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w600)),
                                 ),
                               _Bubble(
                                 msg: widget.msg,
@@ -2135,7 +2298,6 @@ class _MessageBubbleState extends State<_MessageBubble>
   }
 }
 
-// ══════════════════════════════════════════════════════════════
 class _Bubble extends StatelessWidget {
   final _ChatMessage msg;
   final String time;
@@ -2186,70 +2348,58 @@ class _Bubble extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Text(
-                      msg.replyToNickname!,
-                      style: const TextStyle(
-                        color: _kSendBtn,
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
+                    Text(msg.replyToNickname!,
+                        style: const TextStyle(
+                            color: _kSendBtn,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600)),
                     const SizedBox(height: 1),
-                    Text(
-                      msg.replyToContent ?? '',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: Colors.white70, fontSize: 12,
-                      ),
-                    ),
+                    Text(msg.replyToContent ?? '',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            color: Colors.white70, fontSize: 12)),
                   ],
                 ),
               ),
             if (type == 'image')
-              _buildImageContent(context)
+              _buildImage(context)
             else if (type == 'file')
-              _buildFileContent()
+              _buildFile()
             else
-              _buildTextContent(),
+              _buildText(),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildTextContent() {
+  Widget _buildText() {
     return Row(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.end,
       children: [
         Flexible(
-          child: Text(
-            msg.content,
-            style: TextStyle(
-              color: isMine ? _kMyText : _kOtherText,
-              fontSize: 15,
-              height: 1.35,
-            ),
-          ),
+          child: Text(msg.content,
+              style: TextStyle(
+                  color: isMine ? _kMyText : _kOtherText,
+                  fontSize: 15,
+                  height: 1.35)),
         ),
         const SizedBox(width: 8),
         Padding(
           padding: const EdgeInsets.only(top: 4),
-          child: Text(
-            time,
-            style: TextStyle(
-              color: isMine ? _kTimeMine : _kTimeOther,
-              fontSize: 11,
-              height: 1,
-            ),
-          ),
+          child: Text(time,
+              style: TextStyle(
+                  color: isMine ? _kTimeMine : _kTimeOther,
+                  fontSize: 11,
+                  height: 1)),
         ),
       ],
     );
   }
 
-  Widget _buildImageContent(BuildContext context) {
+  Widget _buildImage(BuildContext context) {
     return ClipRRect(
       borderRadius: BorderRadius.circular(10),
       child: Stack(
@@ -2269,8 +2419,7 @@ class _Bubble extends StatelessWidget {
                   color: Colors.black26,
                   child: const Center(
                     child: CircularProgressIndicator(
-                      strokeWidth: 2, color: _kSendBtn,
-                    ),
+                        strokeWidth: 2, color: _kSendBtn),
                   ),
                 );
               },
@@ -2285,18 +2434,17 @@ class _Bubble extends StatelessWidget {
           Positioned(
             right: 6, bottom: 6,
             child: Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              padding: const EdgeInsets.symmetric(
+                  horizontal: 6, vertical: 2),
               decoration: BoxDecoration(
                 color: Colors.black.withValues(alpha: 0.5),
                 borderRadius: BorderRadius.circular(8),
               ),
-              child: Text(
-                time,
-                style: const TextStyle(
-                  color: Colors.white, fontSize: 10, height: 1,
-                ),
-              ),
+              child: Text(time,
+                  style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 10,
+                      height: 1)),
             ),
           ),
         ],
@@ -2304,7 +2452,7 @@ class _Bubble extends StatelessWidget {
     );
   }
 
-  Widget _buildFileContent() {
+  Widget _buildFile() {
     return Row(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.end,
@@ -2324,45 +2472,35 @@ class _Bubble extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text(
-                msg.fileName ?? '文件',
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
+              Text(msg.fileName ?? '文件',
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w500)),
               const SizedBox(height: 2),
-              Text(
-                '点击下载',
-                style: TextStyle(
-                  color: Colors.white.withValues(alpha: 0.6),
-                  fontSize: 11,
-                ),
-              ),
+              Text('点击下载',
+                  style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.6),
+                      fontSize: 11)),
             ],
           ),
         ),
         const SizedBox(width: 8),
         Padding(
           padding: const EdgeInsets.only(top: 4),
-          child: Text(
-            time,
-            style: TextStyle(
-              color: isMine ? _kTimeMine : _kTimeOther,
-              fontSize: 11,
-              height: 1,
-            ),
-          ),
+          child: Text(time,
+              style: TextStyle(
+                  color: isMine ? _kTimeMine : _kTimeOther,
+                  fontSize: 11,
+                  height: 1)),
         ),
       ],
     );
   }
 }
 
-// ══════════════════════════════════════════════════════════════
 class _TelegramBubblePainter extends CustomPainter {
   final Color color;
   final bool isMine;
@@ -2376,8 +2514,8 @@ class _TelegramBubblePainter extends CustomPainter {
       ..style = PaintingStyle.fill
       ..isAntiAlias = true;
 
-    const r = 15.0;
-    const rSmall = 4.0;
+    const r = 20.0;
+    const rSmall = 6.0;
     const tailW = 8.0;
     const tailH = 10.0;
 
@@ -2412,7 +2550,6 @@ class _TelegramBubblePainter extends CustomPainter {
       path.quadraticBezierTo(w, h, w, h - r);
       path.close();
     }
-
     canvas.drawPath(path, paint);
   }
 
@@ -2421,7 +2558,6 @@ class _TelegramBubblePainter extends CustomPainter {
       old.color != color || old.isMine != isMine;
 }
 
-// ══════════════════════════════════════════════════════════════
 class _AvatarImage extends StatelessWidget {
   final String seed;
   final String nickname;
@@ -2467,23 +2603,18 @@ class _AvatarImage extends StatelessWidget {
     final color = _colors[hash % _colors.length];
     final initial =
         nickname.isNotEmpty ? nickname.characters.first.toUpperCase() : '?';
-
     return Container(
       decoration: BoxDecoration(color: color, shape: BoxShape.circle),
       alignment: Alignment.center,
-      child: Text(
-        initial,
-        style: const TextStyle(
-          color: Colors.white,
-          fontSize: 14,
-          fontWeight: FontWeight.w600,
-        ),
-      ),
+      child: Text(initial,
+          style: const TextStyle(
+              color: Colors.white,
+              fontSize: 14,
+              fontWeight: FontWeight.w600)),
     );
   }
 }
 
-// ══════════════════════════════════════════════════════════════
 class _ChatMessage {
   final int id;
   final String deviceId;
