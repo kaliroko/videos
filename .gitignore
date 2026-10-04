@@ -45,5 +45,5 @@ assets/**
 
 # Other
 *.log
-*.bak
+.bak
 .DS_Store

@@ -14,7 +14,7 @@ import '../config/secrets.dart';
 // ══════════════════════════════════════════════════════════════════
 
 /// 每页拉取条数
-const int kDefaultPerPage = 50;
+const int kDefaultPerPage = 80;
 
 /// 最大页数（50 × 2 = 100 条）
 const int kDefaultMaxPages = 2;
@@ -225,6 +225,7 @@ class ApiRepository {
   static String _rewriteUrl(String url) {
     if (url.isEmpty) return url;
     return url.replaceAll(
-        'http://119.28.204.36', SecureConfig.apiRewriteHost);
+        SecureConfig.apiOriginHost,   // ★ 从加密配置里取，不再硬编码
+        SecureConfig.apiRewriteHost);
   }
 }

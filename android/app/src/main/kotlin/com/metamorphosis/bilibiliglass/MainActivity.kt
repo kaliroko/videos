@@ -13,9 +13,11 @@ import android.view.ViewGroup
 import android.view.animation.PathInterpolator
 import android.widget.FrameLayout
 import android.widget.ImageView
+import android.widget.Toast
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.embedding.engine.renderer.FlutterUiDisplayListener
+import io.flutter.plugin.common.MethodChannel
 import kotlin.math.min
 
 class MainActivity : FlutterActivity() {
@@ -24,16 +26,29 @@ class MainActivity : FlutterActivity() {
     private val handler = Handler(Looper.getMainLooper())
     private var splashRemoved = false
 
-    // ★ 最小显示时长：1000ms，让动画完整播出
     private val splashStartTime = System.currentTimeMillis()
     /** ★ 最小显示时长：1000ms，让动画完整播出 */
     private val minSplashMs = 1000L
     /** ★ 动画时长：1000ms */
     private val splashAnimMs = 1000L
 
+    /** ★ 完整性校验 MethodChannel */
+    private val integrityChannel = "app/integrity"
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        // ═══════════════════════════════════════════════════════
+        // ★★★ 最先执行：签名校验 ★★★
+        //   校验失败：Toast → finishAffinity → killProcess
+        //   不区分 debug / release，一律强制校验
+        // ═══════════════════════════════════════════════════════
+        if (!IntegrityGuard.verifySignature(this)) {
+            exitForTampered()
+            return
+        }
+
+        // ── 原有 splash 逻辑 ────────────────────────────────────
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
             showCustomSplash()
             // ★ 兜底：5 秒
@@ -41,8 +56,32 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    /** 被篡改 → 提示 + 退出 + 杀进程 */
+    private fun exitForTampered() {
+        try {
+            Toast.makeText(
+                applicationContext,
+                "检测到应用被篡改，即将退出",
+                Toast.LENGTH_SHORT
+            ).show()
+        } catch (_: Exception) {}
+
+        handler.postDelayed({
+            try {
+                finishAffinity()
+                android.os.Process.killProcess(android.os.Process.myPid())
+            } catch (_: Exception) {
+                try {
+                    System.exit(0)
+                } catch (_: Exception) {}
+            }
+        }, 800)
+    }
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+
+        // ── 原有 splash 逻辑 ────────────────────────────────────
         flutterEngine.renderer.addIsDisplayingFlutterUiListener(
             object : FlutterUiDisplayListener {
                 override fun onFlutterUiDisplayed() {
@@ -53,6 +92,32 @@ class MainActivity : FlutterActivity() {
                 override fun onFlutterUiNoLongerDisplayed() {}
             }
         )
+
+        // ── 完整性校验通道 ──────────────────────────────────────
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            integrityChannel
+        ).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "verifySignature" -> {
+                    result.success(IntegrityGuard.verifySignature(this))
+                }
+                "verifyIntegrity" -> {
+                    result.success(IntegrityGuard.verifyIntegrity(this))
+                }
+                "fullCheck" -> {
+                    val fails = IntegrityGuard.fullCheck(this)
+                    result.success(fails)
+                }
+                "getSignatureHash" -> {
+                    result.success(IntegrityGuard.getSignatureHash(this))
+                }
+                "getApkHash" -> {
+                    result.success(IntegrityGuard.getApkHash(this))
+                }
+                else -> result.notImplemented()
+            }
+        }
     }
 
     private fun showCustomSplash() {
@@ -67,7 +132,7 @@ class MainActivity : FlutterActivity() {
         val icon = ImageView(this).apply {
             setImageResource(R.mipmap.ic_launcher)
             scaleType = ImageView.ScaleType.FIT_CENTER
-            // ★ 2. 起始 scale 0.7
+            // ★ 起始 scale 0.7
             scaleX = 0.7f
             scaleY = 0.7f
             alpha = 1f
@@ -86,7 +151,6 @@ class MainActivity : FlutterActivity() {
         icon.animate()
             .scaleX(1f)
             .scaleY(1f)
-            // ★ 1. 动画时长 1500ms
             .setDuration(splashAnimMs)
             .setInterpolator(m3Easing)
             .start()
@@ -107,8 +171,6 @@ class MainActivity : FlutterActivity() {
 
     /**
      * 移除 splash（带最小显示时长保护）
-     * - 如果已显示 < 1500ms，等到 1500ms 再移除
-     * - 让动画完整播完
      */
     private fun removeSplash() {
         if (splashRemoved) return
@@ -117,7 +179,6 @@ class MainActivity : FlutterActivity() {
         val remain = minSplashMs - elapsed
 
         if (remain > 0) {
-            // 还没到最小显示时长，延迟执行
             handler.postDelayed({ doRemoveSplash() }, remain)
         } else {
             doRemoveSplash()
@@ -133,7 +194,6 @@ class MainActivity : FlutterActivity() {
 
         view.animate()
             .alpha(0f)
-            // ★ 7. 退场 250ms
             .setDuration(250)
             .setInterpolator(fadeOutEasing)
             .setListener(object : AnimatorListenerAdapter() {
