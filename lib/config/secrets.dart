@@ -24,7 +24,6 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:encrypt/encrypt.dart' as enc;
-import 'package:flutter/foundation.dart' show debugPrint;
 
 import 'hardware_key.dart';
 

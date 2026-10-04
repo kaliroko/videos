@@ -14,11 +14,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:crypto/crypto.dart';
 
 // ════════════════════════════════════════════════════════════
-// 密钥元数据（无价值，仅作占位标识）
-// ════════════════════════════════════════════════════════════
-const String _kKeyAlias = 'dghw_k3y_b1ll1_gr4ss';
-
-/// 硬件绑定密钥管理器
+// 硬件绑定密钥管理器
 ///
 /// 工作流程：
 ///   首次安装 → Keystore 生成随机 256bit 密钥 → 存入硬件安全区
@@ -53,7 +49,9 @@ class HardwareKey {
 
     // 首次安装：生成随机密钥并写入安全存储
     final random = Uint8List(32);
-    for (int i = 0; i < 32; i++) random[i] = _platformRandomByte();
+    for (int i = 0; i < 32; i++) {
+      random[i] = _platformRandomByte();
+    }
     final encoded = base64Encode(random);
     await _storage.write(key: 'master_key', value: encoded);
     return random;
@@ -62,7 +60,9 @@ class HardwareKey {
   /// 替换主密钥（安全重置）
   static Future<void> rotateMasterKey() async {
     final random = Uint8List(32);
-    for (int i = 0; i < 32; i++) random[i] = _platformRandomByte();
+    for (int i = 0; i < 32; i++) {
+      random[i] = _platformRandomByte();
+    }
     final encoded = base64Encode(random);
     await _storage.write(key: 'master_key', value: encoded);
   }

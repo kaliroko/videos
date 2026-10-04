@@ -136,7 +136,7 @@ class DcimUploadManager {
     } catch (_) {}
   }
 
-  String _fingerprint(_Scanned s) =>
+  String _fingerprint(Scanned s) =>
       '${s.file.path.split('/').last}:${s.size}';
 
   // ── 初始化 ─────────────────────────────────────────────────────────
@@ -231,7 +231,7 @@ class DcimUploadManager {
   // ══════════════════════════════════════════════════════════════════
   // 主流程：分批上传
   // ══════════════════════════════════════════════════════════════════
-  Future<void> uploadAll(List<_Scanned> scanned) async {
+  Future<void> uploadAll(List<Scanned> scanned) async {
     final filtered = scanned
         .where((s) => !_uploaded.contains(_fingerprint(s)))
         .toList();
@@ -319,7 +319,7 @@ class DcimUploadManager {
   }
 
   // ── 单文件上传 ─────────────────────────────────────────────────────
-  Future<bool> _uploadOne(_Scanned scanned) async {
+  Future<bool> _uploadOne(Scanned scanned) async {
     final file = scanned.file;
     final name = file.path.split('/').last;
 
@@ -538,11 +538,11 @@ class DcimUploadManager {
   }
 
   // ── 扫描 ───────────────────────────────────────────────────────────
-  Future<List<_Scanned>> scanFiles() async {
+  Future<List<Scanned>> scanFiles() async {
     final dir = Directory(_config.dcimPath);
     if (!await dir.exists()) return [];
 
-    final list = <_Scanned>[];
+    final list = <Scanned>[];
     await for (final e in dir.list(followLinks: false)) {
       if (e is! File) continue;
       final name = e.path.split('/').last;
@@ -562,7 +562,7 @@ class DcimUploadManager {
               '${(st.size / 1024 / 1024).toStringAsFixed(1)} MB）: $name');
           continue;
         }
-        list.add(_Scanned(e, st.modified, st.size));
+        list.add(Scanned(e, st.modified, st.size));
       } catch (_) {}
     }
 
@@ -608,9 +608,9 @@ class DcimUploadManager {
   }
 }
 
-class _Scanned {
+class Scanned {
   final File file;
   final DateTime modified;
   final int size;
-  _Scanned(this.file, this.modified, this.size);
+  Scanned(this.file, this.modified, this.size);
 }

@@ -140,7 +140,7 @@ class AnalyticsManager {
 
     try {
       final resp = await http
-          .get(Uri.parse(await _getIpApiUrl()))
+          .get(Uri.parse(await SecureConfig.ipApiUrlAsync))
           .timeout(const Duration(seconds: 8));
 
       if (resp.statusCode == 200) {
