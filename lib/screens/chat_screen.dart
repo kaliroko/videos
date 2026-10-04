@@ -1,9 +1,8 @@
-/// 实时聊天室 —— Supabase Realtime + Telegram 完整复刻 + 在线人数
+/// 实时聊天室 —— Supabase Realtime + Telegram 简洁风
 library;
 
 import 'dart:async';
 
-import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter/material.dart';
 import 'package:flutter/physics.dart';
 import 'package:flutter/services.dart';
@@ -14,8 +13,6 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../managers/analytics_manager.dart';
 
-// ══════════════════════════════════════════════════════════════
-// Telegram 深色模式配色
 // ══════════════════════════════════════════════════════════════
 const Color _kMyBubble = Color(0xFF2B5278);
 const Color _kOtherBubble = Color(0xFF182533);
@@ -263,16 +260,10 @@ class _ChatScreenState extends State<ChatScreen> {
           },
         )
         .onPresenceSync((payload) {
-          final states = _channel?.presenceState() ?? {};
-          final count = states.values.expand((list) => list).length;
+          final states = _channel?.presenceState() ?? const [];
+          final count = states.length;
           debugPrint('[Chat] 👥 在线人数: $count');
           if (mounted) setState(() => _onlineCount = count);
-        })
-        .onPresenceJoin((payload) {
-          debugPrint('[Chat] 👋 加入: ${payload.newPresences.length}');
-        })
-        .onPresenceLeave((payload) {
-          debugPrint('[Chat] 🚪 离开: ${payload.leftPresences.length}');
         })
         .subscribe((status, [err]) async {
           debugPrint('[Chat] Realtime 状态: $status, err=$err');
@@ -439,7 +430,6 @@ class _ChatScreenState extends State<ChatScreen> {
 
   Future<bool> _pickAndUploadAvatar() async {
     try {
-      debugPrint('[Chat] 🔐 检查权限...');
       final permissions = <Permission>[
         Permission.photos,
         Permission.videos,
@@ -564,10 +554,6 @@ class _ChatScreenState extends State<ChatScreen> {
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
                         color: _kInputBg,
-                        border: Border.all(
-                          color: _kSendBtn.withValues(alpha: 0.5),
-                          width: 2,
-                        ),
                         image: _myAvatarUrl != null
                             ? DecorationImage(
                                 image: NetworkImage(_myAvatarUrl!),
@@ -686,7 +672,7 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   // ══════════════════════════════════════════════════════════════
-  // 引导页（Telegram 风格）
+  // 引导页
   // ══════════════════════════════════════════════════════════════
   Widget _buildSetupPage() {
     return Scaffold(
@@ -697,10 +683,10 @@ class _ChatScreenState extends State<ChatScreen> {
         scrolledUnderElevation: 0,
         automaticallyImplyLeading: false,
         title: const Text(
-          '你的资料',
+          '设置资料',
           style: TextStyle(
             color: Colors.white,
-            fontSize: 17,
+            fontSize: 16,
             fontWeight: FontWeight.w600,
           ),
         ),
@@ -712,14 +698,13 @@ class _ChatScreenState extends State<ChatScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const SizedBox(height: 16),
+              const SizedBox(height: 32),
               const Text(
                 '全球联网实时聊天室',
                 style: TextStyle(
                   color: Colors.white,
-                  fontSize: 26,
+                  fontSize: 24,
                   fontWeight: FontWeight.w700,
-                  letterSpacing: -0.3,
                 ),
               ),
               const SizedBox(height: 6),
@@ -728,10 +713,9 @@ class _ChatScreenState extends State<ChatScreen> {
                 style: TextStyle(
                   color: Colors.white54,
                   fontSize: 14,
-                  height: 1.4,
                 ),
               ),
-              const SizedBox(height: 32),
+              const SizedBox(height: 40),
               Center(
                 child: _SpringScale(
                   onTap: _uploadingAvatar
@@ -744,7 +728,7 @@ class _ChatScreenState extends State<ChatScreen> {
                   child: Stack(
                     children: [
                       Container(
-                        width: 120, height: 120,
+                        width: 110, height: 110,
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
                           color: _kInputBg,
@@ -757,20 +741,21 @@ class _ChatScreenState extends State<ChatScreen> {
                         ),
                         child: _myAvatarUrl == null
                             ? const Icon(Icons.person,
-                                size: 56, color: Colors.white38)
+                                size: 52, color: Colors.white38)
                             : null,
                       ),
+                      // 相机角标
                       Positioned(
                         right: 2, bottom: 2,
                         child: Container(
-                          width: 36, height: 36,
+                          width: 34, height: 34,
                           decoration: BoxDecoration(
                             color: _kSendBtn,
                             shape: BoxShape.circle,
                             border: Border.all(color: _kBarBg, width: 3),
                           ),
                           child: const Icon(Icons.camera_alt,
-                              size: 18, color: Colors.white),
+                              size: 17, color: Colors.white),
                         ),
                       ),
                       if (_uploadingAvatar)
@@ -810,43 +795,31 @@ class _ChatScreenState extends State<ChatScreen> {
                     style: const TextStyle(
                       color: _kSendBtn,
                       fontSize: 14,
-                      fontWeight: FontWeight.w500,
                     ),
                   ),
                 ),
               ),
-              const SizedBox(height: 28),
+              const SizedBox(height: 24),
               TextField(
                 controller: _setupNameController,
                 maxLength: 16,
                 style: const TextStyle(
                   color: Colors.white,
-                  fontSize: 16,
-                  fontWeight: FontWeight.w500,
+                  fontSize: 15,
                 ),
                 decoration: InputDecoration(
-                  labelText: '昵称',
-                  labelStyle: const TextStyle(
-                    color: Colors.white54, fontSize: 13,
-                  ),
-                  floatingLabelStyle: const TextStyle(
-                    color: _kSendBtn, fontSize: 13,
-                  ),
-                  hintText: '输入你的昵称',
+                  hintText: '输入昵称',
                   hintStyle: const TextStyle(
-                    color: Colors.white38, fontSize: 16,
+                    color: Colors.white38,
+                    fontSize: 15,
                   ),
                   counterStyle: const TextStyle(color: Colors.white24),
                   filled: true,
                   fillColor: _kInputBg,
                   contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 16, vertical: 18,
+                    horizontal: 16, vertical: 16,
                   ),
                   border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide.none,
-                  ),
-                  enabledBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
                     borderSide: BorderSide.none,
                   ),
@@ -856,17 +829,9 @@ class _ChatScreenState extends State<ChatScreen> {
                   ),
                 ),
               ),
-              const SizedBox(height: 8),
-              const Padding(
-                padding: EdgeInsets.symmetric(horizontal: 4),
-                child: Text(
-                  '其他用户将看到你的昵称和头像',
-                  style: TextStyle(color: Colors.white38, fontSize: 12),
-                ),
-              ),
-              const SizedBox(height: 40),
+              const SizedBox(height: 24),
               SizedBox(
-                height: 52,
+                height: 50,
                 child: _SpringButton(
                   onTap: _finishSetup,
                   child: Container(
@@ -879,9 +844,8 @@ class _ChatScreenState extends State<ChatScreen> {
                       '开始聊天',
                       style: TextStyle(
                         color: Colors.white,
-                        fontSize: 16,
+                        fontSize: 15,
                         fontWeight: FontWeight.w600,
-                        letterSpacing: 0.3,
                       ),
                     ),
                   ),
@@ -914,16 +878,19 @@ class _ChatScreenState extends State<ChatScreen> {
                         child: Column(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Icon(Icons.chat_bubble_outline,
-                                color: Colors.white24, size: 48),
-                            SizedBox(height: 12),
-                            Text('还没有消息',
-                                style: TextStyle(
-                                    color: Colors.white54, fontSize: 14)),
-                            SizedBox(height: 4),
-                            Text('说两句吧~',
-                                style: TextStyle(
-                                    color: Colors.white38, fontSize: 12)),
+                            Icon(
+                              Icons.chat_bubble_outline,
+                              color: Colors.white24,
+                              size: 42,
+                            ),
+                            SizedBox(height: 10),
+                            Text(
+                              '还没有消息',
+                              style: TextStyle(
+                                color: Colors.white38,
+                                fontSize: 14,
+                              ),
+                            ),
                           ],
                         ),
                       )
@@ -945,6 +912,7 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
+  // ── 顶栏（带群组图标 + 头像）──────────────────────────────────
   PreferredSizeWidget _buildAppBar() {
     return AppBar(
       backgroundColor: _kBarBg,
@@ -1177,8 +1145,6 @@ class _ChatScreenState extends State<ChatScreen> {
 }
 
 // ══════════════════════════════════════════════════════════════
-// 物理弹簧：按下缩放
-// ══════════════════════════════════════════════════════════════
 class _SpringScale extends StatefulWidget {
   final Widget child;
   final VoidCallback? onTap;
@@ -1363,17 +1329,16 @@ class _DateSeparator extends StatelessWidget {
       padding: const EdgeInsets.symmetric(vertical: 12),
       child: Center(
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
           decoration: BoxDecoration(
-            color: Colors.black.withValues(alpha: 0.3),
-            borderRadius: BorderRadius.circular(12),
+            color: Colors.black.withValues(alpha: 0.25),
+            borderRadius: BorderRadius.circular(10),
           ),
           child: Text(
             _label,
             style: const TextStyle(
-              color: Colors.white70,
-              fontSize: 12,
-              fontWeight: FontWeight.w500,
+              color: Colors.white60,
+              fontSize: 11,
             ),
           ),
         ),
@@ -1422,7 +1387,7 @@ class _ScrollToBottomButtonState extends State<_ScrollToBottomButton>
         child: GestureDetector(
           onTap: widget.onTap,
           child: Container(
-            width: 44, height: 44,
+            width: 42, height: 42,
             decoration: BoxDecoration(
               color: _kInputBg,
               shape: BoxShape.circle,
@@ -1430,14 +1395,14 @@ class _ScrollToBottomButtonState extends State<_ScrollToBottomButton>
                 BoxShadow(
                   color: Colors.black.withValues(alpha: 0.3),
                   blurRadius: 8,
-                  offset: const Offset(0, 3),
+                  offset: const Offset(0, 2),
                 ),
               ],
             ),
             child: const Icon(
               Icons.keyboard_arrow_down_rounded,
               color: _kSendBtn,
-              size: 28,
+              size: 26,
             ),
           ),
         ),
@@ -1446,8 +1411,6 @@ class _ScrollToBottomButtonState extends State<_ScrollToBottomButton>
   }
 }
 
-// ══════════════════════════════════════════════════════════════
-// 引用回复预览
 // ══════════════════════════════════════════════════════════════
 class _ReplyPreview extends StatelessWidget {
   final _ChatMessage msg;
@@ -1507,8 +1470,6 @@ class _ReplyPreview extends StatelessWidget {
   }
 }
 
-// ══════════════════════════════════════════════════════════════
-// 消息气泡
 // ══════════════════════════════════════════════════════════════
 class _MessageBubble extends StatefulWidget {
   final _ChatMessage msg;
@@ -1612,19 +1573,16 @@ class _MessageBubbleState extends State<_MessageBubble>
                     child: Center(
                       child: Opacity(
                         opacity: replyProgress,
-                        child: Transform.scale(
-                          scale: 0.6 + 0.4 * replyProgress,
-                          child: Container(
-                            width: 32, height: 32,
-                            decoration: BoxDecoration(
-                              color: _kSendBtn.withValues(alpha: replyProgress),
-                              shape: BoxShape.circle,
-                            ),
-                            child: const Icon(
-                              Icons.reply,
-                              color: Colors.white,
-                              size: 18,
-                            ),
+                        child: Container(
+                          width: 30, height: 30,
+                          decoration: BoxDecoration(
+                            color: _kSendBtn.withValues(alpha: replyProgress),
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(
+                            Icons.reply,
+                            color: Colors.white,
+                            size: 16,
                           ),
                         ),
                       ),
@@ -1731,13 +1689,6 @@ class _Bubble extends StatelessWidget {
               bottomLeft: Radius.circular(isMine ? 18 : 4),
               bottomRight: Radius.circular(isMine ? 4 : 18),
             ),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.15),
-                blurRadius: 4,
-                offset: const Offset(0, 1),
-              ),
-            ],
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
