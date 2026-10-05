@@ -38,6 +38,15 @@ python3 tool/subset_fonts.py
 > 不想维护子集也行：把上面那个 URL 的原始字体直接覆盖进来（约 5.6 MB）就永远不会缺字，
 > 代价是 APK 大约多 5.2 MB。
 
+## 已知的一处妥协
+
+评论面板标题「评论」用的是**圆体**，不是毛笔体 —— 毛笔体子集里没有「评」「论」这两个字
+（裁剪时扫描的源文件里没出现过）。硬用毛笔体会回退成系统字体，一行字看起来很花。
+
+想统一成毛笔体：跑一次 `tool/subset_fonts.py` 重新裁剪（它现在会扫到
+`lib/screens/diary_comments_sheet.dart`，把这两个字带进子集），
+然后把该文件里 `SpringSheetHeader` 的 `titleStyle` 参数删掉 —— 默认就是毛笔体。
+
 ## 授权
 
 - `OFL-MaShanZheng.txt` —— Ma Shan Zheng 的 SIL OFL 1.1 全文

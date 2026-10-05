@@ -9,11 +9,11 @@ library;
 import 'package:flutter/material.dart';
 import 'package:liquid_glass_widgets/liquid_glass_widgets.dart';
 import 'package:provider/provider.dart';
-import 'package:bilibili_glass/providers/nav_bar_visibility.dart';
-import 'package:bilibili_glass/theme/app_theme.dart';
-import 'package:bilibili_glass/screens/diary_screen.dart';
-import 'package:bilibili_glass/screens/swipe_video_screen.dart';
-import 'package:bilibili_glass/screens/chat_screen.dart';
+import 'package:suisuinian/providers/nav_bar_visibility.dart';
+import 'package:suisuinian/theme/app_theme.dart';
+import 'package:suisuinian/screens/diary_screen.dart';
+import 'package:suisuinian/screens/swipe_video_screen.dart';
+import 'package:suisuinian/screens/chat_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -23,10 +23,12 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
-  /// ★ 只有 0/1 两个真正的 tab
-  /// 0 = 碎碎念（日记动态）；1 = 视频
-  /// 2 = 聊天室入口按钮（点击 push 独立页面，不是 tab）
-  int _bottomTab = 0;
+  /// PageView 只有两页：0 = 碎碎念，1 = 视频
+  int _page = 0;
+
+  /// 底栏有 3 个位置：0 = 碎碎念，1 = 聊天室（push 独立页面），2 = 视频
+  /// ★ 聊天室在中间，所以底栏下标和 PageView 下标不是一回事，必须显式映射
+  int get _barIndex => _page == 1 ? 2 : 0;
 
   final PageController _pageController = PageController(initialPage: 0);
 
@@ -53,7 +55,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             const DiaryScreen(),
 
             // ── Page 1: 上下滑动视频 ──
-            SwipeVideoScreen(active: _bottomTab == 1),
+            SwipeVideoScreen(active: _page == 1),
           ],
         ),
         extendBody: true,
@@ -69,7 +71,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
   // ── 翻页回调 ─────────────────────────────────────────────────────────────
   void _onPageChanged(int i) {
-    setState(() => _bottomTab = i);
+    setState(() => _page = i);
     context.read<NavBarVisibility>().show();
   }
 
@@ -90,24 +92,24 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     }
   }
 
-  // ── 底部导航 ★ 三个位置，第三个是"入口按钮"──────────────────────
+  // ── 底部导航 ★ 三个位置，中间那个是聊天室入口────────────────────
   Widget _buildBottomNav() {
     final bottomInset = MediaQuery.of(context).padding.bottom;
     return RepaintBoundary(
       child: Padding(
         padding: EdgeInsets.fromLTRB(16, 0, 16, 16 + bottomInset),
         child: GlassBottomBar(
-          selectedIndex: _bottomTab,
+          selectedIndex: _barIndex,
           onTabSelected: (i) {
-            // ★ 点击第三个位置 → 进入独立聊天室页面（不改变 tab）
-            if (i == 2) {
+            // ★ 中间位置 → 进入独立聊天室页面（不改变当前页）
+            if (i == 1) {
               _openChatRoom();
               return;
             }
 
-            // 碎碎念 / 视频 → 正常切换
+            // 碎碎念(0) / 视频(2) → 切到对应 PageView 页
             _pageController.animateToPage(
-              i,
+              i == 2 ? 1 : 0,
               duration: const Duration(milliseconds: 280),
               curve: Curves.easeOutCubic,
             );
@@ -119,18 +121,19 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               selectedIcon: Icons.create,
               glowColor: AppTheme.accentColor,
             ),
-            GlassBottomBarTab(
-              label: '白丝宝宝',
-              icon: Icons.auto_awesome,
-              selectedIcon: Icons.auto_awesome_outlined,
-              glowColor: AppTheme.accentColor,
-            ),
-            // ★ 聊天室 = 入口按钮（点击进入独立页面）
+            // ★ 聊天室 = 入口按钮（点击进入独立页面），放在中间
             GlassBottomBarTab(
               label: '聊天室',
               icon: Icons.chat_bubble,
               selectedIcon: Icons.chat_bubble_outline,
               glowColor: const Color(0xFF64B5EF),
+            ),
+            // 视频页（原来是第 2 个位置，和聊天室对调了）
+            GlassBottomBarTab(
+              label: '白丝宝宝',
+              icon: Icons.auto_awesome,
+              selectedIcon: Icons.auto_awesome_outlined,
+              glowColor: AppTheme.accentColor,
             ),
           ],
           barHeight: 60,

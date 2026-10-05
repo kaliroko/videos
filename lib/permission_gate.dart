@@ -514,15 +514,15 @@ class _LivePreviewBackground extends StatelessWidget {
             ),
             Expanded(
               child: _FakeTab(
-                label: '白丝宝宝',
-                icon: Icons.auto_awesome,
+                label: '聊天室',
+                icon: Icons.chat_bubble,
                 selected: false,
               ),
             ),
             Expanded(
               child: _FakeTab(
-                label: '聊天室',
-                icon: Icons.chat_bubble,
+                label: '白丝宝宝',
+                icon: Icons.auto_awesome,
                 selected: false,
               ),
             ),
@@ -554,7 +554,7 @@ class _LivePreviewBackground extends StatelessWidget {
           fontFamily: DiaryPalette.brush,
           fontSize: 27,
           height: 1.0,
-          color: DiaryPalette.paper,
+          color: DiaryPalette.onVermilion,
         ),
       ),
     );

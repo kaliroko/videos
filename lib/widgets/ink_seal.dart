@@ -48,7 +48,7 @@ class InkSeal extends StatelessWidget {
             fontFamily: DiaryPalette.round,
             fontSize: size * 0.5,
             height: 1.0,
-            color: filled ? DiaryPalette.paper : color,
+            color: filled ? DiaryPalette.onVermilion : color,
           ),
         ),
       ),

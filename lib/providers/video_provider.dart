@@ -4,9 +4,9 @@
 library;
 
 import 'package:flutter/foundation.dart';
-import 'package:bilibili_glass/repository/api_repository.dart';
-import 'package:bilibili_glass/repository/simple_api.dart';
-import 'package:bilibili_glass/models/video_model.dart';
+import 'package:suisuinian/repository/api_repository.dart';
+import 'package:suisuinian/repository/simple_api.dart';
+import 'package:suisuinian/models/video_model.dart';
 
 enum VideoSource { oldApi, newApi }
 

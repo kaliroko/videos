@@ -20,8 +20,9 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+<!-- ★ android:label 走字符串资源，改名字只需要改 res/values/strings.xml 一处 -->
 <application
-    android:label="Bilibili Glass"
+    android:label="@string/app_name"
     android:name="${applicationName}"
     android:icon="@mipmap/ic_launcher"
     android:allowBackup="false"

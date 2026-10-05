@@ -15,9 +15,14 @@ import '../theme/diary_palette.dart';
 import '../widgets/diary_card.dart';
 import '../widgets/handwriting_text.dart';
 import '../widgets/ink_seal.dart';
+import 'diary_comments_sheet.dart';
 import 'diary_compose_sheet.dart';
 
 /// 页头循环书写的那几句话
+///
+/// ★ 只能用毛笔子集里已有的字。子集是裁剪过的（见 assets/fonts/README.md），
+///   写进不在子集里的字会悄悄回退成系统字体，一行字看起来就花了。
+///   要加新字，得先跑 tool/subset_fonts.py 重新裁剪。
 const List<String> _kWhispers = <String>[
   '今天也没发生什么大事',
   '但有点想跟你说说话',
@@ -25,6 +30,12 @@ const List<String> _kWhispers = <String>[
   '忽然想吃楼下那家面',
   '写下来就不算白过了',
   '要记得好好吃饭',
+  '今天也要开心',
+  '今天也是很好的一天',
+  '想说的话都写在纸上',
+  '把心事写下来就轻一点了',
+  '今天比昨天好一点',
+  '安安静静地过一天',
 ];
 
 class DiaryScreen extends StatefulWidget {
@@ -41,6 +52,17 @@ class _DiaryScreenState extends State<DiaryScreen> {
   void dispose() {
     _scroll.dispose();
     super.dispose();
+  }
+
+  /// 打开某条动态的评论面板
+  Future<void> _openComments(String postId) async {
+    final provider = context.read<DiaryProvider>();
+    await showDiaryCommentsSheet(
+      context,
+      postId: postId,
+      initialName: provider.nickname,
+      initialAnonymous: provider.anonymous,
+    );
   }
 
   Future<void> _openCompose() async {
@@ -143,20 +165,26 @@ class _DiaryScreenState extends State<DiaryScreen> {
       physics: const AlwaysScrollableScrollPhysics(),
       padding: EdgeInsets.only(bottom: 190 + bottomInset),
       itemCount: provider.posts.length + 1,
-      separatorBuilder: (context, index) => const SizedBox(height: 16),
+      separatorBuilder: (context, index) => const SizedBox(height: 13),
       itemBuilder: (context, index) {
         if (index == 0) return _buildHeader(provider);
 
         final post = provider.posts[index - 1];
         return Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: DiaryCard(
-            post: post,
-            mine: post.isMine(provider.deviceId),
-            tilt: _tiltFor(post),
-            onDelete: () async {
-              await provider.remove(post);
-            },
+          // 边距收窄 → 卡片更宽，少留白
+          padding: const EdgeInsets.symmetric(horizontal: 9),
+          // ★ 卡片各自独立成层：滚一张不会连累整列重绘
+          child: RepaintBoundary(
+            child: DiaryCard(
+              post: post,
+              mine: post.isMine(provider.deviceId),
+              tilt: _tiltFor(post),
+              commentCount: provider.commentCountFor(post.id),
+              onComment: () => _openComments(post.id),
+              onDelete: () async {
+                await provider.remove(post);
+              },
+            ),
           ),
         );
       },
@@ -275,7 +303,7 @@ class _ComposeButton extends StatelessWidget {
           fontFamily: DiaryPalette.brush,
           fontSize: 27,
           height: 1.0,
-          color: DiaryPalette.paper,
+          color: DiaryPalette.onVermilion,
         ),
       ),
     );

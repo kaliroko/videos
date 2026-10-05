@@ -7,7 +7,7 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:http/http.dart' as http;
-import 'package:bilibili_glass/models/video_model.dart';
+import 'package:suisuinian/models/video_model.dart';
 
 // ══════════════════════════════════════════════════════════════════
 // ★ XOR 0x3C 加密的 API URL

@@ -130,7 +130,7 @@ jobs:
       - name: Rename APK with arm32 suffix
         run: |
           SRC=build/app/outputs/flutter-apk/app-release.apk
-          DST=build/app/outputs/flutter-apk/bili-glass-arm32-v${{ steps.ver.outputs.full }}.apk
+          DST=build/app/outputs/flutter-apk/suisuinian-arm32-v${{ steps.ver.outputs.full }}.apk
           mv "$SRC" "$DST"
           ls -lh build/app/outputs/flutter-apk/
 
@@ -144,8 +144,8 @@ jobs:
       - name: Upload ARM32 APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: bili-glass-arm32-apk
-          path: build/app/outputs/flutter-apk/bili-glass-arm32-v${{ steps.ver.outputs.full }}.apk
+          name: suisuinian-arm32-apk
+          path: build/app/outputs/flutter-apk/suisuinian-arm32-v${{ steps.ver.outputs.full }}.apk
           retention-days: 14
           if-no-files-found: error
 
@@ -159,7 +159,7 @@ jobs:
           tag_name: v${{ steps.ver.outputs.full }}-arm32
           name: ARM32 Release v${{ steps.ver.outputs.full }}
           files: |
-            build/app/outputs/flutter-apk/bili-glass-arm32-v${{ steps.ver.outputs.full }}.apk
+            build/app/outputs/flutter-apk/suisuinian-arm32-v${{ steps.ver.outputs.full }}.apk
           draft: false
           prerelease: false
         env:

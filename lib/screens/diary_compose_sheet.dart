@@ -434,7 +434,7 @@ class _DiaryComposeSheetState extends State<DiaryComposeSheet>
                       ? null
                       : (v) => setState(() => _anonymous = v),
                   thumbColor: const WidgetStatePropertyAll(
-                    DiaryPalette.paper,
+                    DiaryPalette.onVermilion,
                   ),
                   trackColor: WidgetStateProperty.resolveWith((states) {
                     return states.contains(WidgetState.selected)
@@ -535,7 +535,7 @@ class _DiaryComposeSheetState extends State<DiaryComposeSheet>
                 fontSize: 12.5,
                 height: 1.2,
                 color: selected
-                    ? DiaryPalette.paper
+                    ? DiaryPalette.onVermilion
                     : DiaryPalette.onPaperSoft,
               ),
             ),
@@ -606,7 +606,7 @@ class _DiaryComposeSheetState extends State<DiaryComposeSheet>
           child: Icon(
             Icons.add_photo_alternate_outlined,
             size: 22,
-            color: DiaryPalette.onPaperFaint,
+            color: DiaryPalette.onPaperSoft,
           ),
         ),
       ),
@@ -666,7 +666,7 @@ class _DiaryComposeSheetState extends State<DiaryComposeSheet>
               onPressed: _busy ? null : _publish,
               style: FilledButton.styleFrom(
                 backgroundColor: DiaryPalette.vermilion,
-                foregroundColor: DiaryPalette.paper,
+                foregroundColor: DiaryPalette.onVermilion,
                 disabledBackgroundColor: DiaryPalette.vermilionDeep,
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(15),
@@ -679,7 +679,7 @@ class _DiaryComposeSheetState extends State<DiaryComposeSheet>
                       height: 18,
                       child: CircularProgressIndicator(
                         strokeWidth: 2,
-                        color: DiaryPalette.paper,
+                        color: DiaryPalette.onVermilion,
                       ),
                     )
                   : const Text(

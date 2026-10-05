@@ -1,8 +1,7 @@
-/// 实时聊天室 —— Supabase Realtime + Telegram 完整复刻
+/// 实时聊天室 —— Supabase Realtime + MD3 界面（弹簧物理）
 library;
 
 import 'dart:async';
-import 'dart:ui' show ImageFilter;
 
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:emoji_picker_flutter/emoji_picker_flutter.dart';
@@ -17,19 +16,30 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../managers/analytics_manager.dart';
+import '../theme/diary_palette.dart';
 
-const Color _kMyBubble = Color(0xFF2B5278);
-const Color _kOtherBubble = Color(0xFF182533);
-const Color _kMyText = Color(0xFFFFFFFF);
-const Color _kOtherText = Color(0xFFFFFFFF);
-const Color _kTimeMine = Color(0xFF8FB5D6);
-const Color _kTimeOther = Color(0xFF6B7B8B);
+// ── 聊天室配色：和「碎碎念」共用同一套 墨 · 朱 · 纸 ──────────────
+// 思路：自己说的话写在米色纸上，别人说的话落在暖墨上，
+//       强调色统一是印章的朱砂红 —— 两个页面看起来才像同一个 App。
 
-const Color _kChatBg = Color(0xFF000000);
-const Color _kBarBg = Color(0xFF17212B);
-const Color _kInputBg = Color(0xFF242F3D);
-const Color _kSendBtn = Color(0xFF64B5EF);
-const Color _kOnline = Color(0xFF4EC9A6);
+/// 自己的气泡 —— 米色纸，正文对纸 7.8:1
+const Color _kMyBubble = DiaryPalette.paper;
+/// 别人的气泡 —— 暖墨，正文对底 13:1
+const Color _kOtherBubble = Color(0xFF221E19);
+
+const Color _kMyText = DiaryPalette.onPaper;
+const Color _kOtherText = DiaryPalette.onInk;
+const Color _kTimeMine = DiaryPalette.onPaperFaint;
+const Color _kTimeOther = Color(0xFF8C8375);
+
+const Color _kChatBg = DiaryPalette.ink;
+const Color _kBarBg = DiaryPalette.inkSoft;
+const Color _kInputBg = Color(0xFF1C1813);
+const Color _kSendBtn = DiaryPalette.vermilion;
+const Color _kOnline = Color(0xFF5FB878);
+
+/// 朱砂提亮版 —— 暗底上的文字与图标用它（朱砂原色在暗底只有 3.6:1，小字读不清）
+const Color _kAccent = Color(0xFFE07A62);
 
 const Curve _kEmphasizedDecel = Cubic(0.05, 0.7, 0.1, 1.0);
 
@@ -72,9 +82,6 @@ class _ChatScreenState extends State<ChatScreen>
   Timer? _reconnectTimer;
   final _setupNameController = TextEditingController();
 
-  /// 顶栏 / 底栏动态模糊
-  late final AnimationController _blurCtrl;
-  late final Animation<double> _blurAnim;
 
   static const _kTable = 'chat_messages';
   static const _kProfileTable = 'user_profiles';
@@ -88,15 +95,6 @@ class _ChatScreenState extends State<ChatScreen>
   void initState() {
     super.initState();
 
-    _blurCtrl = AnimationController(
-      vsync: this,
-      duration: const Duration(seconds: 4),
-    )..repeat(reverse: true);
-
-    _blurAnim = Tween<double>(begin: 12.0, end: 22.0).animate(
-      CurvedAnimation(parent: _blurCtrl, curve: Curves.easeInOut),
-    );
-
     _inputController.addListener(() {
       final has = _inputController.text.trim().isNotEmpty;
       if (has != _hasText) setState(() => _hasText = has);
@@ -107,7 +105,6 @@ class _ChatScreenState extends State<ChatScreen>
 
   @override
   void dispose() {
-    _blurCtrl.dispose();
     _reconnectTimer?.cancel();
     _channel?.untrack();
     _channel?.unsubscribe();
@@ -498,19 +495,19 @@ class _ChatScreenState extends State<ChatScreen>
             const SizedBox(height: 16),
             _attachItem(
               icon: Icons.photo,
-              color: const Color(0xFF4EC9A6),
+              color: const Color(0xFF9CAF6E),
               label: '相册',
               onTap: () => Navigator.pop(ctx, 'photo'),
             ),
             _attachItem(
               icon: Icons.insert_drive_file,
-              color: const Color(0xFF64B5EF),
+              color: const Color(0xFFD9A441),
               label: '文件',
               onTap: () => Navigator.pop(ctx, 'file'),
             ),
             _attachItem(
               icon: Icons.camera_alt,
-              color: const Color(0xFFFB7299),
+              color: _kAccent,
               label: '拍照',
               onTap: () => Navigator.pop(ctx, 'camera'),
             ),
@@ -761,14 +758,14 @@ class _ChatScreenState extends State<ChatScreen>
             ),
             const SizedBox(height: 12),
             ListTile(
-              leading: const Icon(Icons.reply, color: _kSendBtn),
+              leading: const Icon(Icons.reply, color: _kAccent),
               title: const Text('回复',
                   style: TextStyle(color: Colors.white)),
               onTap: () => Navigator.pop(ctx, 'reply'),
             ),
             if (msg.messageType == 'text')
               ListTile(
-                leading: const Icon(Icons.copy, color: _kSendBtn),
+                leading: const Icon(Icons.copy, color: _kAccent),
                 title: const Text('复制',
                     style: TextStyle(color: Colors.white)),
                 onTap: () => Navigator.pop(ctx, 'copy'),
@@ -1203,7 +1200,7 @@ class _ChatScreenState extends State<ChatScreen>
                         },
                   child: Text(
                     _myAvatarUrl == null ? '上传头像' : '更换头像',
-                    style: const TextStyle(color: _kSendBtn, fontSize: 14),
+                    style: const TextStyle(color: _kAccent, fontSize: 14),
                   ),
                 ),
               ),
@@ -1356,103 +1353,107 @@ class _ChatScreenState extends State<ChatScreen>
   }
 
   Widget _buildFloatingAppBar() {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(20),
-      child: AnimatedBuilder(
-        animation: _blurAnim,
-        builder: (context, child) {
-          return BackdropFilter(
-            filter: ImageFilter.blur(
-              sigmaX: _blurAnim.value,
-              sigmaY: _blurAnim.value,
-            ),
-            child: child,
-          );
-        },
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-          decoration: BoxDecoration(
-            color: Colors.transparent,
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(
-              color: Colors.white.withValues(alpha: 0.12),
-              width: 0.5,
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.3),
-                blurRadius: 16,
-                offset: const Offset(0, 4),
-              ),
-            ],
+    return Container(
+      padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+      decoration: BoxDecoration(
+        color: _kBarBg,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: Colors.white.withValues(alpha: 0.08),
+          width: 0.8,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.35),
+            blurRadius: 18,
+            offset: const Offset(0, 6),
           ),
-          child: Row(
-            children: [
-              Container(
-                width: 36, height: 36,
-                decoration: const BoxDecoration(
-                  color: _kInputBg,
-                  shape: BoxShape.circle,
+        ],
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 38,
+            height: 38,
+            decoration: BoxDecoration(
+              color: _kSendBtn.withValues(alpha: 0.16),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(Icons.groups_rounded, color: _kAccent, size: 21),
+          ),
+          const SizedBox(width: 11),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text(
+                  '公共聊天室',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 15.5,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
-                child:
-                    const Icon(Icons.groups, color: _kSendBtn, size: 20),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
+                const SizedBox(height: 2),
+                Row(
                   children: [
-                    const Text('公共聊天室',
-                        style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 15,
-                            fontWeight: FontWeight.w600)),
-                    const SizedBox(height: 1),
+                    Container(
+                      width: 6,
+                      height: 6,
+                      decoration: BoxDecoration(
+                        color: _connected ? _kOnline : Colors.orange,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                    const SizedBox(width: 5),
                     Text(
                       _connected ? '$_onlineCount 人在线' : '连接中…',
                       style: TextStyle(
-                        color: _connected ? _kOnline : Colors.orange,
-                        fontSize: 11,
+                        color: _connected
+                            ? Colors.white.withValues(alpha: 0.62)
+                            : Colors.orange,
+                        fontSize: 11.5,
                       ),
                     ),
                   ],
                 ),
-              ),
-              GestureDetector(
-                onTap: _showSettings,
-                child: _myAvatarUrl != null
-                    ? ClipOval(
-                        child: Image.network(
-                          _myAvatarUrl!,
-                          width: 32, height: 32,
-                          fit: BoxFit.cover,
-                          errorBuilder: (_, __, ___) => Container(
-                            width: 32, height: 32,
-                            decoration: const BoxDecoration(
-                              color: _kInputBg,
-                              shape: BoxShape.circle,
-                            ),
-                            child: const Icon(Icons.person,
-                                size: 18, color: Colors.white54),
-                          ),
-                        ),
-                      )
-                    : Container(
-                        width: 32, height: 32,
-                        decoration: const BoxDecoration(
-                          color: _kInputBg,
-                          shape: BoxShape.circle,
-                        ),
-                        child: const Icon(Icons.person,
-                            size: 18, color: Colors.white54),
-                      ),
-              ),
-              const SizedBox(width: 4),
-            ],
+              ],
+            ),
           ),
+          // 点头像进设置
+          GestureDetector(
+            onTap: _showSettings,
+            child: _myAvatarUrl != null
+                ? ClipOval(
+                    child: Image.network(
+                      _myAvatarUrl!,
+                      width: 36,
+                      height: 36,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => _buildAvatarFallback(),
+                    ),
+                  )
+                : _buildAvatarFallback(),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAvatarFallback() {
+    return Container(
+      width: 36,
+      height: 36,
+      decoration: BoxDecoration(
+        color: _kInputBg,
+        shape: BoxShape.circle,
+        border: Border.all(
+          color: Colors.white.withValues(alpha: 0.08),
+          width: 0.8,
         ),
       ),
+      child: const Icon(Icons.person_outline, size: 19, color: Colors.white60),
     );
   }
 
@@ -1501,313 +1502,198 @@ class _ChatScreenState extends State<ChatScreen>
   }
 
   Widget _buildInputBar() {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(24),
-      child: AnimatedBuilder(
-        animation: _blurAnim,
-        builder: (context, child) {
-          return BackdropFilter(
-            filter: ImageFilter.blur(
-              sigmaX: _blurAnim.value,
-              sigmaY: _blurAnim.value,
-            ),
-            child: child,
-          );
-        },
-        child: Container(
-          padding: const EdgeInsets.fromLTRB(8, 8, 8, 8),
-          decoration: BoxDecoration(
-            color: Colors.transparent,
-            borderRadius: BorderRadius.circular(24),
-            border: Border.all(
-              color: Colors.white.withValues(alpha: 0.12),
-              width: 0.5,
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.3),
-                blurRadius: 16,
-                offset: const Offset(0, 4),
-              ),
-            ],
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (_replyTo != null)
-                _ReplyPreview(msg: _replyTo!, onCancel: _cancelReply),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  Expanded(
-                    child: Container(
-                      decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.08),
-                        borderRadius: BorderRadius.circular(18),
-                      ),
-                      padding: const EdgeInsets.symmetric(horizontal: 4),
-                      constraints: const BoxConstraints(minHeight: 40),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.end,
-                        children: [
-                          IconButton(
-                            onPressed: () {
-                              FocusScope.of(context).unfocus();
-                              setState(() =>
-                                  _showEmojiPicker = !_showEmojiPicker);
-                            },
-                            icon: Icon(
-                              _showEmojiPicker
-                                  ? Icons.keyboard
-                                  : Icons.emoji_emotions_outlined,
-                              color: Colors.white70,
-                              size: 22,
-                            ),
-                            padding: const EdgeInsets.all(8),
-                            constraints: const BoxConstraints(),
-                          ),
-                          Expanded(
-                            child: TextField(
-                              controller: _inputController,
-                              focusNode: _inputFocus,
-                              onTap: () {
-                                if (_showEmojiPicker) {
-                                  setState(() => _showEmojiPicker = false);
-                                }
-                              },
-                              style: const TextStyle(
-                                  color: Colors.white, fontSize: 15),
-                              maxLines: 5,
-                              minLines: 1,
-                              textInputAction: TextInputAction.send,
-                              onSubmitted: (_) => _send(),
-                              decoration: const InputDecoration(
-                                hintText: '消息',
-                                hintStyle: TextStyle(
-                                    color: Colors.white54, fontSize: 15),
-                                filled: false,
-                                border: InputBorder.none,
-                                contentPadding: EdgeInsets.symmetric(
-                                    horizontal: 4, vertical: 10),
-                                isDense: true,
-                              ),
-                            ),
-                          ),
-                          IconButton(
-                            onPressed: _showAttachMenu,
-                            icon: const Icon(
-                              Icons.attach_file,
-                              color: Colors.white70,
-                              size: 20,
-                            ),
-                            padding: const EdgeInsets.all(8),
-                            constraints: const BoxConstraints(),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 6),
-                  AnimatedScale(
-                    scale: _hasText ? 1.0 : 0.0,
-                    duration: const Duration(milliseconds: 220),
-                    curve: _kEmphasizedDecel,
-                    child: AnimatedOpacity(
-                      opacity: _hasText ? 1.0 : 0.0,
-                      duration: const Duration(milliseconds: 160),
-                      child: _SendButton(onTap: _send),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
+    return Container(
+      padding: const EdgeInsets.all(6),
+      decoration: BoxDecoration(
+        color: _kBarBg,
+        borderRadius: BorderRadius.circular(26),
+        border: Border.all(
+          color: Colors.white.withValues(alpha: 0.08),
+          width: 0.8,
         ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.35),
+            blurRadius: 18,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (_replyTo != null)
+            _ReplyPreview(msg: _replyTo!, onCancel: _cancelReply),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Expanded(
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: _kInputBg,
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  padding: const EdgeInsets.symmetric(horizontal: 2),
+                  constraints: const BoxConstraints(minHeight: 42),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      IconButton(
+                        onPressed: () {
+                          FocusScope.of(context).unfocus();
+                          setState(
+                              () => _showEmojiPicker = !_showEmojiPicker);
+                        },
+                        icon: Icon(
+                          _showEmojiPicker
+                              ? Icons.keyboard_outlined
+                              : Icons.emoji_emotions_outlined,
+                          color: Colors.white70,
+                          size: 22,
+                        ),
+                        padding: const EdgeInsets.all(8),
+                        constraints: const BoxConstraints(),
+                      ),
+                      Expanded(
+                        child: TextField(
+                          controller: _inputController,
+                          focusNode: _inputFocus,
+                          onTap: () {
+                            if (_showEmojiPicker) {
+                              setState(() => _showEmojiPicker = false);
+                            }
+                          },
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 15,
+                            height: 1.4,
+                          ),
+                          maxLines: 5,
+                          minLines: 1,
+                          textInputAction: TextInputAction.send,
+                          onSubmitted: (_) => _send(),
+                          decoration: InputDecoration(
+                            hintText: '说点什么…',
+                            hintStyle: TextStyle(
+                              color: Colors.white.withValues(alpha: 0.42),
+                              fontSize: 15,
+                            ),
+                            filled: false,
+                            border: InputBorder.none,
+                            enabledBorder: InputBorder.none,
+                            focusedBorder: InputBorder.none,
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 4,
+                              vertical: 11,
+                            ),
+                            isDense: true,
+                          ),
+                        ),
+                      ),
+                      IconButton(
+                        onPressed: _showAttachMenu,
+                        icon: const Icon(
+                          Icons.attach_file_rounded,
+                          color: Colors.white70,
+                          size: 20,
+                        ),
+                        padding: const EdgeInsets.all(8),
+                        constraints: const BoxConstraints(),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(width: 6),
+              // 有字才弹出来的发送键 —— 用弹簧而不是补间
+              _SpringReveal(
+                show: _hasText,
+                child: _SendButton(onTap: _send),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
 }
 
+/// 按需弹簧展开 / 收起（会稍微过冲一下）
+class _SpringReveal extends StatefulWidget {
+  const _SpringReveal({required this.show, required this.child});
+
+  final bool show;
+  final Widget child;
+
+  @override
+  State<_SpringReveal> createState() => _SpringRevealState();
+}
+
+class _SpringRevealState extends State<_SpringReveal>
+    with SingleTickerProviderStateMixin {
+  static const SpringDescription _spring =
+      SpringDescription(mass: 1, stiffness: 420, damping: 18);
+
+  late final AnimationController _ctrl =
+      AnimationController.unbounded(vsync: this, value: widget.show ? 1 : 0);
+
+  @override
+  void didUpdateWidget(covariant _SpringReveal oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.show != widget.show) {
+      _ctrl.animateWith(
+        SpringSimulation(_spring, _ctrl.value, widget.show ? 1 : 0, 0),
+      );
+    }
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _ctrl,
+      builder: (context, child) {
+        final v = _ctrl.value;
+        return Opacity(
+          // 弹簧会过冲到 1 以上，透明度必须夹住
+          opacity: v.clamp(0.0, 1.0).toDouble(),
+          child: Transform.scale(
+            scale: v < 0 ? 0 : v,
+            alignment: Alignment.center,
+            child: child,
+          ),
+        );
+      },
+      child: widget.child,
+    );
+  }
+}
+
 // ══════════════════════════════════════════════════════════════
-// 背景：黑 + 紫渐变 + 几何图案
+// 背景：MD3 深色表面 + 顶部一层很淡的主色光晕
+// （原来是紫色渐变加几何图案，太「Telegram 壁纸」了，已去掉）
 // ══════════════════════════════════════════════════════════════
 class _ChatBackground extends StatelessWidget {
   const _ChatBackground();
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            Color(0xFF050208),
-            Color(0xFF000000),
-            Color(0xFF0A0414),
-          ],
-          stops: [0.0, 0.55, 1.0],
+    return const DecoratedBox(
+      decoration: BoxDecoration(
+        color: _kChatBg,
+        gradient: RadialGradient(
+          center: Alignment(0, -1.05),
+          radius: 1.15,
+          colors: <Color>[Color(0xFF1F1A14), _kChatBg],
         ),
-      ),
-      child: CustomPaint(
-        painter: _PatternPainter(),
-        size: Size.infinite,
       ),
     );
   }
-}
-
-class _PatternPainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final w = size.width;
-    final h = size.height;
-    const purple = Color(0xFF9B8CFF);
-    const purpleDeep = Color(0xFF6B4EB5);
-
-    canvas.drawCircle(
-      Offset(w * 0.9, h * 0.1),
-      w * 0.55,
-      Paint()
-        ..color = purple.withValues(alpha: 0.07)
-        ..style = PaintingStyle.fill,
-    );
-    canvas.drawCircle(
-      Offset(w * 0.05, h * 0.9),
-      w * 0.65,
-      Paint()
-        ..color = purpleDeep.withValues(alpha: 0.06)
-        ..style = PaintingStyle.fill,
-    );
-    canvas.drawCircle(
-      Offset(w * 0.35, h * 0.35),
-      w * 0.25,
-      Paint()
-        ..color = purple.withValues(alpha: 0.04)
-        ..style = PaintingStyle.fill,
-    );
-    canvas.drawCircle(
-      Offset(w * 0.8, h * 0.75),
-      w * 0.3,
-      Paint()
-        ..color = purple.withValues(alpha: 0.05)
-        ..style = PaintingStyle.fill,
-    );
-
-    final linePaint = Paint()
-      ..color = purple.withValues(alpha: 0.03)
-      ..strokeWidth = 0.8
-      ..style = PaintingStyle.stroke;
-    const spacing = 32.0;
-    for (double i = -h; i < w + h; i += spacing) {
-      canvas.drawLine(Offset(i, 0), Offset(i + h, h), linePaint);
-    }
-
-    final linePaint2 = Paint()
-      ..color = purple.withValues(alpha: 0.02)
-      ..strokeWidth = 0.6
-      ..style = PaintingStyle.stroke;
-    for (double i = -h; i < w + h; i += spacing * 1.5) {
-      canvas.drawLine(Offset(i, 0), Offset(i - h, h), linePaint2);
-    }
-
-    final dotPaint = Paint()
-      ..color = purple.withValues(alpha: 0.1)
-      ..style = PaintingStyle.fill;
-    final dots = <Offset>[
-      Offset(w * 0.15, h * 0.12),
-      Offset(w * 0.6, h * 0.08),
-      Offset(w * 0.85, h * 0.32),
-      Offset(w * 0.25, h * 0.45),
-      Offset(w * 0.7, h * 0.5),
-      Offset(w * 0.4, h * 0.62),
-      Offset(w * 0.15, h * 0.78),
-      Offset(w * 0.9, h * 0.68),
-      Offset(w * 0.55, h * 0.88),
-      Offset(w * 0.75, h * 0.15),
-    ];
-    for (final d in dots) {
-      canvas.drawCircle(d, 2.5, dotPaint);
-    }
-
-    final bigDotPaint = Paint()
-      ..color = purple.withValues(alpha: 0.08)
-      ..style = PaintingStyle.fill;
-    for (final d in <Offset>[
-      Offset(w * 0.5, h * 0.3),
-      Offset(w * 0.2, h * 0.6),
-      Offset(w * 0.85, h * 0.45),
-    ]) {
-      canvas.drawCircle(d, 5.0, bigDotPaint);
-    }
-
-    final triPaint = Paint()
-      ..color = purple.withValues(alpha: 0.05)
-      ..style = PaintingStyle.fill;
-    canvas.drawPath(
-      Path()
-        ..moveTo(w * 0.15, h * 0.28)
-        ..lineTo(w * 0.25, h * 0.42)
-        ..lineTo(w * 0.05, h * 0.42)
-        ..close(),
-      triPaint,
-    );
-    canvas.drawPath(
-      Path()
-        ..moveTo(w * 0.75, h * 0.55)
-        ..lineTo(w * 0.88, h * 0.72)
-        ..lineTo(w * 0.62, h * 0.72)
-        ..close(),
-      triPaint,
-    );
-
-    canvas.drawPath(
-      Path()
-        ..moveTo(w * 0.55, h * 0.68)
-        ..lineTo(w * 0.62, h * 0.78)
-        ..lineTo(w * 0.55, h * 0.88)
-        ..lineTo(w * 0.48, h * 0.78)
-        ..close(),
-      Paint()
-        ..color = purple.withValues(alpha: 0.04)
-        ..style = PaintingStyle.fill,
-    );
-
-    canvas.drawRect(
-      Rect.fromLTWH(0, 0, w, h),
-      Paint()
-        ..shader = RadialGradient(
-          colors: [
-            purple.withValues(alpha: 0.06),
-            Colors.transparent,
-          ],
-        ).createShader(
-          Rect.fromCircle(
-            center: Offset(w * 0.5, h * 0.4),
-            radius: w * 0.75,
-          ),
-        ),
-    );
-
-    canvas.drawRect(
-      Rect.fromLTWH(0, 0, w, h),
-      Paint()
-        ..shader = RadialGradient(
-          colors: [
-            purple.withValues(alpha: 0.04),
-            Colors.transparent,
-          ],
-        ).createShader(
-          Rect.fromCircle(
-            center: Offset(w * 0.5, h),
-            radius: w * 0.6,
-          ),
-        ),
-    );
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -2052,7 +1938,7 @@ class _ScrollToBottomButtonState extends State<_ScrollToBottomButton>
               ],
             ),
             child: const Icon(Icons.keyboard_arrow_down_rounded,
-                color: _kSendBtn, size: 26),
+                color: _kAccent, size: 26),
           ),
         ),
       ),
@@ -2086,7 +1972,7 @@ class _ReplyPreview extends StatelessWidget {
               children: [
                 Text(msg.nickname,
                     style: const TextStyle(
-                        color: _kSendBtn,
+                        color: _kAccent,
                         fontSize: 12,
                         fontWeight: FontWeight.w600)),
                 const SizedBox(height: 2),
@@ -2109,6 +1995,14 @@ class _ReplyPreview extends StatelessWidget {
       ),
     );
   }
+}
+
+/// 弹簧会过冲到 1 以上，但 Opacity 只接受 0..1，夹一下
+class _Clamp01 extends Animatable<double> {
+  const _Clamp01();
+
+  @override
+  double transform(double t) => t.clamp(0.0, 1.0).toDouble();
 }
 
 class _MessageBubble extends StatefulWidget {
@@ -2150,19 +2044,21 @@ class _MessageBubbleState extends State<_MessageBubble>
   @override
   void initState() {
     super.initState();
-    _ctrl = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 420),
+    // ★ 用弹簧而不是补间：会轻轻过冲一下再落定
+    _ctrl = AnimationController.unbounded(vsync: this, value: 0);
+    _fade = _ctrl.drive(const _Clamp01());
+    _slide = _ctrl.drive(
+      Tween<Offset>(begin: const Offset(0, 0.25), end: Offset.zero),
     );
-    _fade = CurvedAnimation(parent: _ctrl, curve: _kEmphasizedDecel);
-    _slide = Tween<Offset>(
-      begin: const Offset(0, 0.25),
-      end: Offset.zero,
-    ).animate(CurvedAnimation(parent: _ctrl, curve: _kEmphasizedDecel));
-    _scale = Tween<double>(begin: 0.88, end: 1.0).animate(
-      CurvedAnimation(parent: _ctrl, curve: Curves.easeOutBack),
+    _scale = _ctrl.drive(Tween<double>(begin: 0.88, end: 1.0));
+    _ctrl.animateWith(
+      SpringSimulation(
+        const SpringDescription(mass: 1, stiffness: 380, damping: 24),
+        0,
+        1,
+        0,
+      ),
     );
-    _ctrl.forward();
   }
 
   @override
@@ -2273,7 +2169,7 @@ class _MessageBubbleState extends State<_MessageBubble>
                                       left: 12, bottom: 2),
                                   child: Text(displayName,
                                       style: const TextStyle(
-                                          color: _kSendBtn,
+                                          color: _kAccent,
                                           fontSize: 12,
                                           fontWeight: FontWeight.w600)),
                                 ),
@@ -2298,6 +2194,10 @@ class _MessageBubbleState extends State<_MessageBubble>
   }
 }
 
+/// MD3 气泡
+///
+/// 形状靠「不对称圆角」表达方向：朝向说话人那一侧的底角收窄，
+/// 不再是 Telegram 那种手绘小尾巴，也不需要 CustomPainter。
 class _Bubble extends StatelessWidget {
   final _ChatMessage msg;
   final String time;
@@ -2309,67 +2209,91 @@ class _Bubble extends StatelessWidget {
     required this.isMine,
   });
 
-  static const double _tailH = 10.0;
-
   @override
   Widget build(BuildContext context) {
     final hasReply = msg.replyToNickname != null;
     final type = msg.messageType;
+    final isMedia = type == 'image';
 
-    return CustomPaint(
-      painter: _TelegramBubblePainter(
+    return Container(
+      decoration: BoxDecoration(
         color: isMine ? _kMyBubble : _kOtherBubble,
-        isMine: isMine,
+        borderRadius: _radiusFor(isMine),
+        border: Border.all(
+          color: isMine
+              ? DiaryPalette.paperEdge.withValues(alpha: 0.55)
+              : Colors.white.withValues(alpha: 0.08),
+          width: 0.8,
+        ),
       ),
-      child: Padding(
-        padding: EdgeInsets.only(
-          left: type == 'image' ? 4 : 12,
-          right: type == 'image' ? 4 : 12,
-          top: type == 'image' ? 4 : 7,
-          bottom: (type == 'image' ? 4 : 7) + _tailH - 2,
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (hasReply)
-              Container(
-                margin: EdgeInsets.only(
-                    bottom: 6, left: type == 'image' ? 8 : 0),
-                padding: const EdgeInsets.fromLTRB(8, 4, 8, 4),
-                decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: 0.2),
-                  borderRadius: BorderRadius.circular(6),
-                  border: const Border(
-                    left: BorderSide(color: _kSendBtn, width: 3),
-                  ),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(msg.replyToNickname!,
-                        style: const TextStyle(
-                            color: _kSendBtn,
-                            fontSize: 11,
-                            fontWeight: FontWeight.w600)),
-                    const SizedBox(height: 1),
-                    Text(msg.replyToContent ?? '',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                            color: Colors.white70, fontSize: 12)),
-                  ],
-                ),
-              ),
-            if (type == 'image')
-              _buildImage(context)
-            else if (type == 'file')
-              _buildFile()
-            else
-              _buildText(),
-          ],
-        ),
+      padding: EdgeInsets.fromLTRB(
+        isMedia ? 5 : 14,
+        isMedia ? 5 : 9,
+        isMedia ? 5 : 14,
+        isMedia ? 5 : 9,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (hasReply) _buildReplyQuote(isMedia: isMedia),
+          if (isMedia)
+            _buildImage(context)
+          else if (type == 'file')
+            _buildFile()
+          else
+            _buildText(),
+        ],
+      ),
+    );
+  }
+
+  /// 朝说话人那侧收窄底角 → 视觉上指着发送者
+  static BorderRadius _radiusFor(bool isMine) => BorderRadius.only(
+        topLeft: const Radius.circular(18),
+        topRight: const Radius.circular(18),
+        bottomLeft: Radius.circular(isMine ? 18 : 5),
+        bottomRight: Radius.circular(isMine ? 5 : 18),
+      );
+
+  /// 引用的那条消息
+  Widget _buildReplyQuote({required bool isMedia}) {
+    return Container(
+      margin: EdgeInsets.only(bottom: 7, left: isMedia ? 8 : 0),
+      padding: const EdgeInsets.fromLTRB(9, 5, 9, 5),
+      decoration: BoxDecoration(
+        color: isMine
+            ? Colors.black.withValues(alpha: 0.10)
+            : Colors.white.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(9),
+        border: BorderSide(
+          color: isMine ? DiaryPalette.vermilionDeep : _kAccent,
+          width: 3,
+        ).toBorder(left: true),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            msg.replyToNickname!,
+            style: const TextStyle(
+              color: _kAccent,
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            msg.replyToContent ?? '',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: isMine ? DiaryPalette.onPaperSoft : DiaryPalette.onInk,
+              fontSize: 12,
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -2380,20 +2304,26 @@ class _Bubble extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.end,
       children: [
         Flexible(
-          child: Text(msg.content,
-              style: TextStyle(
-                  color: isMine ? _kMyText : _kOtherText,
-                  fontSize: 15,
-                  height: 1.35)),
+          child: Text(
+            msg.content,
+            style: TextStyle(
+              color: isMine ? _kMyText : _kOtherText,
+              fontSize: 15,
+              height: 1.4,
+            ),
+          ),
         ),
         const SizedBox(width: 8),
         Padding(
           padding: const EdgeInsets.only(top: 4),
-          child: Text(time,
-              style: TextStyle(
-                  color: isMine ? _kTimeMine : _kTimeOther,
-                  fontSize: 11,
-                  height: 1)),
+          child: Text(
+            time,
+            style: TextStyle(
+              color: isMine ? _kTimeMine : _kTimeOther,
+              fontSize: 11,
+              height: 1,
+            ),
+          ),
         ),
       ],
     );
@@ -2401,7 +2331,7 @@ class _Bubble extends StatelessWidget {
 
   Widget _buildImage(BuildContext context) {
     return ClipRRect(
-      borderRadius: BorderRadius.circular(10),
+      borderRadius: BorderRadius.circular(14),
       child: Stack(
         children: [
           ConstrainedBox(
@@ -2415,36 +2345,46 @@ class _Bubble extends StatelessWidget {
               loadingBuilder: (_, child, progress) {
                 if (progress == null) return child;
                 return Container(
-                  width: 200, height: 200,
-                  color: Colors.black26,
+                  width: 200,
+                  height: 200,
+                  color: Colors.black.withValues(alpha: 0.42),
                   child: const Center(
                     child: CircularProgressIndicator(
-                        strokeWidth: 2, color: _kSendBtn),
+                      strokeWidth: 2,
+                      color: _kSendBtn,
+                    ),
                   ),
                 );
               },
               errorBuilder: (_, __, ___) => Container(
-                width: 200, height: 200,
-                color: Colors.black26,
-                child: const Icon(Icons.broken_image,
-                    color: Colors.white38, size: 40),
+                width: 200,
+                height: 200,
+                color: Colors.black.withValues(alpha: 0.42),
+                child: const Icon(
+                  Icons.broken_image_outlined,
+                  color: Colors.white70,
+                  size: 40,
+                ),
               ),
             ),
           ),
           Positioned(
-            right: 6, bottom: 6,
+            right: 6,
+            bottom: 6,
             child: Container(
-              padding: const EdgeInsets.symmetric(
-                  horizontal: 6, vertical: 2),
+              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
               decoration: BoxDecoration(
-                color: Colors.black.withValues(alpha: 0.5),
-                borderRadius: BorderRadius.circular(8),
+                color: Colors.black.withValues(alpha: 0.55),
+                borderRadius: BorderRadius.circular(9),
               ),
-              child: Text(time,
-                  style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 10,
-                      height: 1)),
+              child: Text(
+                time,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 10,
+                  height: 1,
+                ),
+              ),
             ),
           ),
         ],
@@ -2458,13 +2398,17 @@ class _Bubble extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.end,
       children: [
         Container(
-          width: 40, height: 40,
+          width: 40,
+          height: 40,
           decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.15),
+            color: isMine ? Colors.black.withValues(alpha: 0.08) : Colors.white.withValues(alpha: 0.14),
             shape: BoxShape.circle,
           ),
-          child: const Icon(Icons.insert_drive_file,
-              color: Colors.white, size: 20),
+          child: const Icon(
+            Icons.insert_drive_file_outlined,
+            color: isMine ? _kMyText : _kOtherText,
+            size: 20,
+          ),
         ),
         const SizedBox(width: 10),
         Flexible(
@@ -2472,90 +2416,42 @@ class _Bubble extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text(msg.fileName ?? '文件',
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 14,
-                      fontWeight: FontWeight.w500)),
+              Text(
+                msg.fileName ?? '文件',
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: isMine ? _kMyText : _kOtherText,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
               const SizedBox(height: 2),
-              Text('点击下载',
-                  style: TextStyle(
-                      color: Colors.white.withValues(alpha: 0.6),
-                      fontSize: 11)),
+              Text(
+                '点击下载',
+                style: TextStyle(
+                  color: isMine ? DiaryPalette.onPaperSoft : DiaryPalette.onInkSoft,
+                  fontSize: 11,
+                ),
+              ),
             ],
           ),
         ),
         const SizedBox(width: 8),
         Padding(
           padding: const EdgeInsets.only(top: 4),
-          child: Text(time,
-              style: TextStyle(
-                  color: isMine ? _kTimeMine : _kTimeOther,
-                  fontSize: 11,
-                  height: 1)),
+          child: Text(
+            time,
+            style: TextStyle(
+              color: isMine ? _kTimeMine : _kTimeOther,
+              fontSize: 11,
+              height: 1,
+            ),
+          ),
         ),
       ],
     );
   }
-}
-
-class _TelegramBubblePainter extends CustomPainter {
-  final Color color;
-  final bool isMine;
-
-  _TelegramBubblePainter({required this.color, required this.isMine});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = color
-      ..style = PaintingStyle.fill
-      ..isAntiAlias = true;
-
-    const r = 20.0;
-    const rSmall = 6.0;
-    const tailW = 8.0;
-    const tailH = 10.0;
-
-    final w = size.width;
-    final h = size.height - tailH;
-    final path = Path();
-
-    if (isMine) {
-      path.moveTo(0, r);
-      path.quadraticBezierTo(0, 0, r, 0);
-      path.lineTo(w - r, 0);
-      path.quadraticBezierTo(w, 0, w, r);
-      path.lineTo(w, h - rSmall);
-      path.quadraticBezierTo(w, h, w - rSmall, h);
-      path.lineTo(w - 6, h);
-      path.quadraticBezierTo(w - 1, h + 3, w + tailW, h + tailH);
-      path.quadraticBezierTo(w - 5, h - 1, w - rSmall - 6, h);
-      path.lineTo(r, h);
-      path.quadraticBezierTo(0, h, 0, h - r);
-      path.close();
-    } else {
-      path.moveTo(w, r);
-      path.quadraticBezierTo(w, 0, w - r, 0);
-      path.lineTo(r, 0);
-      path.quadraticBezierTo(0, 0, 0, r);
-      path.lineTo(0, h - rSmall);
-      path.quadraticBezierTo(0, h, rSmall, h);
-      path.lineTo(6, h);
-      path.quadraticBezierTo(1, h + 3, -tailW, h + tailH);
-      path.quadraticBezierTo(5, h - 1, rSmall + 6, h);
-      path.lineTo(w - r, h);
-      path.quadraticBezierTo(w, h, w, h - r);
-      path.close();
-    }
-    canvas.drawPath(path, paint);
-  }
-
-  @override
-  bool shouldRepaint(covariant _TelegramBubblePainter old) =>
-      old.color != color || old.isMine != isMine;
 }
 
 class _AvatarImage extends StatelessWidget {
@@ -2570,14 +2466,14 @@ class _AvatarImage extends StatelessWidget {
   });
 
   static const _colors = [
-    Color(0xFFE84A7F),
-    Color(0xFFFB7299),
-    Color(0xFF7EC8E3),
-    Color(0xFF9B8CFF),
-    Color(0xFF4EC9A6),
-    Color(0xFFF0A458),
-    Color(0xFFEA6B7A),
-    Color(0xFF7BA8F0),
+    Color(0xFFE07A62), // 朱砂
+    Color(0xFFD9A441), // 泥金
+    Color(0xFF9CAF6E), // 苔绿
+    Color(0xFF7FA8A0), // 灰青
+    Color(0xFFB08A6A), // 陶土
+    Color(0xFFA87C9E), // 紫藤
+    Color(0xFFC96B5C), // 赭石
+    Color(0xFF8C9E6E), // 橄榄
   ];
 
   @override

@@ -7,7 +7,9 @@ import 'package:device_info_plus/device_info_plus.dart';
 import 'package:flutter/foundation.dart' show ChangeNotifier, debugPrint;
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../models/diary_comment.dart';
 import '../models/diary_post.dart';
+import '../repository/diary_cache.dart';
 import '../repository/diary_repository.dart';
 
 /// 一次拉多少条
@@ -16,6 +18,20 @@ const int kDiaryPageSize = 60;
 class DiaryProvider extends ChangeNotifier {
   DiaryRepository? _repo;
   List<DiaryPost> _posts = const <DiaryPost>[];
+
+  /// 评论全量放在内存里：卡片上的评论数直接从这儿数，永远和列表一致
+  List<DiaryComment> _comments = const <DiaryComment>[];
+
+  /// ★ 按动态分组 + 计数只算一次，别在每张卡片 build 时遍历全部评论。
+  ///   60 条动态 × 400 条评论 = 每次重建 24000 次循环，会卡。
+  Map<String, List<DiaryComment>> _commentsByPost =
+      const <String, List<DiaryComment>>{};
+  Map<String, int> _commentCounts = const <String, int>{};
+
+  bool _sendingComment = false;
+
+  /// 当前屏幕上这批内容是缓存铺出来的（网络还没回来）
+  bool _fromCache = false;
 
   String _deviceId = '';
   bool _loading = true;
@@ -41,6 +57,8 @@ class DiaryProvider extends ChangeNotifier {
   bool get loading => _loading;
   bool get ready => _ready;
   bool get publishing => _publishing;
+  bool get sendingComment => _sendingComment;
+  bool get fromCache => _fromCache;
   String? get error => _error;
   String get deviceId => _deviceId;
   String get backendLabel => _repo?.backendLabel ?? '本机';
@@ -49,6 +67,35 @@ class DiaryProvider extends ChangeNotifier {
 
   String get nickname => _nickname;
   bool get anonymous => _anonymous;
+
+  /// 某条动态下的评论，按时间正序。O(1)
+  List<DiaryComment> commentsFor(String postId) =>
+      _commentsByPost[postId] ?? const <DiaryComment>[];
+
+  /// 某条动态有几条评论。O(1)
+  int commentCountFor(String postId) => _commentCounts[postId] ?? 0;
+
+  /// 评论变了就重建一次索引（只在数据变动时调用，不在 build 里）
+  void _rebuildCommentIndex() {
+    if (_comments.isEmpty) {
+      _commentsByPost = const <String, List<DiaryComment>>{};
+      _commentCounts = const <String, int>{};
+      return;
+    }
+    final byPost = <String, List<DiaryComment>>{};
+    for (final c in _comments) {
+      (byPost[c.postId] ??= <DiaryComment>[]).add(c);
+    }
+    _commentsByPost = byPost;
+    _commentCounts = <String, int>{
+      for (final entry in byPost.entries) entry.key: entry.value.length,
+    };
+  }
+
+  void _setComments(List<DiaryComment> comments) {
+    _comments = comments;
+    _rebuildCommentIndex();
+  }
 
   // ── 生命周期 ────────────────────────────────────────────────────────
 
@@ -67,19 +114,43 @@ class DiaryProvider extends ChangeNotifier {
     if (_started) return;
     _started = true;
 
+    await _loadIdentity();
+
+    // ── ① 先把上次的缓存铺出来 ──────────────────────────────────────
+    // 云端模式要先探测 Supabase（最长 6 秒）才能拿数据，这段时间屏幕空着很难看。
+    // 有缓存就先渲染卡片，网络回来再无声替换。
     _loading = true;
     _safeNotify();
-
     try {
-      await _loadIdentity();
+      final cachedPosts = await DiaryCache.readPosts();
+      if (cachedPosts.isNotEmpty) {
+        _posts = cachedPosts;
+        _setComments(await DiaryCache.readComments());
+        _fromCache = true;
+        _ready = true;
+        _loading = false;
+        _safeNotify();
+        debugPrint('[Diary] 📦 缓存先顶上 - ${cachedPosts.length} 条');
+      }
+    } catch (e) {
+      debugPrint('[Diary] 读缓存失败（忽略）: $e');
+    }
+
+    // ── ② 再联网刷新 ────────────────────────────────────────────────
+    try {
       _deviceId = await _readDeviceId();
       _repo = await DiaryRepository.resolve(deviceId: _deviceId);
       _posts = await _repo!.fetch(limit: kDiaryPageSize);
+      _setComments(await _loadCommentsSafe(_repo!));
       _error = null;
-      debugPrint('[Diary] 就绪 - $backendLabel - ${_posts.length} 条');
+      _fromCache = false;
+      await _saveCache();
+      debugPrint(
+          '[Diary] 就绪 - $backendLabel - ${_posts.length} 条动态 / ${_comments.length} 条评论');
     } catch (e) {
       _error = e.toString();
-      debugPrint('[Diary] 初始化失败: $e');
+      // ★ 刷新失败就保留缓存，别把用户已经看到的卡片清掉
+      debugPrint('[Diary] 初始化失败（保留缓存）: $e');
     } finally {
       _loading = false;
       _ready = true;
@@ -92,12 +163,75 @@ class DiaryProvider extends ChangeNotifier {
     if (repo == null) return;
     try {
       _posts = await repo.fetch(limit: kDiaryPageSize);
+      _setComments(await _loadCommentsSafe(repo));
       _error = null;
+      _fromCache = false;
+      await _saveCache();
     } catch (e) {
       _error = e.toString();
       debugPrint('[Diary] 刷新失败: $e');
     }
     _safeNotify();
+  }
+
+  /// 缓存写盘失败无所谓，不该影响主流程
+  Future<void> _saveCache() async {
+    try {
+      await DiaryCache.writePosts(_posts);
+      await DiaryCache.writeComments(_comments);
+    } catch (e) {
+      debugPrint('[Diary] 写缓存失败（忽略）: $e');
+    }
+  }
+
+  /// 评论拉不到不该把整页拖垮：动态照常显示，只是评论数先当 0
+  Future<List<DiaryComment>> _loadCommentsSafe(DiaryRepository repo) async {
+    try {
+      return await repo.fetchComments(limit: kDiaryCommentLimit);
+    } catch (e) {
+      debugPrint('[Diary] 评论加载失败（忽略）: $e');
+      return _comments;
+    }
+  }
+
+  /// 在某条动态下发一条评论，成功返回 true
+  Future<bool> addComment({
+    required String postId,
+    required String authorName,
+    required bool anonymous,
+    required String content,
+  }) async {
+    final repo = _repo;
+    final text = content.trim();
+    if (repo == null || _sendingComment || text.isEmpty) return false;
+
+    _sendingComment = true;
+    _safeNotify();
+
+    try {
+      final comment = await repo.addComment(
+        postId: postId,
+        authorName: authorName.trim(),
+        anonymous: anonymous,
+        content: text,
+      );
+      _setComments(<DiaryComment>[..._comments, comment]);
+      _error = null;
+      _fromCache = false;
+      await _saveCache();
+      await saveIdentity(
+        nickname: anonymous ? _nickname : authorName,
+        anonymous: anonymous,
+      );
+      return true;
+    } catch (e) {
+      _error = e.toString();
+      debugPrint('[Diary] 评论失败: $e');
+      return false;
+    } finally {
+      _sendingComment = false;
+      _safeNotify();
+    }
   }
 
   /// 发布一条，成功返回 true
@@ -112,6 +246,8 @@ class DiaryProvider extends ChangeNotifier {
       final post = await repo.create(draft);
       _posts = <DiaryPost>[post, ..._posts];
       _error = null;
+      _fromCache = false;
+      await _saveCache();
       await saveIdentity(
         nickname: draft.anonymous ? _nickname : draft.authorName,
         anonymous: draft.anonymous,
@@ -135,6 +271,11 @@ class DiaryProvider extends ChangeNotifier {
     try {
       await repo.remove(post);
       _posts = _posts.where((e) => e.id != post.id).toList(growable: false);
+      // 动态没了，它下面的评论也别留在内存里
+      _setComments(
+        _comments.where((c) => c.postId != post.id).toList(growable: false),
+      );
+      await _saveCache();
       _safeNotify();
       return true;
     } catch (e) {

@@ -18,10 +18,12 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../managers/analytics_manager.dart';
+import '../models/diary_comment.dart';
 import '../models/diary_post.dart';
 
 /// 云端表名 / 存储桶名
 const String kDiaryTable = 'diary_posts';
+const String kDiaryCommentTable = 'diary_comments';
 const String kDiaryBucket = 'diary_images';
 
 /// 一条动态最多几张图
@@ -29,6 +31,14 @@ const int kDiaryMaxImages = 9;
 
 /// 正文最多多少字
 const int kDiaryMaxLength = 500;
+
+/// 一条评论最多多少字
+const int kDiaryCommentMaxLength = 200;
+
+/// 评论是全量加载的：单条很小，几百条也不占什么。
+/// 这样卡片上的评论数可以直接在客户端数出来，
+/// 不用维护反范式计数器、也不用写数据库触发器，永远不会数错。
+const int kDiaryCommentLimit = 400;
 
 abstract class DiaryRepository {
   DiaryRepository({required this.deviceId});
@@ -46,6 +56,17 @@ abstract class DiaryRepository {
   Future<DiaryPost> create(DiaryDraft draft);
 
   Future<void> remove(DiaryPost post);
+
+  /// 拉取评论（全量，按时间正序）
+  Future<List<DiaryComment>> fetchComments({int limit});
+
+  /// 发一条评论
+  Future<DiaryComment> addComment({
+    required String postId,
+    required String authorName,
+    required bool anonymous,
+    required String content,
+  });
 
   /// 探测器：云端能用就用云端，否则本机
   static Future<DiaryRepository> resolve({required String deviceId}) async {
@@ -73,6 +94,7 @@ class LocalDiaryRepository extends DiaryRepository {
   LocalDiaryRepository({required super.deviceId});
 
   static const String _kPostsKey = 'diary_posts_v1';
+  static const String _kCommentsKey = 'diary_comments_v1';
   static const int _kMaxKept = 200;
 
   @override
@@ -144,6 +166,67 @@ class LocalDiaryRepository extends DiaryRepository {
     final prefs = await SharedPreferences.getInstance();
     final payload = posts.map((e) => e.toJson()).toList(growable: false);
     await prefs.setString(_kPostsKey, jsonEncode(payload));
+  }
+
+  // ── 评论 ──────────────────────────────────────────────────────────
+
+  @override
+  Future<List<DiaryComment>> fetchComments({int limit = kDiaryCommentLimit}) async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_kCommentsKey);
+    if (raw == null || raw.isEmpty) return const <DiaryComment>[];
+
+    final comments = <DiaryComment>[];
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is List) {
+        for (final item in decoded) {
+          if (item is Map) {
+            comments.add(DiaryComment.fromJson(Map<String, dynamic>.from(item)));
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('[Diary] 本机评论解析失败: $e');
+    }
+
+    comments.sort((a, b) => a.createdAt.compareTo(b.createdAt));
+    return comments.length > limit
+        ? comments.sublist(comments.length - limit)
+        : comments;
+  }
+
+  @override
+  Future<DiaryComment> addComment({
+    required String postId,
+    required String authorName,
+    required bool anonymous,
+    required String content,
+  }) async {
+    final now = DateTime.now();
+    final comment = DiaryComment(
+      id: now.microsecondsSinceEpoch.toString(),
+      postId: postId,
+      deviceId: deviceId,
+      authorName: authorName,
+      anonymous: anonymous,
+      content: content,
+      createdAt: now,
+    );
+
+    final all = await fetchComments();
+    final next = <DiaryComment>[...all, comment];
+    // 超出上限就丢掉最旧的，别让 prefs 无限膨胀
+    final trimmed = next.length > kDiaryCommentLimit
+        ? next.sublist(next.length - kDiaryCommentLimit)
+        : next;
+
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(
+      _kCommentsKey,
+      jsonEncode(trimmed.map((e) => e.toJson()).toList(growable: false)),
+    );
+    return comment;
   }
 
   /// 相册选出来的是缓存路径，会被系统清掉 —— 必须复制进 App 私有目录
@@ -227,6 +310,42 @@ class SupabaseDiaryRepository extends DiaryRepository {
         .delete()
         .eq('id', post.id)
         .eq('device_id', deviceId);
+  }
+
+  // ── 评论 ──────────────────────────────────────────────────────────
+
+  @override
+  Future<List<DiaryComment>> fetchComments({int limit = kDiaryCommentLimit}) async {
+    final data = await _db
+        .from(kDiaryCommentTable)
+        .select()
+        .order('created_at', ascending: true)
+        .limit(limit);
+    final rows = (data as List).cast<Map<String, dynamic>>();
+    return rows.map(DiaryComment.fromJson).toList(growable: false);
+  }
+
+  @override
+  Future<DiaryComment> addComment({
+    required String postId,
+    required String authorName,
+    required bool anonymous,
+    required String content,
+  }) async {
+    final data = await _db
+        .from(kDiaryCommentTable)
+        .insert(<String, dynamic>{
+          'post_id': postId,
+          'device_id': deviceId,
+          'author_name': authorName,
+          'anonymous': anonymous,
+          'content': content,
+          'created_at': DateTime.now().toUtc().toIso8601String(),
+        })
+        .select()
+        .single();
+
+    return DiaryComment.fromJson(Map<String, dynamic>.from(data as Map));
   }
 
   Future<List<String>> _uploadAll(List<String> sources) async {

@@ -6,7 +6,7 @@ library;
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:encrypt/encrypt.dart' as enc;
-import 'package:bilibili_glass/models/video_model.dart';
+import 'package:suisuinian/models/video_model.dart';
 import '../config/secrets.dart';
 
 // ══════════════════════════════════════════════════════════════════

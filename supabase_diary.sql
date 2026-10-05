@@ -23,6 +23,23 @@ create table if not exists public.diary_posts (
 create index if not exists diary_posts_created_at_idx
   on public.diary_posts (created_at desc);
 
+-- ── 1b. 评论表 ────────────────────────────────────────────────────────
+-- 故意不做 comment_count 反范式计数：评论单条很小，客户端全量拉下来自己数，
+-- 永远和列表一致，也不需要触发器。
+create table if not exists public.diary_comments (
+  id          bigint generated always as identity primary key,
+  post_id     bigint      not null
+              references public.diary_posts (id) on delete cascade,
+  device_id   text        not null,
+  author_name text        not null default '',
+  anonymous   boolean     not null default false,
+  content     text        not null,
+  created_at  timestamptz not null default now()
+);
+
+create index if not exists diary_comments_post_idx
+  on public.diary_comments (post_id, created_at);
+
 -- ── 2. RLS ────────────────────────────────────────────────────────────
 -- 注意：本 App 没有登录体系（「无需注册」正是产品前提），
 -- 所以这里的策略是「人人可读、人人可写、人人可删」。
@@ -43,11 +60,35 @@ create policy diary_posts_insert
 create policy diary_posts_delete
   on public.diary_posts for delete using (true);
 
+-- 评论同样是公开留言板：人人可读、人人可写
+alter table public.diary_comments enable row level security;
+
+drop policy if exists diary_comments_read   on public.diary_comments;
+drop policy if exists diary_comments_insert on public.diary_comments;
+drop policy if exists diary_comments_delete on public.diary_comments;
+
+create policy diary_comments_read
+  on public.diary_comments for select using (true);
+
+create policy diary_comments_insert
+  on public.diary_comments for insert with check (true);
+
+create policy diary_comments_delete
+  on public.diary_comments for delete using (true);
+
 -- ── 3. 实时推送（可选）───────────────────────────────────────────────
 -- 加上之后别人发的新动态会立刻出现。不加也不影响使用。
 do $$
 begin
   alter publication supabase_realtime add table public.diary_posts;
+exception
+  when duplicate_object then null;
+  when undefined_object then null;
+end $$;
+
+do $$
+begin
+  alter publication supabase_realtime add table public.diary_comments;
 exception
   when duplicate_object then null;
   when undefined_object then null;

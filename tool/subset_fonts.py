@@ -44,18 +44,22 @@ except ImportError:  # pragma: no cover
 ROOT = Path(__file__).resolve().parent.parent
 FONT_DIR = ROOT / 'assets' / 'fonts'
 
-# 手写体只服务这些文件；扫描它们的所有字符即可
+# 手写体（和共用它的弹窗）会渲染到的源文件；扫描它们的所有字符即可
 BRUSH_SOURCES = [
     'lib/theme/diary_palette.dart',
     'lib/models/diary_post.dart',
+    'lib/models/diary_comment.dart',
     'lib/providers/diary_provider.dart',
     'lib/repository/diary_repository.dart',
     'lib/screens/diary_screen.dart',
     'lib/screens/diary_compose_sheet.dart',
+    'lib/screens/diary_comments_sheet.dart',
     'lib/widgets/diary_card.dart',
     'lib/widgets/diary_image_viewer.dart',
     'lib/widgets/handwriting_text.dart',
     'lib/widgets/ink_seal.dart',
+    'lib/widgets/spring_sheet.dart',
+    'lib/utils/diary_time.dart',
     # 权限页那张「首页预览」用的也是手写体大字，所以也要扫
     'lib/permission_gate.dart',
 ]

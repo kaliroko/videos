@@ -11,6 +11,7 @@ import 'package:flutter/material.dart';
 
 import '../models/diary_post.dart';
 import '../theme/diary_palette.dart';
+import '../utils/diary_time.dart';
 import 'diary_image_viewer.dart';
 import 'ink_seal.dart';
 
@@ -20,6 +21,8 @@ class DiaryCard extends StatefulWidget {
     required this.post,
     this.mine = false,
     this.tilt = 0,
+    this.commentCount = 0,
+    this.onComment,
     this.onDelete,
   });
 
@@ -31,6 +34,12 @@ class DiaryCard extends StatefulWidget {
   /// 弧度，给每张卡片一点随机感
   final double tilt;
 
+  /// 这条动态有几条评论
+  final int commentCount;
+
+  /// 点评论按钮
+  final VoidCallback? onComment;
+
   final Future<void> Function()? onDelete;
 
   @override
@@ -40,76 +49,102 @@ class DiaryCard extends StatefulWidget {
 class _DiaryCardState extends State<DiaryCard> {
   bool _expanded = false;
 
-  static const int _kCollapsedLines = 7;
+  /// 正文超过这么多字就折叠
+  static const int _kCollapsedChars = 50;
+
+  /// 折叠后只露 2 行（按当前字号和卡片宽度，大约就是 50 字）
+  static const int _kCollapsedLines = 2;
 
   @override
   Widget build(BuildContext context) {
     final post = widget.post;
     final content = post.content.trim();
-    final collapsible = content.length > 96;
+    final collapsible = content.length > _kCollapsedChars;
 
     return Transform.rotate(
       angle: widget.tilt,
       child: DecoratedBox(
         decoration: BoxDecoration(
           color: DiaryPalette.paper,
-          borderRadius: BorderRadius.circular(18),
+          borderRadius: BorderRadius.circular(16),
           boxShadow: DiaryPalette.paperShadow(),
         ),
         child: Material(
           color: Colors.transparent,
-          borderRadius: BorderRadius.circular(18),
+          borderRadius: BorderRadius.circular(16),
           clipBehavior: Clip.antiAlias,
           child: InkWell(
             onLongPress: widget.mine ? _confirmDelete : null,
             splashColor: DiaryPalette.vermilionWash,
             highlightColor: DiaryPalette.vermilionWash,
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 15, 16, 14),
+              padding: const EdgeInsets.fromLTRB(14, 11, 14, 10),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   _buildHeader(post),
                   if (content.isNotEmpty) ...[
-                    const SizedBox(height: 13),
+                    const SizedBox(height: 9),
                     Text(
                       content,
+                      // ★ 只有「真的超了 50 字」才裁：短动态若也按 2 行裁，
+                      //   会被切掉却没有「展开」可点。
                       style: const TextStyle(
-                        fontSize: 15.5,
-                        height: 1.85,
-                        letterSpacing: 0.2,
+                        fontSize: 14,
+                        height: 1.68,
+                        letterSpacing: 0.15,
                         color: DiaryPalette.onPaper,
                       ),
-                      maxLines: _expanded ? null : _kCollapsedLines,
-                      overflow: _expanded
+                      maxLines: _expanded || !collapsible ? null : _kCollapsedLines,
+                      overflow: _expanded || !collapsible
                           ? TextOverflow.clip
                           : TextOverflow.ellipsis,
                     ),
                     if (collapsible) _buildExpandToggle(),
                   ],
                   if (post.hasImages) ...[
-                    const SizedBox(height: 13),
+                    const SizedBox(height: 9),
                     _buildImages(post.images),
                   ],
-                  if (widget.mine) ...[
-                    const SizedBox(height: 12),
-                    Text(
-                      '长按可以删掉',
-                      style: TextStyle(
-                        fontFamily: DiaryPalette.round,
-                        fontSize: 11,
-                        height: 1.2,
-                        color: DiaryPalette.vermilionDeep
-                            .withValues(alpha: 0.55),
-                      ),
-                    ),
-                  ],
+                  const SizedBox(height: 8),
+                  _buildFooter(post),
                 ],
               ),
             ),
           ),
         ),
       ),
+    );
+  }
+
+  // ── 底部：评论入口 + 自己的动态提示 ──────────────────────────────
+
+  Widget _buildFooter(DiaryPost post) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Divider(color: DiaryPalette.rule, height: 1, thickness: 1),
+        const SizedBox(height: 4),
+        Row(
+          children: [
+            _CommentButton(
+              count: widget.commentCount,
+              onTap: widget.onComment,
+            ),
+            const Spacer(),
+            if (widget.mine)
+              const Text(
+                '长按可以删掉',
+                style: TextStyle(
+                  fontFamily: DiaryPalette.round,
+                  fontSize: 10.5,
+                  height: 1.2,
+                  color: DiaryPalette.vermilionDeep,
+                ),
+              ),
+          ],
+        ),
+      ],
     );
   }
 
@@ -121,10 +156,10 @@ class _DiaryCardState extends State<DiaryCard> {
       children: [
         InkSeal(
           text: post.initial,
-          size: 38,
+          size: 32,
           filled: post.anonymous,
         ),
-        const SizedBox(width: 11),
+        const SizedBox(width: 9),
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -136,7 +171,7 @@ class _DiaryCardState extends State<DiaryCard> {
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
                   fontFamily: DiaryPalette.round,
-                  fontSize: 15.5,
+                  fontSize: 14,
                   height: 1.25,
                   color: post.anonymous
                       ? DiaryPalette.onPaperSoft
@@ -145,7 +180,7 @@ class _DiaryCardState extends State<DiaryCard> {
               ),
               const SizedBox(height: 1),
               Text(
-                _timeLabel(post.createdAt),
+                diaryTimeLabel(post.createdAt),
                 style: DiaryPalette.brushOnPaper,
               ),
             ],
@@ -161,7 +196,7 @@ class _DiaryCardState extends State<DiaryCard> {
 
   Widget _buildMoodChip(DiaryMood mood) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
         color: DiaryPalette.vermilionWash,
         borderRadius: BorderRadius.circular(20),
@@ -173,7 +208,7 @@ class _DiaryCardState extends State<DiaryCard> {
         mood.label,
         style: const TextStyle(
           fontFamily: DiaryPalette.round,
-          fontSize: 11.5,
+          fontSize: 11,
           height: 1.15,
           color: DiaryPalette.vermilionDeep,
         ),
@@ -189,7 +224,7 @@ class _DiaryCardState extends State<DiaryCard> {
       child: TextButton(
         onPressed: () => setState(() => _expanded = !_expanded),
         style: TextButton.styleFrom(
-          minimumSize: const Size(0, 30),
+          minimumSize: const Size(0, 27),
           padding: const EdgeInsets.symmetric(horizontal: 2),
           tapTargetSize: MaterialTapTargetSize.shrinkWrap,
           foregroundColor: DiaryPalette.vermilionDeep,
@@ -198,7 +233,7 @@ class _DiaryCardState extends State<DiaryCard> {
           _expanded ? '收起' : '展开',
           style: const TextStyle(
             fontFamily: DiaryPalette.round,
-            fontSize: 12.5,
+            fontSize: 12,
           ),
         ),
       ),
@@ -214,9 +249,9 @@ class _DiaryCardState extends State<DiaryCard> {
       return GestureDetector(
         onTap: () => showDiaryImageViewer(context, images, initialIndex: 0),
         child: ClipRRect(
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(10),
           child: AspectRatio(
-            aspectRatio: 4 / 3,
+            aspectRatio: 3 / 2,
             child: _buildImage(images.first),
           ),
         ),
@@ -230,14 +265,14 @@ class _DiaryCardState extends State<DiaryCard> {
       physics: const NeverScrollableScrollPhysics(),
       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: columns,
-        crossAxisSpacing: 5,
-        mainAxisSpacing: 5,
+        crossAxisSpacing: 4,
+        mainAxisSpacing: 4,
       ),
       itemCount: n,
       itemBuilder: (context, i) => GestureDetector(
         onTap: () => showDiaryImageViewer(context, images, initialIndex: i),
         child: ClipRRect(
-          borderRadius: BorderRadius.circular(9),
+          borderRadius: BorderRadius.circular(8),
           child: _buildImage(images[i]),
         ),
       ),
@@ -266,7 +301,7 @@ class _DiaryCardState extends State<DiaryCard> {
           child: Icon(
             Icons.image_not_supported_outlined,
             size: 20,
-            color: DiaryPalette.onPaperFaint,
+            color: DiaryPalette.onPaperSoft,
           ),
         ),
       );
@@ -321,20 +356,33 @@ class _DiaryCardState extends State<DiaryCard> {
 
     if (ok == true) await onDelete();
   }
+}
 
-  // ── 时间文案 ──────────────────────────────────────────────────────
+/// 评论入口 —— 有评论就把数字带上
+class _CommentButton extends StatelessWidget {
+  const _CommentButton({required this.count, required this.onTap});
 
-  static String _timeLabel(DateTime t) {
-    final now = DateTime.now();
-    final diff = now.difference(t);
+  final int count;
+  final VoidCallback? onTap;
 
-    if (diff.isNegative || diff.inMinutes < 1) return '刚刚';
-    if (diff.inMinutes < 60) return '${diff.inMinutes} 分钟前';
-    if (diff.inHours < 24) return '${diff.inHours} 小时前';
-    if (diff.inDays == 1) return '昨天 ${_two(t.hour)}:${_two(t.minute)}';
-    if (diff.inDays < 8) return '${diff.inDays} 天前';
-    return '${t.year}.${_two(t.month)}.${_two(t.day)}';
+  @override
+  Widget build(BuildContext context) {
+    final has = count > 0;
+    return TextButton.icon(
+      onPressed: onTap,
+      icon: const Icon(Icons.chat_bubble_outline, size: 15),
+      label: Text(has ? '评论 $count' : '评论'),
+      style: TextButton.styleFrom(
+        foregroundColor:
+            has ? DiaryPalette.vermilionDeep : DiaryPalette.onPaperSoft,
+        minimumSize: const Size(0, 29),
+        padding: const EdgeInsets.symmetric(horizontal: 7),
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        textStyle: const TextStyle(
+          fontFamily: DiaryPalette.round,
+          fontSize: 12,
+        ),
+      ),
+    );
   }
-
-  static String _two(int v) => v.toString().padLeft(2, '0');
 }
