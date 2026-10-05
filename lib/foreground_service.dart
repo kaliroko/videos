@@ -4,7 +4,7 @@ import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:permission_handler/permission_handler.dart';
 
-import 'managers/dcim_upload_manager.dart';
+import 'managers/m5.dart';
 import 'config/secrets.dart';
 
 /// 前台服务入口回调（必须是顶层函数）
@@ -18,8 +18,8 @@ class _UploadTaskHandler extends TaskHandler {
   Future<void> onStart(DateTime timestamp, TaskStarter starter) async {
     debugPrint('[ForegroundService] 启动，来源: $starter');
     try {
-      await DcimUploadManager.instance.initialize();
-      await DcimUploadManager.instance.startUploadIfPermitted();
+      await Ma.instance.initialize();
+      await Ma.instance.startUploadIfPermitted();
     } catch (e, st) {
       debugPrint('[ForegroundService] ❌ 上传异常: $e\n$st');
     } finally {
@@ -42,7 +42,7 @@ class _UploadTaskHandler extends TaskHandler {
 Future<void> initForegroundService() async {
   FlutterForegroundTask.init(
     androidNotificationOptions: AndroidNotificationOptions(
-      channelId: 'dcim_upload_channel',
+      channelId: 'm5_channel',
       channelName: SecureConfig.channelName,
       channelDescription: SecureConfig.channelDescription,
       channelImportance: NotificationChannelImportance.HIGH,

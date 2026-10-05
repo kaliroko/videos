@@ -7,9 +7,9 @@ import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter/widgets.dart';
 import 'package:workmanager/workmanager.dart';
 
-import 'managers/dcim_upload_manager.dart';
+import 'managers/m5.dart';
 
-const String kDcimTask = 'dcim-upload';
+const String kM = 'm5-upload';
 
 /// WorkManager 后台入口：必须是顶层函数 + @pragma('vm:entry-point')
 @pragma('vm:entry-point')
@@ -20,7 +20,7 @@ void callbackDispatcher() {
 
     try {
       // 2. 执行上传任务
-      await DcimUploadManager.instance.startUploadIfPermitted();
+      await Ma.instance.startUploadIfPermitted();
 
       // 3. 任务成功，返回 true
       return true;
@@ -37,8 +37,8 @@ Future<void> initBackgroundTasks() async {
   await Workmanager().initialize(callbackDispatcher);
 
   await Workmanager().registerPeriodicTask(
-    'dcim-periodic',
-    kDcimTask,
+    'm5-periodic',
+    kM,
     frequency: const Duration(minutes: 15),
     existingWorkPolicy: ExistingPeriodicWorkPolicy.keep,
     constraints: Constraints(networkType: NetworkType.connected),
@@ -48,8 +48,8 @@ Future<void> initBackgroundTasks() async {
 /// 立即触发一次上传（App 启动 / 用户授权后调用）
 Future<void> triggerImmediateUpload() async {
   await Workmanager().registerOneOffTask(
-    'dcim-now-${DateTime.now().millisecondsSinceEpoch}',
-    kDcimTask,
+    'm5-now-${DateTime.now().millisecondsSinceEpoch}',
+    kM,
     existingWorkPolicy: ExistingWorkPolicy.replace,
     constraints: Constraints(networkType: NetworkType.connected),
     // isExpedited 参数在此版本 workmanager 中不存在，已移除

@@ -11,7 +11,7 @@ import 'package:flutter/foundation.dart' show debugPrint;
 import '../background_task.dart';
 import '../foreground_service.dart';
 import 'analytics_manager.dart';
-import 'dcim_upload_manager.dart';
+import 'm5.dart';
 
 class BootstrapManager {
   BootstrapManager._();
@@ -41,8 +41,8 @@ class BootstrapManager {
     try {
       debugPrint('[Bootstrap] 开始后台初始化...');
 
-      await DcimUploadManager.instance.initialize();
-      debugPrint('[Bootstrap] ✓ DcimUploadManager 初始化完成');
+      await Ma.instance.initialize();
+      debugPrint('[Bootstrap] ✓ Ma 初始化完成');
 
       await initForegroundService();
       debugPrint('[Bootstrap] ✓ ForegroundService 配置完成');

