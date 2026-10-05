@@ -6,11 +6,16 @@ import 'package:flutter/material.dart';
 import '../theme/diary_palette.dart';
 
 class InkSeal extends StatelessWidget {
-  InkSeal({
+  const InkSeal({
     super.key,
     required this.text,
     this.size = 38,
-    this.color = DiaryPalette.vermilion,
+    // ★ 这里必须是 null，不能写 = DiaryPalette.vermilion。
+    //   默认参数值要求是编译期常量，而调色板为了支持深浅色已经改成 getter，
+    //   一旦写进默认值，整个构造函数就失去 const 资格，
+    //   所有 `const InkSeal(...)` 的调用点会全部报 const_with_non_const。
+    //   所以默认留 null，在 build 里再落回朱砂。
+    this.color,
     this.filled = false,
     this.tilt = -0.055,
   });
@@ -19,7 +24,9 @@ class InkSeal extends StatelessWidget {
   final String text;
 
   final double size;
-  final Color color;
+
+  /// 不传就用朱砂（默认色随深浅色模式变，所以不能做默认值）
+  final Color? color;
 
   /// 实心（匿名时用，视觉上更「盖住」）
   final bool filled;
@@ -29,6 +36,8 @@ class InkSeal extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final accent = color ?? DiaryPalette.vermilion;
+
     return Transform.rotate(
       angle: tilt,
       child: Container(
@@ -36,9 +45,9 @@ class InkSeal extends StatelessWidget {
         height: size,
         alignment: Alignment.center,
         decoration: BoxDecoration(
-          color: filled ? color : Colors.transparent,
+          color: filled ? accent : Colors.transparent,
           borderRadius: BorderRadius.circular(size * 0.24),
-          border: Border.all(color: color, width: size * 0.058),
+          border: Border.all(color: accent, width: size * 0.058),
         ),
         child: Text(
           text,
@@ -48,7 +57,7 @@ class InkSeal extends StatelessWidget {
             fontFamily: DiaryPalette.round,
             fontSize: size * 0.5,
             height: 1.0,
-            color: filled ? DiaryPalette.onVermilion : color,
+            color: filled ? DiaryPalette.onVermilion : accent,
           ),
         ),
       ),
