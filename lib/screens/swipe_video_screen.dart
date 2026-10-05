@@ -227,7 +227,7 @@ class _SwipeVideoScreenState extends State<SwipeVideoScreen> {
       Uri.parse(video.url),
       httpHeaders: {
         'User-Agent': 'Mozilla/5.0 (Linux; Android 13)',
-        'Referer': 'https://www.kuaishou.com/',
+        'Referer': 'https://example.com/',
       },
     );
     _players[index] = player;
