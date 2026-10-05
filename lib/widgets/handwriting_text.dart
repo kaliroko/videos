@@ -10,7 +10,6 @@ library;
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show TextSelection;
 
 /// 逐字书写的文字。
 ///

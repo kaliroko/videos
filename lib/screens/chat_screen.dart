@@ -2266,10 +2266,12 @@ class _Bubble extends StatelessWidget {
             ? Colors.black.withValues(alpha: 0.10)
             : Colors.white.withValues(alpha: 0.06),
         borderRadius: BorderRadius.circular(9),
-        border: BorderSide(
-          color: isMine ? DiaryPalette.vermilionDeep : _kAccent,
-          width: 3,
-        ).toBorder(left: true),
+        border: Border(
+          left: BorderSide(
+            color: isMine ? DiaryPalette.vermilionDeep : _kAccent,
+            width: 3,
+          ),
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -2404,7 +2406,7 @@ class _Bubble extends StatelessWidget {
             color: isMine ? Colors.black.withValues(alpha: 0.08) : Colors.white.withValues(alpha: 0.14),
             shape: BoxShape.circle,
           ),
-          child: const Icon(
+          child: Icon(
             Icons.insert_drive_file_outlined,
             color: isMine ? _kMyText : _kOtherText,
             size: 20,
@@ -2420,7 +2422,7 @@ class _Bubble extends StatelessWidget {
                 msg.fileName ?? '文件',
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
+                style: TextStyle(
                   color: isMine ? _kMyText : _kOtherText,
                   fontSize: 14,
                   fontWeight: FontWeight.w500,

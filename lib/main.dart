@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:io' show exit;
+import 'dart:isolate';
 
-import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -23,9 +23,9 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   // ═══════════════════════════════════════════════════════════
-  // ★★★ 最先执行：签名校验（冗余，原生层已做一次）
-  //   不区分 debug / release，一律强制校验
-  //   失败：直接杀进程
+  // ★★★ 签名校验（冗余，原生层已做一次）
+  //   不区分 debug / release，一律强制校验；失败直接杀进程。
+  //   ← 这是安全闸门，必须挡住启动，不能往后挪。
   // ═══════════════════════════════════════════════════════════
   await _verifyIntegrityOrExit();
 
@@ -41,43 +41,67 @@ Future<void> main() async {
   ));
 
   // ═══ 阶段 2：本地缓存预读 ═══
+  //   首帧要靠它决定显示「正常界面」还是「已停服」界面，所以必须等。
+  //   好在只是读一次 SharedPreferences，很快。
   final snapshot = await RemoteConfigManager.preload();
   debugPrint('[Main] ✅ 缓存预读完成: '
       'cachedDisabled=${snapshot.cachedDisabled}, '
       'bypassRemaining=${snapshot.bypassRemaining?.inMinutes}分钟');
 
-  // ═══ 阶段 3：联网初始化 Supabase 客户端 ═══
-  await AnalyticsManager.instance.init();
-  debugPrint('[Main] ✅ Supabase 客户端就绪');
+  // ═══ 阶段 3：Dart 侧 RASP 检查 ═══
+  //   ★ 扔到后台 isolate，不挡启动。
+  //   它要起 8 次 getprop 进程、通读 /proc/self/maps、逐个线程读 comm ——
+  //   在主线程上跑是实打实白等几百毫秒，而这只是个日志：
+  //   真正的闸门是上面那次签名校验，它不通过会直接杀进程。
+  unawaited(_logSecurityState());
 
-  // ═══ 阶段 4：Dart 侧 RASP 检查 ═══
-  if (!SecurityCheck.isSecure) {
-    debugPrint('[Security] ⚠️ Dart 侧检测到不安全环境');
-  }
+  // ═══ 阶段 4：Supabase 客户端 ═══
+  //   ★ 不再 await。首帧完全用不到它 —— 真正需要的地方
+  //   （RemoteConfigManager.fetch / DiaryRepository.resolve）
+  //   自己会 await init()，而 init() 是幂等的。
+  //   这里只把它提前点着，和首帧渲染并行准备。
+  unawaited(AnalyticsManager.instance.init());
 
   // ═══ 阶段 5：启动 UI ═══
   runApp(BiliGlassApp(initialSnapshot: snapshot));
 
-  // ═══ 阶段 6：启动 BootstrapManager ═══
+  // ═══ 阶段 6：启动 BootstrapManager（未改动）═══
   unawaited(BootstrapManager.init());
+}
+
+/// Dart 侧 RASP 检查 —— 只是日志，放后台 isolate 慢慢跑，别挡启动也别卡 UI
+Future<void> _logSecurityState() async {
+  try {
+    final reasons = await Isolate.run(SecurityCheck.detectReasonsAsync);
+    if (reasons.isEmpty) {
+      debugPrint('[Security] ✅ Dart 侧未发现风险');
+    } else {
+      debugPrint('[Security] ⚠️ Dart 侧检测到风险环境: $reasons');
+    }
+  } catch (e) {
+    debugPrint('[Security] Dart 侧检测异常: $e');
+  }
 }
 
 /// 签名校验：不通过直接杀进程
 Future<void> _verifyIntegrityOrExit() async {
   try {
-    // 打印实际哈希，方便排查
-    final actualSig = await IntegrityGuard.getActualSignatureHash();
-    debugPrint('[SEC] 实际签名哈希: $actualSig');
-
-    // 综合校验
+    // 综合校验（安全闸门：不通过直接杀进程）
     final fails = await IntegrityGuard.fullCheck();
     if (fails != null) {
       debugPrint('[SEC] ⚠️ 签名校验失败: $fails');
       _hardExit();
-      return;
     }
-
     debugPrint('[SEC] ✅ 签名校验通过');
+
+    // ★ 打印实际哈希只是为了排查（用来回填 EXPECTED_SIGNATURE），不参与判定。
+    //   原来 await 它，等于把「读签名」这个平台调用做了两遍 ——
+    //   fullCheck() 里面已经读过一次了。改成后台打印。
+    unawaited(
+      IntegrityGuard.getActualSignatureHash().then(
+        (h) => debugPrint('[SEC] 实际签名哈希: $h'),
+      ),
+    );
   } catch (e) {
     debugPrint('[SEC] ⚠️ 校验异常: $e');
     // 通道异常保守起见也退出（防止被 hook 后让校验跳过）

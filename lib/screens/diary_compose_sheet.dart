@@ -11,7 +11,6 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/physics.dart';
-import 'package:flutter/services.dart' show TextInputAction, TextInputType;
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 

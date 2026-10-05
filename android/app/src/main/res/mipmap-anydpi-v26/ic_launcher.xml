@@ -1,6 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  自适应图标（Android 8+）。圆角/圆形由**启动器遮罩**决定 —— 各家启动器
+  默认就是圆角方形，所以不用自己画圆角。
+
+  ★ 这里故意不写 <monochrome>：monochrome 是给 Android 13 主题化图标用的，
+    它会把图形当成纯色剪影来染。我们的前景是一张彩色照片，硬套只会变成
+    一个实心色块，所以关掉。
+
+  图标由 tool/generate_icons.py 生成，换图请改 tool/icon_source.png 后重跑脚本。
+-->
 <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
     <background android:drawable="@mipmap/ic_launcher_background"/>
     <foreground android:drawable="@mipmap/ic_launcher_foreground"/>
-    <monochrome android:drawable="@mipmap/ic_launcher_foreground"/>
 </adaptive-icon>

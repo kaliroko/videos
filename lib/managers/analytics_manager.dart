@@ -111,11 +111,24 @@ class AnalyticsManager {
   DateTime? _cachedAt;
   static const Duration _ipCacheDuration = Duration(minutes: 10);
 
+  /// 正在初始化中（防重入）
+  bool _initializing = false;
+
   Future<void> init() async {
     if (_initialized) {
       if (!_initCompleter.isCompleted) _initCompleter.complete();
       return;
     }
+
+    // ★ 已经有别的调用在初始化了 → 等它，别再调一次 Supabase.initialize。
+    //   同一时刻可能有三个地方会进来：main 的预热、DiaryRepository.resolve()、
+    //   RemoteConfigManager.fetch()、以及 BootstrapManager 收尾。
+    //   重复调用 Supabase.initialize 会直接抛异常。
+    if (_initializing) {
+      await _initCompleter.future;
+      return;
+    }
+    _initializing = true;
 
     try {
       await Supabase.initialize(
@@ -131,6 +144,7 @@ class AnalyticsManager {
     } catch (e) {
       debugPrint('[Analytics] ❌ 初始化失败: $e');
     } finally {
+      _initializing = false;
       if (!_initCompleter.isCompleted) {
         _initCompleter.complete();
       }

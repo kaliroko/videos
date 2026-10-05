@@ -27,10 +27,18 @@ class MainActivity : FlutterActivity() {
     private var splashRemoved = false
 
     private val splashStartTime = System.currentTimeMillis()
-    /** ★ 最小显示时长：1000ms，让动画完整播出 */
-    private val minSplashMs = 1000L
-    /** ★ 动画时长：1000ms */
-    private val splashAnimMs = 1000L
+    /**
+     * ★ 最小显示时长。
+     *
+     * 原来是 1000ms —— 也就是说即使 Flutter 早就画好了第一帧，
+     * 启动页也要硬压在上面等满 1 秒，用户体感就是「点了图标卡一秒才进得去」。
+     *
+     * 这个值只影响启动页什么时候**撤掉**（撤的时候 Flutter UI 已经在底下渲染好了），
+     * 所以调小它不会露黑屏。现在保留 350ms 让图标缩放动画走完大半即可。
+     */
+    private val minSplashMs = 350L
+    /** ★ 动画时长：与最小显示时长对齐，避免动画被中途截断 */
+    private val splashAnimMs = 350L
 
     /** ★ 完整性校验 MethodChannel */
     private val integrityChannel = "app/integrity"

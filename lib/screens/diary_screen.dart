@@ -237,10 +237,10 @@ class _DiaryScreenState extends State<DiaryScreen> {
               lines: _kWhispers,
               style: DiaryPalette.brushLine,
               loop: true,
-              charDuration: const Duration(milliseconds: 135),
-              holdDuration: const Duration(milliseconds: 2100),
-              fadeDuration: const Duration(milliseconds: 460),
-              gapDuration: const Duration(milliseconds: 300),
+              charDuration: Duration(milliseconds: 135),
+              holdDuration: Duration(milliseconds: 2100),
+              fadeDuration: Duration(milliseconds: 460),
+              gapDuration: Duration(milliseconds: 300),
               startDelay: Duration(milliseconds: 150),
               penColor: DiaryPalette.vermilion,
             ),
@@ -422,12 +422,13 @@ class _DelayedFade extends StatefulWidget {
   const _DelayedFade({
     required this.child,
     this.delay = Duration.zero,
-    this.slide = 8,
   });
 
   final Widget child;
   final Duration delay;
-  final double slide;
+
+  /// 上移距离。目前没有调用方需要改它，先收成内部常量
+  static const double _kSlide = 8;
 
   @override
   State<_DelayedFade> createState() => _DelayedFadeState();
@@ -464,7 +465,7 @@ class _DelayedFadeState extends State<_DelayedFade>
       builder: (context, child) => Opacity(
         opacity: _curved.value,
         child: Transform.translate(
-          offset: Offset(0, (1 - _curved.value) * widget.slide),
+          offset: Offset(0, (1 - _curved.value) * _DelayedFade._kSlide),
           child: child,
         ),
       ),
@@ -475,10 +476,11 @@ class _DelayedFadeState extends State<_DelayedFade>
 
 /// 朱砂一笔 —— 手绘感的短线，会自己画出来
 class _BrushStroke extends StatefulWidget {
-  const _BrushStroke({this.width = 74, this.height = 9});
+  const _BrushStroke();
 
-  final double width;
-  final double height;
+  /// 笔画尺寸。没有调用方需要改，先收成内部常量
+  static const double _kW = 74;
+  static const double _kH = 9;
 
   @override
   State<_BrushStroke> createState() => _BrushStrokeState();
@@ -508,8 +510,8 @@ class _BrushStrokeState extends State<_BrushStroke>
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      width: widget.width,
-      height: widget.height,
+      width: _BrushStroke._kW,
+      height: _BrushStroke._kH,
       child: CustomPaint(
         painter: _BrushStrokePainter(progress: _ctrl),
       ),

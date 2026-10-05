@@ -6,7 +6,6 @@ library;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/physics.dart';
-import 'package:flutter/services.dart' show TextInputType;
 import 'package:provider/provider.dart';
 
 import '../models/diary_comment.dart';
