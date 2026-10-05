@@ -221,4 +221,158 @@ class AppTheme {
       labelSmall: TextStyle(fontSize: 11, fontWeight: FontWeight.w500, letterSpacing: 0.5),
     ),
   );
+
+  // ══════════════════════════════════════════════════════════════════
+  // 浅色模式
+  // ══════════════════════════════════════════════════════════════════
+
+  /// 浅色背景 —— 偏暖的白，和碎碎念的「纸」是一路的
+  static const Color lightBackgroundColor = Color(0xFFF5F1E8);
+  /// 浅色表面
+  static const Color lightSurfaceColor = Color(0xFFEDE7DA);
+  /// 浅色卡片
+  static const Color lightCardColor = Color(0xFFFFFDF8);
+  /// 浅色下的正文 / 次要 / 弱化文字
+  static const Color lightTextPrimary = Color(0xFF23201C);
+  static const Color lightTextSecondary = Color(0xB323201C);
+  static const Color lightTextTertiary = Color(0x8A23201C);
+
+  /// 浅色主题。深色那套是纯黑打底，这套是暖白打底，色相保持一致。
+  static final ThemeData lightTheme = ThemeData(
+    useMaterial3: true,
+    brightness: Brightness.light,
+    scaffoldBackgroundColor: lightBackgroundColor,
+
+    colorScheme: ColorScheme.fromSeed(
+      seedColor: primaryColor,
+      brightness: Brightness.light,
+    ),
+
+    materialTapTargetSize: MaterialTapTargetSize.padded,
+    visualDensity: VisualDensity.adaptivePlatformDensity,
+
+    appBarTheme: const AppBarTheme(
+      backgroundColor: Colors.transparent,
+      foregroundColor: lightTextPrimary,
+      elevation: 0,
+      centerTitle: false,
+    ),
+
+    bottomAppBarTheme: const BottomAppBarThemeData(
+      color: Colors.transparent,
+      elevation: 0,
+      padding: EdgeInsets.zero,
+    ),
+
+    floatingActionButtonTheme: const FloatingActionButtonThemeData(
+      backgroundColor: accentColor,
+      foregroundColor: Colors.white,
+      elevation: 4,
+      focusElevation: 6,
+      hoverElevation: 6,
+    ),
+
+    filledButtonTheme: FilledButtonThemeData(
+      style: FilledButton.styleFrom(
+        backgroundColor: primaryColor,
+        foregroundColor: Colors.white,
+        elevation: 2,
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+        textStyle: const TextStyle(
+          fontSize: 14, fontWeight: FontWeight.w600, letterSpacing: 0.1,
+        ),
+      ),
+    ),
+
+    textButtonTheme: TextButtonThemeData(
+      style: TextButton.styleFrom(
+        foregroundColor: primaryColor,
+        textStyle: const TextStyle(
+          fontSize: 14, fontWeight: FontWeight.w600, letterSpacing: 0.1,
+        ),
+      ),
+    ),
+
+    outlinedButtonTheme: OutlinedButtonThemeData(
+      style: OutlinedButton.styleFrom(
+        foregroundColor: lightTextPrimary,
+        side: const BorderSide(color: Color(0x3323201C), width: 1),
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+        textStyle: const TextStyle(
+          fontSize: 14, fontWeight: FontWeight.w600, letterSpacing: 0.1,
+        ),
+      ),
+    ),
+
+    iconButtonTheme: IconButtonThemeData(
+      style: IconButton.styleFrom(
+        backgroundColor: lightSurfaceColor,
+        foregroundColor: lightTextPrimary,
+        minimumSize: const Size(40, 40),
+        padding: const EdgeInsets.all(12),
+      ),
+    ),
+
+    dividerTheme: const DividerThemeData(
+      color: Color(0x1A23201C),
+      thickness: 1,
+      space: 1,
+    ),
+
+    cardTheme: CardThemeData(
+      color: lightCardColor,
+      elevation: 0,
+      surfaceTintColor: Colors.transparent,
+      shadowColor: Colors.transparent,
+      clipBehavior: Clip.antiAlias,
+      margin: EdgeInsets.zero,
+    ),
+
+    dialogTheme: const DialogThemeData(
+      backgroundColor: lightCardColor,
+      surfaceTintColor: Colors.transparent,
+    ),
+
+    snackBarTheme: const SnackBarThemeData(
+      backgroundColor: Color(0xFF332F28),
+      contentTextStyle: TextStyle(color: Color(0xFFF6F2E9), fontSize: 14),
+    ),
+
+    inputDecorationTheme: InputDecorationTheme(
+      filled: true,
+      fillColor: lightSurfaceColor,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: const BorderSide(color: Color(0x1A23201C), width: 1),
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: const BorderSide(color: Color(0x1A23201C), width: 1),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: const BorderSide(color: primaryColor, width: 1.5),
+      ),
+      hintStyle: const TextStyle(color: lightTextTertiary, fontSize: 14),
+    ),
+
+    textTheme: const TextTheme(
+      displayLarge: TextStyle(fontSize: 57, fontWeight: FontWeight.w400, height: 1.12, letterSpacing: -0.25, color: lightTextPrimary),
+      displayMedium: TextStyle(fontSize: 45, fontWeight: FontWeight.w400, height: 1.16, color: lightTextPrimary),
+      displaySmall: TextStyle(fontSize: 36, fontWeight: FontWeight.w400, height: 1.22, color: lightTextPrimary),
+      headlineLarge: TextStyle(fontSize: 32, fontWeight: FontWeight.w400, height: 1.25, color: lightTextPrimary),
+      headlineMedium: TextStyle(fontSize: 28, fontWeight: FontWeight.w400, height: 1.29, color: lightTextPrimary),
+      headlineSmall: TextStyle(fontSize: 24, fontWeight: FontWeight.w400, height: 1.33, color: lightTextPrimary),
+      titleLarge: TextStyle(fontSize: 22, fontWeight: FontWeight.w500, height: 1.27, color: lightTextPrimary),
+      titleMedium: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, height: 1.50, color: lightTextPrimary),
+      titleSmall: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, height: 1.43, color: lightTextPrimary),
+      bodyLarge: TextStyle(fontSize: 16, fontWeight: FontWeight.w400, height: 1.50, color: lightTextPrimary),
+      bodyMedium: TextStyle(fontSize: 14, fontWeight: FontWeight.w400, height: 1.43, color: lightTextPrimary),
+      bodySmall: TextStyle(fontSize: 12, fontWeight: FontWeight.w400, height: 1.67, color: lightTextTertiary),
+      labelLarge: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, letterSpacing: 0.1, color: lightTextPrimary),
+      labelMedium: TextStyle(fontSize: 12, fontWeight: FontWeight.w500, letterSpacing: 0.5, color: lightTextSecondary),
+      labelSmall: TextStyle(fontSize: 11, fontWeight: FontWeight.w500, letterSpacing: 0.5, color: lightTextSecondary),
+    ),
+  );
 }

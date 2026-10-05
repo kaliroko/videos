@@ -29,7 +29,7 @@ Future<void> showDiaryCommentsSheet(
     maxHeightFactor: 0.86,
     // ★ 标题用圆体：毛笔体是裁剪过的子集，没有「评」「论」这两个字，
     //   用毛笔体会回退成系统字体。圆体是完整字库，随便写。
-    header: const SpringSheetHeader(
+    header: SpringSheetHeader(
       title: '评论',
       sealText: '评',
       titleStyle: TextStyle(
@@ -134,7 +134,7 @@ class _CommentRow extends StatelessWidget {
                         color: DiaryPalette.vermilionWash,
                         borderRadius: BorderRadius.circular(20),
                       ),
-                      child: const Text(
+                      child: Text(
                         '我',
                         style: TextStyle(
                           fontFamily: DiaryPalette.round,
@@ -155,7 +155,7 @@ class _CommentRow extends StatelessWidget {
               const SizedBox(height: 4),
               Text(
                 comment.content,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 14.5,
                   height: 1.7,
                   color: DiaryPalette.onPaper,
@@ -174,7 +174,7 @@ class _EmptyComments extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const Padding(
+    return Padding(
       padding: EdgeInsets.symmetric(vertical: 46),
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -268,7 +268,7 @@ class _CommentComposerState extends State<_CommentComposer> {
     } else {
       ScaffoldMessenger.maybeOf(context)?.showSnackBar(
         SnackBar(
-          content: const Text(
+          content: Text(
             '没发出去，再试一次',
             style: TextStyle(
               fontFamily: DiaryPalette.round,
@@ -312,7 +312,7 @@ class _CommentComposerState extends State<_CommentComposer> {
                   : '以「${widget.initialName.trim().isEmpty ? kAnonymousName : widget.initialName.trim()}」的身份评论',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
+              style: TextStyle(
                 fontFamily: DiaryPalette.round,
                 fontSize: 11.5,
                 height: 1.3,
@@ -333,7 +333,7 @@ class _CommentComposerState extends State<_CommentComposer> {
                   maxLines: 4,
                   maxLength: kDiaryCommentMaxLength,
                   keyboardType: TextInputType.multiline,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 14.5,
                     height: 1.6,
                     color: DiaryPalette.onPaper,
@@ -343,7 +343,7 @@ class _CommentComposerState extends State<_CommentComposer> {
                     isDense: true,
                     counterText: '',
                     hintText: '说点什么…',
-                    hintStyle: const TextStyle(
+                    hintStyle: TextStyle(
                       fontSize: 14.5,
                       color: DiaryPalette.onPaperFaint,
                     ),
@@ -444,7 +444,7 @@ class _SpringSendButtonState extends State<_SpringSendButton>
             shape: BoxShape.circle,
           ),
           child: widget.busy
-              ? const SizedBox(
+              ? SizedBox(
                   width: 16,
                   height: 16,
                   child: CircularProgressIndicator(
@@ -452,7 +452,7 @@ class _SpringSendButtonState extends State<_SpringSendButton>
                     color: DiaryPalette.onVermilion,
                   ),
                 )
-              : const Icon(
+              : Icon(
                   Icons.arrow_upward_rounded,
                   size: 20,
                   color: DiaryPalette.onVermilion,

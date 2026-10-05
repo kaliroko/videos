@@ -203,7 +203,7 @@ class _SpringSheetState extends State<SpringSheet>
   Widget _buildCard(double maxHeight) {
     return Container(
       constraints: BoxConstraints(maxHeight: maxHeight),
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         color: DiaryPalette.paper,
         borderRadius: BorderRadius.vertical(top: Radius.circular(26)),
       ),
@@ -324,7 +324,7 @@ class SpringSheetHeader extends StatelessWidget {
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: titleStyle ??
-                const TextStyle(
+                TextStyle(
                   fontFamily: DiaryPalette.brush,
                   fontSize: 25,
                   height: 1.2,

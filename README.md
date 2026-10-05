@@ -10,7 +10,7 @@
 
 | 模块 | 说明 |
 |---|---|
-| **碎碎念**（首页） | 日记动态流。无需注册，昵称可自定义或匿名，最多 9 张配图，心情标签，**可评论**，可删除自己发的 |
+| **碎碎念**（首页） | 日记动态流。无需注册，昵称可自定义或匿名，**有主标题**，最多 9 张配图，心情标签，非匿名时可选**地区**，**4 个表情反应**（类似点赞），**可评论**，可删除自己发的 |
 | **视频** | 上下滑动切换的竖屏视频流，多播放器预加载 + 进度记忆 |
 | **聊天室** | 匿名公共聊天，MD3 界面 + 弹簧动画，支持图片、文件、表情、回复、撤回 |
 | **运营控制** | 远程公告 / 远程停服，基于 Supabase Realtime + 60 秒轮询兜底 |
@@ -43,6 +43,18 @@ GitHub Actions 在推送 `main`/`master` 时自动构建 APK 并发布 Release�
 
 > CI 只跑 `flutter pub get` 和 `flutter build apk`，**不依赖任何外网下载**（字体等资源都在仓库里）。
 
+## 深色 / 浅色
+
+跟系统走：`MaterialApp` 同时装了 `theme`（浅）和 `darkTheme`（深），
+`themeMode: ThemeMode.system`，系统切换时 App 自动跟着变。
+
+碎碎念和聊天室用的是自己那套「墨 · 朱 · 纸」调色板（`lib/theme/diary_palette.dart`），
+它没有走标准的 `ThemeExtension`，而是「静态当前模式 + getter」：
+
+- 成员名和调用点一个都不用改（这些颜色被 197 处引用，大量嵌在 `const` 构造里）
+- `MaterialApp.builder` 里每帧调一次 `DiaryPalette.syncWith(brightness)` 同步模式
+- 代价是它不是响应式的「每 Widget 取色」，全局同一时刻只有一个模式 —— 对本 App 够用
+
 ## 字体
 
 界面用了两款开源中文字体，已随包打进 APK，运行时不会下载。详见 [`assets/fonts/README.md`](assets/fonts/README.md)。
@@ -53,8 +65,8 @@ GitHub Actions 在推送 `main`/`master` 时自动构建 APK 并发布 Release�
 `lib/repository/diary_repository.dart` 有两条路：
 
 - **本机模式**：动态存在 `SharedPreferences`，图片复制进 App 私有目录。开箱即用，但只在这台手机上。
-- **云端模式**：动态进 Supabase 的 `diary_posts` 表、评论进 `diary_comments` 表，
-  图片进 `diary_images` 桶，所有人可见。
+- **云端模式**：动态进 Supabase 的 `diary_posts` 表、评论进 `diary_comments` 表、
+  表情反应进 `diary_reactions` 表，图片进 `diary_images` 桶，所有人可见。
 
 App 启动时会探测一次云端，探测失败就安静退回本机模式，不影响使用。
 要把云端打开，到 Supabase 后台执行一次 [`supabase_diary.sql`](supabase_diary.sql) 即可，不用改代码。

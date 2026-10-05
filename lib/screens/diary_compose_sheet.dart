@@ -76,11 +76,16 @@ class _DiaryComposeSheetState extends State<DiaryComposeSheet>
   late final AnimationController _drag;
 
   final TextEditingController _nameCtrl = TextEditingController();
+  final TextEditingController _titleCtrl = TextEditingController();
   final TextEditingController _bodyCtrl = TextEditingController();
 
   final List<String> _images = <String>[];
 
   DiaryMood _mood = DiaryMood.none;
+
+  /// 选中的地区。空串 = 不显示
+  String _location = '';
+
   bool _anonymous = false;
   bool _closing = false;
   bool _busy = false;
@@ -102,6 +107,7 @@ class _DiaryComposeSheetState extends State<DiaryComposeSheet>
     _enter.dispose();
     _drag.dispose();
     _nameCtrl.dispose();
+    _titleCtrl.dispose();
     _bodyCtrl.dispose();
     super.dispose();
   }
@@ -159,6 +165,9 @@ class _DiaryComposeSheetState extends State<DiaryComposeSheet>
       DiaryDraft(
         authorName: _nameCtrl.text.trim(),
         anonymous: _anonymous,
+        title: _titleCtrl.text.trim(),
+        // 双保险：匿名时一定传空
+        location: _anonymous ? '' : _location,
         content: body,
         images: List<String>.from(_images),
         mood: _mood,
@@ -205,7 +214,7 @@ class _DiaryComposeSheetState extends State<DiaryComposeSheet>
       SnackBar(
         content: Text(
           message,
-          style: const TextStyle(
+          style: TextStyle(
             fontFamily: DiaryPalette.round,
             fontSize: 13.5,
             color: DiaryPalette.onInk,
@@ -289,7 +298,7 @@ class _DiaryComposeSheetState extends State<DiaryComposeSheet>
   Widget _buildCard(BuildContext context, double maxHeight) {
     return Container(
       constraints: BoxConstraints(maxHeight: maxHeight),
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         color: DiaryPalette.paper,
         borderRadius: BorderRadius.vertical(top: Radius.circular(26)),
       ),
@@ -311,7 +320,17 @@ class _DiaryComposeSheetState extends State<DiaryComposeSheet>
                     _buildTitleRow(),
                     const SizedBox(height: 16),
                     _buildIdentityRow(),
+                    // 地区只在非匿名时出现。
+                    // ★ 切到匿名后 _location 会留着不清（下次切回来还能用），
+                    //   但 _publish() 里有一道 `_anonymous ? '' : _location` 的
+                    //   兜底，所以匿名发布绝不会把地区带出去。
+                    if (!_anonymous) ...[
+                      const SizedBox(height: 14),
+                      _buildLocationRow(),
+                    ],
                     const SizedBox(height: 14),
+                    _buildTitleField(),
+                    const SizedBox(height: 10),
                     _buildBodyField(),
                     const SizedBox(height: 16),
                     _buildMoodRow(),
@@ -356,7 +375,7 @@ class _DiaryComposeSheetState extends State<DiaryComposeSheet>
       children: [
         const InkSeal(text: '记', size: 32, filled: true),
         const SizedBox(width: 10),
-        const Expanded(
+        Expanded(
           child: Text(
             '写点什么',
             style: TextStyle(
@@ -405,7 +424,7 @@ class _DiaryComposeSheetState extends State<DiaryComposeSheet>
                   isDense: true,
                   counterText: '',
                   hintText: '留个名字',
-                  hintStyle: const TextStyle(
+                  hintStyle: TextStyle(
                     fontFamily: DiaryPalette.round,
                     fontSize: 15,
                     color: DiaryPalette.onPaperFaint,
@@ -432,7 +451,7 @@ class _DiaryComposeSheetState extends State<DiaryComposeSheet>
                   onChanged: _closing
                       ? null
                       : (v) => setState(() => _anonymous = v),
-                  thumbColor: const WidgetStatePropertyAll(
+                  thumbColor: WidgetStatePropertyAll(
                     DiaryPalette.onVermilion,
                   ),
                   trackColor: WidgetStateProperty.resolveWith((states) {
@@ -459,11 +478,112 @@ class _DiaryComposeSheetState extends State<DiaryComposeSheet>
         const SizedBox(height: 6),
         Text(
           _anonymous ? '谁也不知道是谁写的' : '不填名字也会显示「匿名」',
-          style: const TextStyle(
+          style: TextStyle(
             fontFamily: DiaryPalette.round,
             fontSize: 11.5,
             height: 1.3,
             color: DiaryPalette.onPaperFaint,
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// 主标题 —— 单行，可以留空
+  Widget _buildTitleField() {
+    return TextField(
+      controller: _titleCtrl,
+      maxLength: kDiaryTitleMaxLength,
+      textInputAction: TextInputAction.next,
+      style: TextStyle(
+        fontFamily: DiaryPalette.round,
+        fontSize: 16,
+        color: DiaryPalette.onPaper,
+      ),
+      cursorColor: DiaryPalette.vermilion,
+      decoration: InputDecoration(
+        isDense: true,
+        counterText: '',
+        hintText: '起个标题（可以不写）',
+        hintStyle: TextStyle(
+          fontFamily: DiaryPalette.round,
+          fontSize: 15,
+          color: DiaryPalette.onPaperFaint,
+        ),
+        filled: true,
+        fillColor: DiaryPalette.paperDim,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 15, vertical: 13),
+        border: _fieldBorder(Colors.transparent),
+        enabledBorder: _fieldBorder(Colors.transparent),
+        focusedBorder: _fieldBorder(DiaryPalette.vermilion),
+      ),
+    );
+  }
+
+  /// 地区选择 —— 横向一排胶囊，点一下选中，再点一下取消
+  Widget _buildLocationRow() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Text(
+              '地区',
+              style: TextStyle(
+                fontFamily: DiaryPalette.round,
+                fontSize: 13,
+                color: DiaryPalette.onPaperSoft,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Text(
+              _location.isEmpty ? '不选就不显示' : '已选：$_location',
+              style: TextStyle(
+                fontFamily: DiaryPalette.round,
+                fontSize: 11.5,
+                color: _location.isEmpty
+                    ? DiaryPalette.onPaperFaint
+                    : DiaryPalette.vermilionDeep,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 9),
+        SizedBox(
+          height: 32,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            padding: EdgeInsets.zero,
+            itemCount: kDiaryRegions.length,
+            separatorBuilder: (_, __) => const SizedBox(width: 7),
+            itemBuilder: (context, i) {
+              final region = kDiaryRegions[i];
+              final on = _location == region;
+              return GestureDetector(
+                onTap: () => setState(() => _location = on ? '' : region),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 160),
+                  curve: Curves.easeOut,
+                  alignment: Alignment.center,
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  decoration: BoxDecoration(
+                    color: on ? DiaryPalette.vermilion : DiaryPalette.paperDim,
+                    borderRadius: BorderRadius.circular(30),
+                  ),
+                  child: Text(
+                    region,
+                    style: TextStyle(
+                      fontFamily: DiaryPalette.round,
+                      fontSize: 12.5,
+                      height: 1.2,
+                      color: on
+                          ? DiaryPalette.onVermilion
+                          : DiaryPalette.onPaperSoft,
+                    ),
+                  ),
+                ),
+              );
+            },
           ),
         ),
       ],
@@ -478,7 +598,7 @@ class _DiaryComposeSheetState extends State<DiaryComposeSheet>
       maxLength: kDiaryMaxLength,
       textInputAction: TextInputAction.newline,
       keyboardType: TextInputType.multiline,
-      style: const TextStyle(
+      style: TextStyle(
         fontSize: 15.5,
         height: 1.85,
         color: DiaryPalette.onPaper,
@@ -486,14 +606,14 @@ class _DiaryComposeSheetState extends State<DiaryComposeSheet>
       cursorColor: DiaryPalette.vermilion,
       decoration: InputDecoration(
         hintText: '今天想说点什么…',
-        hintStyle: const TextStyle(
+        hintStyle: TextStyle(
           fontSize: 15,
           height: 1.85,
           color: DiaryPalette.onPaperFaint,
         ),
         filled: true,
         fillColor: DiaryPalette.paperDim,
-        counterStyle: const TextStyle(
+        counterStyle: TextStyle(
           fontFamily: DiaryPalette.round,
           fontSize: 11,
           color: DiaryPalette.onPaperFaint,
@@ -550,7 +670,7 @@ class _DiaryComposeSheetState extends State<DiaryComposeSheet>
       children: [
         Row(
           children: [
-            const Text(
+            Text(
               '配张图',
               style: TextStyle(
                 fontFamily: DiaryPalette.round,
@@ -561,7 +681,7 @@ class _DiaryComposeSheetState extends State<DiaryComposeSheet>
             const Spacer(),
             Text(
               '${_images.length}/$kDiaryMaxImages',
-              style: const TextStyle(
+              style: TextStyle(
                 fontFamily: DiaryPalette.round,
                 fontSize: 11.5,
                 color: DiaryPalette.onPaperFaint,
@@ -601,7 +721,7 @@ class _DiaryComposeSheetState extends State<DiaryComposeSheet>
             style: BorderStyle.solid,
           ),
         ),
-        child: const Center(
+        child: Center(
           child: Icon(
             Icons.add_photo_alternate_outlined,
             size: 22,
@@ -621,7 +741,7 @@ class _DiaryComposeSheetState extends State<DiaryComposeSheet>
           child: Image.file(
             File(_images[index]),
             fit: BoxFit.cover,
-            errorBuilder: (_, __, ___) => const ColoredBox(
+            errorBuilder: (_, __, ___) => ColoredBox(
               color: DiaryPalette.paperDim,
             ),
           ),
@@ -673,7 +793,7 @@ class _DiaryComposeSheetState extends State<DiaryComposeSheet>
                 elevation: 0,
               ),
               child: _busy
-                  ? const SizedBox(
+                  ? SizedBox(
                       width: 18,
                       height: 18,
                       child: CircularProgressIndicator(
@@ -681,7 +801,7 @@ class _DiaryComposeSheetState extends State<DiaryComposeSheet>
                         color: DiaryPalette.onVermilion,
                       ),
                     )
-                  : const Text(
+                  : Text(
                       '写好了',
                       style: TextStyle(
                         fontFamily: DiaryPalette.round,
@@ -693,7 +813,7 @@ class _DiaryComposeSheetState extends State<DiaryComposeSheet>
           const SizedBox(height: 8),
           Text(
             provider.isCloud ? '发出去大家都看得到' : '先存在这台手机上',
-            style: const TextStyle(
+            style: TextStyle(
               fontFamily: DiaryPalette.round,
               fontSize: 11.5,
               color: DiaryPalette.onPaperFaint,

@@ -9,6 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/diary_comment.dart';
 import '../models/diary_post.dart';
+import '../models/diary_reaction.dart';
 import '../repository/diary_cache.dart';
 import '../repository/diary_repository.dart';
 
@@ -27,6 +28,16 @@ class DiaryProvider extends ChangeNotifier {
   Map<String, List<DiaryComment>> _commentsByPost =
       const <String, List<DiaryComment>>{};
   Map<String, int> _commentCounts = const <String, int>{};
+
+  /// 表情反应同理：全量放在内存，计数和「我点没点」都从这儿算
+  List<DiaryReaction> _reactions = const <DiaryReaction>[];
+  Map<String, Map<String, int>> _reactionCounts =
+      const <String, Map<String, int>>{};
+  Map<String, Set<String>> _myReactionsByPost =
+      const <String, Set<String>>{};
+
+  /// 正在提交的反应（postId|emoji），避免同一个按钮被连点打乱
+  final Set<String> _reactionInFlight = <String>{};
 
   bool _sendingComment = false;
 
@@ -75,6 +86,22 @@ class DiaryProvider extends ChangeNotifier {
   /// 某条动态有几条评论。O(1)
   int commentCountFor(String postId) => _commentCounts[postId] ?? 0;
 
+  /// 某条动态上某个表情被点了多少次。O(1)
+  int reactionCountFor(String postId, String emoji) =>
+      _reactionCounts[postId]?[emoji] ?? 0;
+
+  /// 某条动态各表情的计数。直接返回内部 Map，调用方只读，别改
+  Map<String, int> reactionCountsFor(String postId) =>
+      _reactionCounts[postId] ?? const <String, int>{};
+
+  /// 我在某条动态上点过的表情集合。同上，只读
+  Set<String> myReactionsFor(String postId) =>
+      _myReactionsByPost[postId] ?? const <String>{};
+
+  /// 我有没有点过
+  bool didIReact(String postId, String emoji) =>
+      _myReactionsByPost[postId]?.contains(emoji) ?? false;
+
   /// 评论变了就重建一次索引（只在数据变动时调用，不在 build 里）
   void _rebuildCommentIndex() {
     if (_comments.isEmpty) {
@@ -95,6 +122,66 @@ class DiaryProvider extends ChangeNotifier {
   void _setComments(List<DiaryComment> comments) {
     _comments = comments;
     _rebuildCommentIndex();
+  }
+
+  void _rebuildReactionIndex() {
+    if (_reactions.isEmpty) {
+      _reactionCounts = const <String, Map<String, int>>{};
+      _myReactionsByPost = const <String, Set<String>>{};
+      return;
+    }
+    final counts = <String, Map<String, int>>{};
+    final mine = <String, Set<String>>{};
+    for (final r in _reactions) {
+      final byEmoji = counts[r.postId] ??= <String, int>{};
+      byEmoji[r.emoji] = (byEmoji[r.emoji] ?? 0) + 1;
+      if (r.deviceId == _deviceId) {
+        (mine[r.postId] ??= <String>{}).add(r.emoji);
+      }
+    }
+    _reactionCounts = counts;
+    _myReactionsByPost = mine;
+  }
+
+  void _setReactions(List<DiaryReaction> reactions) {
+    _reactions = reactions;
+    _rebuildReactionIndex();
+  }
+
+  /// 点一下表情：已经点过就取消。先乐观更新，失败再回滚。
+  Future<void> toggleReaction(String postId, String emoji) async {
+    final repo = _repo;
+    if (repo == null || !DiaryReaction.isValidEmoji(emoji)) return;
+
+    final flightKey = '$postId|$emoji';
+    if (_reactionInFlight.contains(flightKey)) return;
+    _reactionInFlight.add(flightKey);
+
+    final on = !didIReact(postId, emoji);
+    final prev = _reactions;
+
+    _setReactions(<DiaryReaction>[
+      for (final r in _reactions)
+        if (!(r.postId == postId &&
+            r.deviceId == _deviceId &&
+            r.emoji == emoji))
+          r,
+      if (on)
+        DiaryReaction(postId: postId, deviceId: _deviceId, emoji: emoji),
+    ]);
+    _safeNotify();
+
+    try {
+      await repo.toggleReaction(postId: postId, emoji: emoji, on: on);
+      await _saveCache();
+    } catch (e) {
+      // 回滚，别让界面显示一个服务端并不认的状态
+      _setReactions(prev);
+      _safeNotify();
+      debugPrint('[Diary] 表情失败（已回滚）: $e');
+    } finally {
+      _reactionInFlight.remove(flightKey);
+    }
   }
 
   // ── 生命周期 ────────────────────────────────────────────────────────
@@ -126,6 +213,7 @@ class DiaryProvider extends ChangeNotifier {
       if (cachedPosts.isNotEmpty) {
         _posts = cachedPosts;
         _setComments(await DiaryCache.readComments());
+        _setReactions(await DiaryCache.readReactions());
         _fromCache = true;
         _ready = true;
         _loading = false;
@@ -142,6 +230,7 @@ class DiaryProvider extends ChangeNotifier {
       _repo = await DiaryRepository.resolve(deviceId: _deviceId);
       _posts = await _repo!.fetch(limit: kDiaryPageSize);
       _setComments(await _loadCommentsSafe(_repo!));
+      _setReactions(await _loadReactionsSafe(_repo!));
       _error = null;
       _fromCache = false;
       await _saveCache();
@@ -164,6 +253,7 @@ class DiaryProvider extends ChangeNotifier {
     try {
       _posts = await repo.fetch(limit: kDiaryPageSize);
       _setComments(await _loadCommentsSafe(repo));
+      _setReactions(await _loadReactionsSafe(repo));
       _error = null;
       _fromCache = false;
       await _saveCache();
@@ -179,6 +269,7 @@ class DiaryProvider extends ChangeNotifier {
     try {
       await DiaryCache.writePosts(_posts);
       await DiaryCache.writeComments(_comments);
+      await DiaryCache.writeReactions(_reactions);
     } catch (e) {
       debugPrint('[Diary] 写缓存失败（忽略）: $e');
     }
@@ -191,6 +282,16 @@ class DiaryProvider extends ChangeNotifier {
     } catch (e) {
       debugPrint('[Diary] 评论加载失败（忽略）: $e');
       return _comments;
+    }
+  }
+
+  /// 反应拉不到也不该拖垮整页：动态照常显示，只是计数先当 0
+  Future<List<DiaryReaction>> _loadReactionsSafe(DiaryRepository repo) async {
+    try {
+      return await repo.fetchReactions(limit: kDiaryReactionLimit);
+    } catch (e) {
+      debugPrint('[Diary] 反应加载失败（忽略）: $e');
+      return _reactions;
     }
   }
 
@@ -274,6 +375,9 @@ class DiaryProvider extends ChangeNotifier {
       // 动态没了，它下面的评论也别留在内存里
       _setComments(
         _comments.where((c) => c.postId != post.id).toList(growable: false),
+      );
+      _setReactions(
+        _reactions.where((r) => r.postId != post.id).toList(growable: false),
       );
       await _saveCache();
       _safeNotify();

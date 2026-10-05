@@ -137,11 +137,23 @@ def rebuild_brush(chars: set[str]) -> None:
     print(f'  {BRUSH_FONT}: {len(chars)} 个字符 → {size_kb:.1f} KB')
 
 
+def _is_emoji(ch: str) -> bool:
+    """表情符号走系统 emoji 字体，不该拿中文字体去要求它。"""
+    o = ord(ch)
+    return (
+        0x1F300 <= o <= 0x1FAFF      # 各类 emoji
+        or 0x2600 <= o <= 0x27BF     # 杂项符号 / 装饰符号
+        or 0x2B00 <= o <= 0x2BFF
+        or o in (0x2764, 0xFE0F, 0x200D, 0x2B50)
+    )
+
+
 def verify() -> int:
     """界面文案里的每个非 ASCII 字符都要有字形。
 
-    只检查会渲染到屏幕上的字符串：注释和 debugPrint 日志（里面有 ✅ ❌ 这类 emoji）
-    不参与渲染，跳过它们，否则会误报。
+    跳过两类：
+      * 注释和 debugPrint 日志 —— 不渲染到屏幕上
+      * emoji —— 它们走系统 emoji 字体，不该拿中文字体去要求
     """
     brush = set(TTFont(FONT_DIR / BRUSH_FONT).getBestCmap())
     round_ = set(TTFont(FONT_DIR / ROUND_FONT).getBestCmap())
@@ -160,6 +172,8 @@ def verify() -> int:
             for match in STRING_LITERAL.finditer(line):
                 for ch in match.group(1):
                     if ord(ch) < 0x80:
+                        continue
+                    if _is_emoji(ch):
                         continue
                     if ord(ch) not in brush and ord(ch) not in round_:
                         print(f'  ❌ {rel}:{lineno} 缺字形: {ch!r}', file=sys.stderr)

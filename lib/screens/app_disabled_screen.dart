@@ -31,7 +31,7 @@ class _AppDisabledScreenState extends State<AppDisabledScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppTheme.surfaceColor,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: Stack(
         children: [
           // ── 主内容 ──

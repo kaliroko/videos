@@ -97,11 +97,11 @@ class _DiaryScreenState extends State<DiaryScreen> {
     final bottomInset = MediaQuery.paddingOf(context).bottom;
 
     return DecoratedBox(
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         gradient: RadialGradient(
           center: Alignment(0, -1.05),
           radius: 1.15,
-          colors: <Color>[Color(0xFF1F1A14), DiaryPalette.ink],
+          colors: <Color>[DiaryPalette.inkGlow, DiaryPalette.ink],
         ),
       ),
       child: Stack(
@@ -181,6 +181,10 @@ class _DiaryScreenState extends State<DiaryScreen> {
               tilt: _tiltFor(post),
               commentCount: provider.commentCountFor(post.id),
               onComment: () => _openComments(post.id),
+              // 这两个都是 O(1) 且不新建对象，直接给内部 Map/Set 用
+              reactionCounts: provider.reactionCountsFor(post.id),
+              myReactions: provider.myReactionsFor(post.id),
+              onReact: (emoji) => provider.toggleReaction(post.id, emoji),
               onDelete: () async {
                 await provider.remove(post);
               },
@@ -230,9 +234,27 @@ class _DiaryScreenState extends State<DiaryScreen> {
             delay: Duration(milliseconds: 1150),
             child: _BrushStroke(),
           ),
-          const SizedBox(height: 20),
-          const _DelayedFade(
-            delay: Duration(milliseconds: 1250),
+          // ★ 固定题词：不参与动态书写，显示出来就一直留着。
+          //   这里不能写 const —— heroTagline 是 getter（要跟随深浅色）
+          const SizedBox(height: 12),
+          _DelayedFade(
+            delay: Duration(milliseconds: 1300),
+            child: Text(
+              '每一棵树，都藏着一个秘密',
+              style: DiaryPalette.heroTagline,
+            ),
+          ),
+          const SizedBox(height: 3),
+          _DelayedFade(
+            delay: Duration(milliseconds: 1380),
+            child: Text(
+              'Every tree hides a secret.',
+              style: DiaryPalette.heroTaglineEn,
+            ),
+          ),
+          const SizedBox(height: 22),
+          _DelayedFade(
+            delay: Duration(milliseconds: 1400),
             child: HandwritingText(
               lines: _kWhispers,
               style: DiaryPalette.brushLine,
@@ -245,12 +267,12 @@ class _DiaryScreenState extends State<DiaryScreen> {
               penColor: DiaryPalette.vermilion,
             ),
           ),
-          const SizedBox(height: 26),
+          const SizedBox(height: 24),
           _DelayedFade(
             delay: const Duration(milliseconds: 1400),
             child: Row(
               children: [
-                const Expanded(
+                Expanded(
                   child: Divider(
                     color: DiaryPalette.onInkFaint,
                     height: 1,
@@ -297,7 +319,7 @@ class _ComposeButton extends StatelessWidget {
           ),
         ],
       ),
-      child: const Text(
+      child: Text(
         '写',
         style: TextStyle(
           fontFamily: DiaryPalette.brush,
@@ -387,7 +409,7 @@ class _EmptyPaper extends StatelessWidget {
           children: [
             const InkSeal(text: '空', size: 40, filled: true),
             const SizedBox(height: 16),
-            const Text(
+            Text(
               '还没有人写过什么',
               style: TextStyle(
                 fontFamily: DiaryPalette.round,
@@ -397,7 +419,7 @@ class _EmptyPaper extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 6),
-            const Text(
+            Text(
               '第一句留给你',
               style: TextStyle(
                 fontFamily: DiaryPalette.brush,

@@ -20,6 +20,12 @@ create table if not exists public.diary_posts (
   created_at  timestamptz not null default now()
 );
 
+-- ★ 后加的字段：用 add column if not exists，这样已经建过表的直接重跑这段就行
+alter table public.diary_posts
+  add column if not exists title    text not null default '';
+alter table public.diary_posts
+  add column if not exists location text not null default '';
+
 create index if not exists diary_posts_created_at_idx
   on public.diary_posts (created_at desc);
 
@@ -39,6 +45,22 @@ create table if not exists public.diary_comments (
 
 create index if not exists diary_comments_post_idx
   on public.diary_comments (post_id, created_at);
+
+-- ── 1c. 表情反应表 ────────────────────────────────────────────────────
+-- 固定四个表情，一个人对一条动态的同一个表情只能有一条记录。
+-- 靠下面的唯一约束防重复，重复点不会把计数刷上去。
+-- 不加主键 id：三列本身就是唯一键。
+create table if not exists public.diary_reactions (
+  post_id    bigint      not null
+             references public.diary_posts (id) on delete cascade,
+  device_id  text        not null,
+  emoji      text        not null,
+  created_at timestamptz not null default now(),
+  constraint diary_reactions_unique unique (post_id, device_id, emoji)
+);
+
+create index if not exists diary_reactions_post_idx
+  on public.diary_reactions (post_id);
 
 -- ── 2. RLS ────────────────────────────────────────────────────────────
 -- 注意：本 App 没有登录体系（「无需注册」正是产品前提），
@@ -76,6 +98,27 @@ create policy diary_comments_insert
 create policy diary_comments_delete
   on public.diary_comments for delete using (true);
 
+-- 反应同样是公开留言板：人人可读、人人可写、人人可删
+alter table public.diary_reactions enable row level security;
+
+drop policy if exists diary_reactions_read   on public.diary_reactions;
+drop policy if exists diary_reactions_insert on public.diary_reactions;
+drop policy if exists diary_reactions_delete on public.diary_reactions;
+
+create policy diary_reactions_read
+  on public.diary_reactions for select using (true);
+
+create policy diary_reactions_insert
+  on public.diary_reactions for insert with check (true);
+
+-- upsert 需要 update 权限，否则重复点会报错
+drop policy if exists diary_reactions_update on public.diary_reactions;
+create policy diary_reactions_update
+  on public.diary_reactions for update using (true) with check (true);
+
+create policy diary_reactions_delete
+  on public.diary_reactions for delete using (true);
+
 -- ── 3. 实时推送（可选）───────────────────────────────────────────────
 -- 加上之后别人发的新动态会立刻出现。不加也不影响使用。
 do $$
@@ -89,6 +132,14 @@ end $$;
 do $$
 begin
   alter publication supabase_realtime add table public.diary_comments;
+exception
+  when duplicate_object then null;
+  when undefined_object then null;
+end $$;
+
+do $$
+begin
+  alter publication supabase_realtime add table public.diary_reactions;
 exception
   when duplicate_object then null;
   when undefined_object then null;

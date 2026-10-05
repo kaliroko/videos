@@ -23,23 +23,23 @@ import '../theme/diary_palette.dart';
 //       强调色统一是印章的朱砂红 —— 两个页面看起来才像同一个 App。
 
 /// 自己的气泡 —— 米色纸，正文对纸 7.8:1
-const Color _kMyBubble = DiaryPalette.paper;
+Color get _kMyBubble => DiaryPalette.paper;
 /// 别人的气泡 —— 暖墨，正文对底 13:1
-const Color _kOtherBubble = Color(0xFF221E19);
+Color get _kOtherBubble => DiaryPalette.chatBubbleOther;
 
-const Color _kMyText = DiaryPalette.onPaper;
-const Color _kOtherText = DiaryPalette.onInk;
-const Color _kTimeMine = DiaryPalette.onPaperFaint;
-const Color _kTimeOther = Color(0xFF8C8375);
+Color get _kMyText => DiaryPalette.onPaper;
+Color get _kOtherText => DiaryPalette.onInk;
+Color get _kTimeMine => DiaryPalette.onPaperFaint;
+Color get _kTimeOther => DiaryPalette.chatTimeOther;
 
-const Color _kChatBg = DiaryPalette.ink;
-const Color _kBarBg = DiaryPalette.inkSoft;
-const Color _kInputBg = Color(0xFF1C1813);
-const Color _kSendBtn = DiaryPalette.vermilion;
-const Color _kOnline = Color(0xFF5FB878);
+Color get _kChatBg => DiaryPalette.ink;
+Color get _kBarBg => DiaryPalette.inkSoft;
+Color get _kInputBg => DiaryPalette.chatInputBg;
+Color get _kSendBtn => DiaryPalette.vermilion;
+Color get _kOnline => DiaryPalette.chatOnline;
 
 /// 朱砂提亮版 —— 暗底上的文字与图标用它（朱砂原色在暗底只有 3.6:1，小字读不清）
-const Color _kAccent = Color(0xFFE07A62);
+Color get _kAccent => DiaryPalette.chatAccent;
 
 const Curve _kEmphasizedDecel = Cubic(0.05, 0.7, 0.1, 1.0);
 
@@ -758,14 +758,14 @@ class _ChatScreenState extends State<ChatScreen>
             ),
             const SizedBox(height: 12),
             ListTile(
-              leading: const Icon(Icons.reply, color: _kAccent),
+              leading: Icon(Icons.reply, color: _kAccent),
               title: const Text('回复',
                   style: TextStyle(color: Colors.white)),
               onTap: () => Navigator.pop(ctx, 'reply'),
             ),
             if (msg.messageType == 'text')
               ListTile(
-                leading: const Icon(Icons.copy, color: _kAccent),
+                leading: Icon(Icons.copy, color: _kAccent),
                 title: const Text('复制',
                     style: TextStyle(color: Colors.white)),
                 onTap: () => Navigator.pop(ctx, 'copy'),
@@ -990,7 +990,7 @@ class _ChatScreenState extends State<ChatScreen>
                             shape: BoxShape.circle,
                             color: Colors.black54,
                           ),
-                          child: const Center(
+                          child: Center(
                             child: SizedBox(
                               width: 24, height: 24,
                               child: CircularProgressIndicator(
@@ -1076,7 +1076,7 @@ class _ChatScreenState extends State<ChatScreen>
   @override
   Widget build(BuildContext context) {
     if (_loading) {
-      return const ColoredBox(
+      return ColoredBox(
         color: _kChatBg,
         child: Center(
           child: CircularProgressIndicator(color: _kSendBtn),
@@ -1171,7 +1171,7 @@ class _ChatScreenState extends State<ChatScreen>
                               shape: BoxShape.circle,
                               color: Colors.black54,
                             ),
-                            child: const Center(
+                            child: Center(
                               child: SizedBox(
                                 width: 28, height: 28,
                                 child: CircularProgressIndicator(
@@ -1200,7 +1200,7 @@ class _ChatScreenState extends State<ChatScreen>
                         },
                   child: Text(
                     _myAvatarUrl == null ? '上传头像' : '更换头像',
-                    style: const TextStyle(color: _kAccent, fontSize: 14),
+                    style: TextStyle(color: _kAccent, fontSize: 14),
                   ),
                 ),
               ),
@@ -1225,7 +1225,7 @@ class _ChatScreenState extends State<ChatScreen>
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
                     borderSide:
-                        const BorderSide(color: _kSendBtn, width: 1.5),
+                        BorderSide(color: _kSendBtn, width: 1.5),
                   ),
                 ),
               ),
@@ -1379,7 +1379,7 @@ class _ChatScreenState extends State<ChatScreen>
               color: _kSendBtn.withValues(alpha: 0.16),
               shape: BoxShape.circle,
             ),
-            child: const Icon(Icons.groups_rounded, color: _kAccent, size: 21),
+            child: Icon(Icons.groups_rounded, color: _kAccent, size: 21),
           ),
           const SizedBox(width: 11),
           Expanded(
@@ -1683,13 +1683,13 @@ class _ChatBackground extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const DecoratedBox(
+    return DecoratedBox(
       decoration: BoxDecoration(
         color: _kChatBg,
         gradient: RadialGradient(
           center: Alignment(0, -1.05),
           radius: 1.15,
-          colors: <Color>[Color(0xFF1F1A14), _kChatBg],
+          colors: <Color>[DiaryPalette.inkGlow, _kChatBg],
         ),
       ),
     );
@@ -1842,7 +1842,7 @@ class _SendButtonState extends State<_SendButton>
         scale: _ctrl,
         child: Container(
           width: 42, height: 42,
-          decoration: const BoxDecoration(
+          decoration: BoxDecoration(
             color: _kSendBtn,
             shape: BoxShape.circle,
           ),
@@ -1937,7 +1937,7 @@ class _ScrollToBottomButtonState extends State<_ScrollToBottomButton>
                 ),
               ],
             ),
-            child: const Icon(Icons.keyboard_arrow_down_rounded,
+            child: Icon(Icons.keyboard_arrow_down_rounded,
                 color: _kAccent, size: 26),
           ),
         ),
@@ -1959,7 +1959,7 @@ class _ReplyPreview extends StatelessWidget {
       decoration: BoxDecoration(
         color: _kInputBg,
         borderRadius: BorderRadius.circular(12),
-        border: const Border(
+        border: Border(
           left: BorderSide(color: _kSendBtn, width: 3),
         ),
       ),
@@ -1971,7 +1971,7 @@ class _ReplyPreview extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text(msg.nickname,
-                    style: const TextStyle(
+                    style: TextStyle(
                         color: _kAccent,
                         fontSize: 12,
                         fontWeight: FontWeight.w600)),
@@ -2168,7 +2168,7 @@ class _MessageBubbleState extends State<_MessageBubble>
                                   padding: const EdgeInsets.only(
                                       left: 12, bottom: 2),
                                   child: Text(displayName,
-                                      style: const TextStyle(
+                                      style: TextStyle(
                                           color: _kAccent,
                                           fontSize: 12,
                                           fontWeight: FontWeight.w600)),
@@ -2279,7 +2279,7 @@ class _Bubble extends StatelessWidget {
         children: [
           Text(
             msg.replyToNickname!,
-            style: const TextStyle(
+            style: TextStyle(
               color: _kAccent,
               fontSize: 11,
               fontWeight: FontWeight.w600,
@@ -2350,7 +2350,7 @@ class _Bubble extends StatelessWidget {
                   width: 200,
                   height: 200,
                   color: Colors.black.withValues(alpha: 0.42),
-                  child: const Center(
+                  child: Center(
                     child: CircularProgressIndicator(
                       strokeWidth: 2,
                       color: _kSendBtn,

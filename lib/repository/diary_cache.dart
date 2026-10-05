@@ -14,16 +14,19 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/diary_comment.dart';
 import '../models/diary_post.dart';
+import '../models/diary_reaction.dart';
 
 class DiaryCache {
   DiaryCache._();
 
   static const String _kPostsKey = 'diary_cache_posts_v1';
   static const String _kCommentsKey = 'diary_cache_comments_v1';
+  static const String _kReactionsKey = 'diary_cache_reactions_v1';
 
   /// 缓存上限：够铺满首屏就行，别让 prefs 无限膨胀
   static const int _kMaxPosts = 120;
   static const int _kMaxComments = 400;
+  static const int _kMaxReactions = 4000;
 
   // ── 动态 ──────────────────────────────────────────────────────────
 
@@ -62,11 +65,33 @@ class DiaryCache {
     );
   }
 
+  // ── 表情反应 ──────────────────────────────────────────────────────
+
+  static Future<List<DiaryReaction>> readReactions() async {
+    final all = await _read(
+      _kReactionsKey,
+      (m) => DiaryReaction.fromJson(m),
+      _kMaxReactions,
+    );
+    return all.where((r) => DiaryReaction.isValidEmoji(r.emoji)).toList(growable: false);
+  }
+
+  static Future<void> writeReactions(List<DiaryReaction> reactions) async {
+    final tail = reactions.length > _kMaxReactions
+        ? reactions.sublist(reactions.length - _kMaxReactions)
+        : reactions;
+    await _write(
+      _kReactionsKey,
+      tail.map((e) => e.toJson()).toList(growable: false),
+    );
+  }
+
   static Future<void> clear() async {
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove(_kPostsKey);
       await prefs.remove(_kCommentsKey);
+      await prefs.remove(_kReactionsKey);
       debugPrint('[Diary] 缓存已清空');
     } catch (e) {
       debugPrint('[Diary] 清缓存失败: $e');

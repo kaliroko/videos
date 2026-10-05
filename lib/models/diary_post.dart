@@ -9,6 +9,21 @@ library;
 /// 匿名时对外显示的名字
 const String kAnonymousName = '匿名';
 
+/// 主标题最多多少字
+const int kDiaryTitleMaxLength = 30;
+
+/// 地区选项（省级行政区）。★ 只在「非匿名」时才让选，
+/// 选完会跟着动态一起展示；勾了匿名就把地区清掉。
+const List<String> kDiaryRegions = <String>[
+  '北京', '天津', '河北', '山西', '内蒙古',
+  '辽宁', '吉林', '黑龙江',
+  '上海', '江苏', '浙江', '安徽', '福建', '江西', '山东',
+  '河南', '湖北', '湖南', '广东', '广西', '海南',
+  '重庆', '四川', '贵州', '云南', '西藏',
+  '陕西', '甘肃', '青海', '宁夏', '新疆',
+  '香港', '澳门', '台湾',
+];
+
 /// 心情标签 —— 固定几款，避免自由输入带来的脏数据
 ///
 /// 存库时直接存 [label] 文本，可读性好、跨端也不用维护枚举映射。
@@ -47,6 +62,8 @@ class DiaryPost {
     required this.anonymous,
     required this.content,
     required this.createdAt,
+    this.title = '',
+    this.location = '',
     this.images = const <String>[],
     this.mood = DiaryMood.none,
   });
@@ -61,6 +78,12 @@ class DiaryPost {
   final String authorName;
 
   final bool anonymous;
+
+  /// 主标题，可为空
+  final String title;
+
+  /// 地区。★ 只在「非匿名」时才有值 —— 匿名就该彻底匿名
+  final String location;
 
   final String content;
 
@@ -90,6 +113,11 @@ class DiaryPost {
 
   bool get hasImages => images.isNotEmpty;
 
+  bool get hasTitle => title.trim().isNotEmpty;
+
+  /// 只有非匿名才对外露地区
+  bool get hasLocation => !anonymous && location.trim().isNotEmpty;
+
   bool isMine(String? myDeviceId) =>
       myDeviceId != null &&
       myDeviceId.isNotEmpty &&
@@ -102,6 +130,8 @@ class DiaryPost {
         'device_id': deviceId,
         'author_name': authorName,
         'anonymous': anonymous,
+        'title': title,
+        'location': location,
         'content': content,
         'images': images,
         'mood': mood.label,
@@ -116,6 +146,8 @@ class DiaryPost {
       deviceId: (m['device_id'] ?? '').toString(),
       authorName: (m['author_name'] ?? '').toString(),
       anonymous: m['anonymous'] == true,
+      title: (m['title'] ?? '').toString(),
+      location: (m['location'] ?? '').toString(),
       content: (m['content'] ?? '').toString(),
       images: rawImages is List
           ? rawImages.map((e) => e.toString()).toList(growable: false)
@@ -129,6 +161,8 @@ class DiaryPost {
         'device_id': deviceId,
         'author_name': authorName,
         'anonymous': anonymous,
+        'title': title,
+        'location': location,
         'content': content,
         'images': images,
         'mood': mood.label,
@@ -149,12 +183,21 @@ class DiaryDraft {
     required this.authorName,
     required this.anonymous,
     required this.content,
+    this.title = '',
+    this.location = '',
     this.images = const <String>[],
     this.mood = DiaryMood.none,
   });
 
   final String authorName;
   final bool anonymous;
+
+  /// 主标题，可为空
+  final String title;
+
+  /// 地区。★ 匿名时上层必须传空串，别把地区带出去
+  final String location;
+
   final String content;
 
   /// 本机待入库的图片路径

@@ -18,6 +18,7 @@ import 'security/integrity_guard.dart';
 import 'widgets/remote_gate.dart';
 import 'screens/home_screen.dart';
 import 'theme/app_theme.dart';
+import 'theme/diary_palette.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -176,8 +177,15 @@ class _BiliGlassAppState extends State<BiliGlassApp> {
           navigatorKey: _navigatorKey,
           title: '碎碎念',
           debugShowCheckedModeBanner: false,
-          theme: AppTheme.darkTheme,
+          // 深/浅色两套都装上，交给系统决定用哪套
+          theme: AppTheme.lightTheme,
+          darkTheme: AppTheme.darkTheme,
+          themeMode: ThemeMode.system,
           builder: (context, child) {
+            // ★ 碎碎念的调色板是静态的（原因见 diary_palette.dart），
+            //   这里每帧把解析后的亮度同步过去。系统切深浅色时
+            //   MaterialApp 会重建，builder 跟着跑，整棵树就用新颜色重建。
+            DiaryPalette.syncWith(Theme.of(context).brightness);
             return RemoteGate(
               navigatorKey: _navigatorKey,
               initialDisabledReason:

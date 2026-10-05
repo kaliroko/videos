@@ -10,6 +10,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
 import '../models/diary_post.dart';
+import '../models/diary_reaction.dart';
 import '../theme/diary_palette.dart';
 import '../utils/diary_time.dart';
 import 'diary_image_viewer.dart';
@@ -23,6 +24,9 @@ class DiaryCard extends StatefulWidget {
     this.tilt = 0,
     this.commentCount = 0,
     this.onComment,
+    this.reactionCounts = const <String, int>{},
+    this.myReactions = const <String>{},
+    this.onReact,
     this.onDelete,
   });
 
@@ -39,6 +43,15 @@ class DiaryCard extends StatefulWidget {
 
   /// 点评论按钮
   final VoidCallback? onComment;
+
+  /// 这条动态各表情的计数（emoji -> 次数），只读
+  final Map<String, int> reactionCounts;
+
+  /// 我在这一条上点过的表情，只读
+  final Set<String> myReactions;
+
+  /// 点某个表情
+  final void Function(String emoji)? onReact;
 
   final Future<void> Function()? onDelete;
 
@@ -83,13 +96,14 @@ class _DiaryCardState extends State<DiaryCard> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   _buildHeader(post),
+                  if (post.hasTitle) _buildTitle(post),
                   if (content.isNotEmpty) ...[
                     const SizedBox(height: 9),
                     Text(
                       content,
                       // ★ 只有「真的超了 50 字」才裁：短动态若也按 2 行裁，
                       //   会被切掉却没有「展开」可点。
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 14,
                         height: 1.68,
                         letterSpacing: 0.15,
@@ -117,33 +131,64 @@ class _DiaryCardState extends State<DiaryCard> {
     );
   }
 
+  /// 主标题 —— 用圆体（完整字库），用户输入什么字都不会缺字形
+  Widget _buildTitle(DiaryPost post) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 10),
+      child: Text(
+        post.title.trim(),
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(
+          fontFamily: DiaryPalette.round,
+          fontSize: 17,
+          height: 1.35,
+          color: DiaryPalette.onPaper,
+        ),
+      ),
+    );
+  }
+
   // ── 底部：评论入口 + 自己的动态提示 ──────────────────────────────
 
   Widget _buildFooter(DiaryPost post) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Divider(color: DiaryPalette.rule, height: 1, thickness: 1),
+        Divider(color: DiaryPalette.rule, height: 1, thickness: 1),
         const SizedBox(height: 4),
         Row(
           children: [
+            // 四个表情，点一下就算一次「赞」
+            for (final emoji in kDiaryReactions)
+              _ReactionChip(
+                emoji: emoji,
+                count: widget.reactionCounts[emoji] ?? 0,
+                selected: widget.myReactions.contains(emoji),
+                onTap: widget.onReact == null
+                    ? null
+                    : () => widget.onReact!(emoji),
+              ),
+            const Spacer(),
             _CommentButton(
               count: widget.commentCount,
               onTap: widget.onComment,
             ),
-            const Spacer(),
-            if (widget.mine)
-              const Text(
-                '长按可以删掉',
-                style: TextStyle(
-                  fontFamily: DiaryPalette.round,
-                  fontSize: 10.5,
-                  height: 1.2,
-                  color: DiaryPalette.vermilionDeep,
-                ),
-              ),
           ],
         ),
+        if (widget.mine)
+          Align(
+            alignment: Alignment.centerRight,
+            child: Text(
+              '长按可以删掉',
+              style: TextStyle(
+                fontFamily: DiaryPalette.round,
+                fontSize: 10.5,
+                height: 1.2,
+                color: DiaryPalette.vermilionDeep,
+              ),
+            ),
+          ),
       ],
     );
   }
@@ -186,11 +231,48 @@ class _DiaryCardState extends State<DiaryCard> {
             ],
           ),
         ),
+        // ★ 地区放卡片最上面一行（在心情胶囊左边）
+        if (post.hasLocation) ...[
+          const SizedBox(width: 6),
+          _buildLocationChip(post.location),
+        ],
         if (!post.mood.isEmpty) ...[
-          const SizedBox(width: 8),
+          const SizedBox(width: 6),
           _buildMoodChip(post.mood),
         ],
       ],
+    );
+  }
+
+  /// 地区胶囊 —— 挂在卡片顶部
+  Widget _buildLocationChip(String location) {
+    return Container(
+      constraints: const BoxConstraints(maxWidth: 96),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: DiaryPalette.ink.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.place, size: 11, color: DiaryPalette.onPaperSoft),
+          const SizedBox(width: 3),
+          Flexible(
+            child: Text(
+              location,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontFamily: DiaryPalette.round,
+                fontSize: 11,
+                height: 1.15,
+                color: DiaryPalette.onPaperSoft,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -206,7 +288,7 @@ class _DiaryCardState extends State<DiaryCard> {
       ),
       child: Text(
         mood.label,
-        style: const TextStyle(
+        style: TextStyle(
           fontFamily: DiaryPalette.round,
           fontSize: 11,
           height: 1.15,
@@ -231,7 +313,7 @@ class _DiaryCardState extends State<DiaryCard> {
         ),
         child: Text(
           _expanded ? '收起' : '展开',
-          style: const TextStyle(
+          style: TextStyle(
             fontFamily: DiaryPalette.round,
             fontSize: 12,
           ),
@@ -284,7 +366,7 @@ class _DiaryCardState extends State<DiaryCard> {
       return CachedNetworkImage(
         imageUrl: path,
         fit: BoxFit.cover,
-        placeholder: (_, __) => const ColoredBox(color: DiaryPalette.paperDim),
+        placeholder: (_, __) => ColoredBox(color: DiaryPalette.paperDim),
         errorWidget: (_, __, ___) => _brokenImage(),
       );
     }
@@ -295,7 +377,7 @@ class _DiaryCardState extends State<DiaryCard> {
     );
   }
 
-  Widget _brokenImage() => const ColoredBox(
+  Widget _brokenImage() => ColoredBox(
         color: DiaryPalette.paperDim,
         child: Center(
           child: Icon(
@@ -319,7 +401,7 @@ class _DiaryCardState extends State<DiaryCard> {
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(18),
         ),
-        title: const Text(
+        title: Text(
           '删掉这一条？',
           style: TextStyle(
             fontFamily: DiaryPalette.round,
@@ -327,7 +409,7 @@ class _DiaryCardState extends State<DiaryCard> {
             color: DiaryPalette.onPaper,
           ),
         ),
-        content: const Text(
+        content: Text(
           '删了就找不回来了',
           style: TextStyle(
             fontSize: 14,
@@ -341,14 +423,14 @@ class _DiaryCardState extends State<DiaryCard> {
             style: TextButton.styleFrom(
               foregroundColor: DiaryPalette.onPaperSoft,
             ),
-            child: const Text('算了', style: TextStyle(fontFamily: DiaryPalette.round)),
+            child: Text('算了', style: TextStyle(fontFamily: DiaryPalette.round)),
           ),
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(true),
             style: TextButton.styleFrom(
               foregroundColor: DiaryPalette.vermilionDeep,
             ),
-            child: const Text('删掉', style: TextStyle(fontFamily: DiaryPalette.round)),
+            child: Text('删掉', style: TextStyle(fontFamily: DiaryPalette.round)),
           ),
         ],
       ),
@@ -378,9 +460,73 @@ class _CommentButton extends StatelessWidget {
         minimumSize: const Size(0, 29),
         padding: const EdgeInsets.symmetric(horizontal: 7),
         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-        textStyle: const TextStyle(
+        textStyle: TextStyle(
           fontFamily: DiaryPalette.round,
           fontSize: 12,
+        ),
+      ),
+    );
+  }
+}
+
+/// 一个表情反应按钮 —— 没点过是透明的，点过才有朱砂淡底
+class _ReactionChip extends StatelessWidget {
+  const _ReactionChip({
+    required this.emoji,
+    required this.count,
+    required this.selected,
+    this.onTap,
+  });
+
+  final String emoji;
+  final int count;
+  final bool selected;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      selected: selected,
+      label: kDiaryReactionLabels[emoji] ?? emoji,
+      child: GestureDetector(
+        onTap: onTap,
+        behavior: HitTestBehavior.opaque,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOut,
+          margin: const EdgeInsets.only(right: 4),
+          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
+          decoration: BoxDecoration(
+            color: selected ? DiaryPalette.vermilionWash : Colors.transparent,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: selected
+                  ? DiaryPalette.vermilion.withValues(alpha: 0.32)
+                  : Colors.transparent,
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // ★ 不指定 fontFamily：表情要走系统 emoji 字体才画得出来
+              Text(emoji, style: const TextStyle(fontSize: 13, height: 1.1)),
+              if (count > 0) ...[
+                const SizedBox(width: 3),
+                Text(
+                  '$count',
+                  style: TextStyle(
+                    fontFamily: DiaryPalette.round,
+                    fontSize: 11,
+                    height: 1.1,
+                    color: selected
+                        ? DiaryPalette.vermilionDeep
+                        : DiaryPalette.onPaperSoft,
+                  ),
+                ),
+              ],
+            ],
+          ),
         ),
       ),
     );

@@ -440,7 +440,7 @@ class _LivePreviewBackground extends StatelessWidget {
           Row(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
-              const Expanded(
+              Expanded(
                 child: Text(
                   '碎碎念',
                   style: DiaryPalette.brushHero,
@@ -464,14 +464,14 @@ class _LivePreviewBackground extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 20),
-          const Text(
+          Text(
             '今天也没发生什么大事',
             style: DiaryPalette.brushLine,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
           ),
           const SizedBox(height: 20),
-          const Row(
+          Row(
             children: [
               Expanded(
                 child: Divider(
@@ -547,7 +547,7 @@ class _LivePreviewBackground extends StatelessWidget {
           ),
         ],
       ),
-      child: const Text(
+      child: Text(
         '写',
         style: TextStyle(
           fontFamily: DiaryPalette.brush,

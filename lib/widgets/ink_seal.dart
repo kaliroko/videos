@@ -6,7 +6,7 @@ import 'package:flutter/material.dart';
 import '../theme/diary_palette.dart';
 
 class InkSeal extends StatelessWidget {
-  const InkSeal({
+  InkSeal({
     super.key,
     required this.text,
     this.size = 38,

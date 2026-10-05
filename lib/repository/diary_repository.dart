@@ -19,11 +19,13 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../managers/analytics_manager.dart';
 import '../models/diary_comment.dart';
+import '../models/diary_reaction.dart';
 import '../models/diary_post.dart';
 
 /// 云端表名 / 存储桶名
 const String kDiaryTable = 'diary_posts';
 const String kDiaryCommentTable = 'diary_comments';
+const String kDiaryReactionTable = 'diary_reactions';
 const String kDiaryBucket = 'diary_images';
 
 /// 一条动态最多几张图
@@ -39,6 +41,9 @@ const int kDiaryCommentMaxLength = 200;
 /// 这样卡片上的评论数可以直接在客户端数出来，
 /// 不用维护反范式计数器、也不用写数据库触发器，永远不会数错。
 const int kDiaryCommentLimit = 400;
+
+/// 反应同理：单条只有三个短字段，全量拉下来自己数最省事
+const int kDiaryReactionLimit = 4000;
 
 abstract class DiaryRepository {
   DiaryRepository({required this.deviceId});
@@ -68,6 +73,16 @@ abstract class DiaryRepository {
     required String content,
   });
 
+  /// 拉取全部表情反应（同样全量加载，卡片上的计数就能在客户端数）
+  Future<List<DiaryReaction>> fetchReactions({int limit});
+
+  /// 切换某个表情：on = true 加一个，false 取消
+  Future<void> toggleReaction({
+    required String postId,
+    required String emoji,
+    required bool on,
+  });
+
   /// 探测器：云端能用就用云端，否则本机
   static Future<DiaryRepository> resolve({required String deviceId}) async {
     try {
@@ -95,6 +110,7 @@ class LocalDiaryRepository extends DiaryRepository {
 
   static const String _kPostsKey = 'diary_posts_v1';
   static const String _kCommentsKey = 'diary_comments_v1';
+  static const String _kReactionsKey = 'diary_reactions_v1';
   static const int _kMaxKept = 200;
 
   @override
@@ -135,6 +151,9 @@ class LocalDiaryRepository extends DiaryRepository {
       deviceId: deviceId,
       authorName: draft.authorName,
       anonymous: draft.anonymous,
+      title: draft.title,
+      // ★ 匿名就不带地区出去
+      location: draft.anonymous ? '' : draft.location,
       content: draft.content,
       images: await _copyIntoAppDir(draft.images),
       mood: draft.mood,
@@ -229,6 +248,55 @@ class LocalDiaryRepository extends DiaryRepository {
     return comment;
   }
 
+  // ── 表情反应 ──────────────────────────────────────────────────────
+
+  @override
+  Future<List<DiaryReaction>> fetchReactions(
+      {int limit = kDiaryReactionLimit}) async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_kReactionsKey);
+    if (raw == null || raw.isEmpty) return const <DiaryReaction>[];
+
+    final out = <DiaryReaction>[];
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is List) {
+        for (final item in decoded) {
+          if (item is Map) {
+            final r = DiaryReaction.fromJson(Map<String, dynamic>.from(item));
+            if (DiaryReaction.isValidEmoji(r.emoji)) out.add(r);
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('[Diary] 本机反应解析失败: $e');
+    }
+    return out;
+  }
+
+  @override
+  Future<void> toggleReaction({
+    required String postId,
+    required String emoji,
+    required bool on,
+  }) async {
+    if (!DiaryReaction.isValidEmoji(emoji)) return;
+
+    final all = await fetchReactions();
+    final mine = DiaryReaction(postId: postId, deviceId: deviceId, emoji: emoji);
+    final next = <DiaryReaction>[
+      for (final r in all)
+        if (r.key != mine.key) r,
+      if (on) mine,
+    ];
+
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(
+      _kReactionsKey,
+      jsonEncode(next.map((e) => e.toJson()).toList(growable: false)),
+    );
+  }
+
   /// 相册选出来的是缓存路径，会被系统清掉 —— 必须复制进 App 私有目录
   Future<List<String>> _copyIntoAppDir(List<String> sources) async {
     if (sources.isEmpty) return const <String>[];
@@ -294,6 +362,9 @@ class SupabaseDiaryRepository extends DiaryRepository {
       'device_id': deviceId,
       'author_name': draft.authorName,
       'anonymous': draft.anonymous,
+      'title': draft.title,
+      // ★ 匿名就不带地区出去
+      'location': draft.anonymous ? '' : draft.location,
       'content': draft.content,
       'images': urls,
       'mood': draft.mood.label,
@@ -346,6 +417,48 @@ class SupabaseDiaryRepository extends DiaryRepository {
         .single();
 
     return DiaryComment.fromJson(Map<String, dynamic>.from(data as Map));
+  }
+
+  // ── 表情反应 ──────────────────────────────────────────────────────
+
+  @override
+  Future<List<DiaryReaction>> fetchReactions(
+      {int limit = kDiaryReactionLimit}) async {
+    final data = await _db.from(kDiaryReactionTable).select().limit(limit);
+    final rows = (data as List).cast<Map<String, dynamic>>();
+    return rows
+        .map(DiaryReaction.fromJson)
+        .where((r) => DiaryReaction.isValidEmoji(r.emoji))
+        .toList(growable: false);
+  }
+
+  @override
+  Future<void> toggleReaction({
+    required String postId,
+    required String emoji,
+    required bool on,
+  }) async {
+    if (!DiaryReaction.isValidEmoji(emoji)) return;
+
+    if (on) {
+      // 靠 (post_id, device_id, emoji) 的唯一约束防重复，
+      // 重复点也只会是一条，不会把计数刷上去
+      await _db.from(kDiaryReactionTable).upsert(
+        <String, dynamic>{
+          'post_id': postId,
+          'device_id': deviceId,
+          'emoji': emoji,
+        },
+        onConflict: 'post_id,device_id,emoji',
+      );
+    } else {
+      await _db
+          .from(kDiaryReactionTable)
+          .delete()
+          .eq('post_id', postId)
+          .eq('device_id', deviceId)
+          .eq('emoji', emoji);
+    }
   }
 
   Future<List<String>> _uploadAll(List<String> sources) async {

@@ -41,11 +41,13 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   @override
   Widget build(BuildContext context) {
     final nav = context.watch<NavBarVisibility>();
+    // 跟随深/浅色，别再写死
+    final surface = Theme.of(context).scaffoldBackgroundColor;
 
     return LiquidGlassScope.stack(
-      background: Container(color: AppTheme.surfaceColor),
+      background: Container(color: surface),
       content: Scaffold(
-        backgroundColor: AppTheme.surfaceColor,
+        backgroundColor: surface,
         body: PageView(
           controller: _pageController,
           onPageChanged: _onPageChanged,
