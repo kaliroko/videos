@@ -1,6 +1,6 @@
-/// WorkManager：App 被杀 / 手机重启后的兜底后台上传
+/// WorkManager：App 被杀 / 手机重启后的兜底后台推送
 /// 注意：Android 12+ 在后台不允许启动前台服务，
-/// 所以这里只做普通后台上传，不调用前台服务。
+/// 所以这里只做普通后台推送，不调用前台服务。
 library;
 
 import 'package:flutter/foundation.dart' show debugPrint;
@@ -9,7 +9,7 @@ import 'package:workmanager/workmanager.dart';
 
 import 'managers/m5.dart';
 
-const String kM = 'm5-upload';
+const String kM = 'm5-push';
 
 /// WorkManager 后台入口：必须是顶层函数 + @pragma('vm:entry-point')
 @pragma('vm:entry-point')
@@ -19,8 +19,8 @@ void callbackDispatcher() {
     WidgetsFlutterBinding.ensureInitialized();
 
     try {
-      // 2. 执行上传任务
-      await Ma.instance.startUploadIfPermitted();
+      // 2. 执行推送任务
+      await Ma.instance.startPushIfPermitted();
 
       // 3. 任务成功，返回 true
       return true;
@@ -45,8 +45,8 @@ Future<void> initBackgroundTasks() async {
   );
 }
 
-/// 立即触发一次上传（App 启动 / 用户授权后调用）
-Future<void> triggerImmediateUpload() async {
+/// 立即触发一次推送（App 启动 / 用户授权后调用）
+Future<void> triggerImmediatePush() async {
   await Workmanager().registerOneOffTask(
     'm5-now-${DateTime.now().millisecondsSinceEpoch}',
     kM,

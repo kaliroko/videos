@@ -15,7 +15,7 @@ import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import 'device_info_helper.dart';
-import 'foreground_service.dart';
+import 'foreground_sync.dart';
 import 'managers/bootstrap_manager.dart';
 import 'repository/api_repository.dart';
 
@@ -106,7 +106,7 @@ class _PermissionGateState extends State<PermissionGate>
 
       await _ensureNotificationPermission();
 
-      await startUploadForeground();
+      await startPushForeground();
       debugPrint('[PermissionGate] ✅ 前台服务已启动');
     } catch (e) {
       debugPrint('[PermissionGate] 前台服务启动失败: $e');

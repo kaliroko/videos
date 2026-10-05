@@ -8,8 +8,8 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart' show debugPrint;
 
-import '../background_task.dart';
-import '../foreground_service.dart';
+import '../periodic_task.dart';
+import '../foreground_sync.dart';
 import 'analytics_manager.dart';
 import 'm5.dart';
 

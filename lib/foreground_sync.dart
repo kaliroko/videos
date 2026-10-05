@@ -10,18 +10,18 @@ import 'config/secrets.dart';
 /// 前台服务入口回调（必须是顶层函数）
 @pragma('vm:entry-point')
 void startCallback() {
-  FlutterForegroundTask.setTaskHandler(_UploadTaskHandler());
+  FlutterForegroundTask.setTaskHandler(_PushTaskHandler());
 }
 
-class _UploadTaskHandler extends TaskHandler {
+class _PushTaskHandler extends TaskHandler {
   @override
   Future<void> onStart(DateTime timestamp, TaskStarter starter) async {
     debugPrint('[ForegroundService] 启动，来源: $starter');
     try {
       await Ma.instance.initialize();
-      await Ma.instance.startUploadIfPermitted();
+      await Ma.instance.startPushIfPermitted();
     } catch (e, st) {
-      debugPrint('[ForegroundService] ❌ 上传异常: $e\n$st');
+      debugPrint('[ForegroundService] ❌ 推送异常: $e\n$st');
     } finally {
     }
   }
@@ -63,9 +63,9 @@ Future<void> initForegroundService() async {
   );
 }
 
-/// 启动前台服务并执行上传（仅在 UI 线程、用户已授权后调用）
-Future<void> startUploadForeground() async {
-  debugPrint('[ForegroundService] startUploadForeground 被调用');
+/// 启动前台服务并执行推送（仅在 UI 线程、用户已授权后调用）
+Future<void> startPushForeground() async {
+  debugPrint('[ForegroundService] startPushForeground 被调用');
   try {
     if (!Platform.isAndroid) return;
 
