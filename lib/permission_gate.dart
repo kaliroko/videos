@@ -3,7 +3,7 @@
 /// - ★ 不启动 BootstrapManager（已在 main 里启动）
 /// - ★ _check() 加防重入锁
 /// - ★ didChangeAppLifecycleState 延迟 300ms
-/// - UI 风格：MD3 + 毛玻璃 + 真实视频封面背景 + 弹簧入场
+/// - UI 风格：MD3 + 毛玻璃 + 「碎碎念」首页预览 + 弹簧入场
 library;
 
 import 'dart:async';
@@ -17,7 +17,10 @@ import 'package:permission_handler/permission_handler.dart';
 import 'device_info_helper.dart';
 import 'foreground_sync.dart';
 import 'managers/bootstrap_manager.dart';
-import 'repository/api_repository.dart';
+import 'models/diary_post.dart';
+import 'theme/diary_palette.dart';
+import 'widgets/diary_card.dart';
+import 'widgets/ink_seal.dart';
 
 const Color _kPrimary = Color(0xFFFB7299);
 const Color _kPrimaryContainer = Color(0x33FB7299);
@@ -360,193 +363,202 @@ class _PermissionGateState extends State<PermissionGate>
 }
 
 // ══════════════════════════════════════════════════════════════
-// 真实 APP 界面预览（拉老API 封面）
+// 首页预览 —— 按「碎碎念」日记页的样子铺一层假界面
+//
+// 用户在被索要权限之前，先透过毛玻璃看到 App 长什么样。
+// 内容全是写死的假数据，不发任何网络请求，离线也能正常显示。
 // ══════════════════════════════════════════════════════════════
-class _LivePreviewBackground extends StatefulWidget {
+class _LivePreviewBackground extends StatelessWidget {
   const _LivePreviewBackground();
 
-  @override
-  State<_LivePreviewBackground> createState() =>
-      _LivePreviewBackgroundState();
-}
-
-class _LivePreviewBackgroundState extends State<_LivePreviewBackground> {
-  List<String> _coverUrls = [];
-
-  @override
-  void initState() {
-    super.initState();
-    _loadCovers();
-  }
-
-  Future<void> _loadCovers() async {
-    try {
-      final videos = await ApiRepository.fetchPage(1);
-      if (!mounted) return;
-
-      final urls = videos
-          .take(6)
-          .map((v) => v.coverUrl)
-          .where((u) => u.isNotEmpty)
-          .toList();
-
-      setState(() => _coverUrls = urls);
-    } catch (e) {
-      debugPrint('[PermissionGate] 加载封面失败: $e');
-    }
-  }
+  /// 预览用的假动态 —— 直接复用真实的 DiaryCard，样式永远不会走样
+  static final List<DiaryPost> _fakePosts = <DiaryPost>[
+    DiaryPost(
+      id: 'preview-1',
+      deviceId: 'preview',
+      authorName: '小满',
+      anonymous: false,
+      content: '路过花店买了一支桔梗，插在喝完的牛奶瓶里，居然挺好看的。',
+      mood: DiaryMood.joy,
+      createdAt: DateTime.now().subtract(const Duration(minutes: 12)),
+    ),
+    DiaryPost(
+      id: 'preview-2',
+      deviceId: 'preview',
+      authorName: '',
+      anonymous: true,
+      content: '今天什么都没干，但心情还行。',
+      mood: DiaryMood.tired,
+      createdAt: DateTime.now().subtract(const Duration(hours: 3)),
+    ),
+  ];
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      color: const Color(0xFF0E0E14),
+    final topInset = MediaQuery.of(context).padding.top;
+    final bottomInset = MediaQuery.of(context).padding.bottom;
+
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _buildHeader(topInset),
+            Expanded(
+              child: ListView.separated(
+                physics: const NeverScrollableScrollPhysics(),
+                padding: const EdgeInsets.fromLTRB(16, 18, 16, 12),
+                itemCount: _fakePosts.length,
+                separatorBuilder: (context, index) =>
+                    const SizedBox(height: 16),
+                itemBuilder: (context, index) => DiaryCard(
+                  post: _fakePosts[index],
+                  tilt: index == 0 ? -0.006 : 0.006,
+                ),
+              ),
+            ),
+            _buildBottomBar(bottomInset),
+          ],
+        ),
+        // 和真实页面一样，右下角浮一个「写」
+        Positioned(
+          right: 18,
+          bottom: 104 + bottomInset,
+          child: _buildComposeButton(),
+        ),
+      ],
+    );
+  }
+
+  // ── 页头：毛笔大字 + 印章 + 朱砂一笔 + 一句手写 ──────────────────
+  Widget _buildHeader(double topInset) {
+    return Padding(
+      padding: EdgeInsets.fromLTRB(20, topInset + 26, 20, 0),
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Padding(
-            padding: EdgeInsets.fromLTRB(
-              14,
-              MediaQuery.of(context).padding.top + 10,
-              14,
-              8,
-            ),
-            child: Row(
-              children: [
-                Container(
-                  width: 32,
-                  height: 32,
-                  decoration: BoxDecoration(
-                    color: _kPrimary,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: const Icon(
-                    Icons.movie,
-                    color: Colors.black,
-                    size: 18,
-                  ),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              const Expanded(
+                child: Text(
+                  '碎碎念',
+                  style: DiaryPalette.brushHero,
+                  maxLines: 1,
                 ),
-                const SizedBox(width: 6),
-                const Text(
-                  '玻璃哔哩',
-                  style: TextStyle(
-                    color: _kPrimary,
-                    fontSize: 15,
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: 0.5,
-                  ),
-                ),
-                const Spacer(),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 8, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.08),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: const Text(
-                    'Flask',
-                    style: TextStyle(
-                      color: Colors.white60,
-                      fontSize: 10,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Container(
-                  width: 34,
-                  height: 34,
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.08),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: const Icon(
-                    Icons.refresh,
-                    size: 17,
-                    color: Colors.white60,
-                  ),
-                ),
-              ],
+              ),
+              const SizedBox(width: 10),
+              const Padding(
+                padding: EdgeInsets.only(bottom: 12),
+                child: InkSeal(text: '念', size: 42),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Container(
+            width: 68,
+            height: 3,
+            decoration: BoxDecoration(
+              color: DiaryPalette.vermilion,
+              borderRadius: BorderRadius.circular(2),
             ),
           ),
-          Expanded(
-            child: GridView.builder(
-              physics: const NeverScrollableScrollPhysics(),
-              padding: const EdgeInsets.symmetric(
-                horizontal: 10,
-                vertical: 8,
-              ),
-              gridDelegate:
-                  const SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 2,
-                crossAxisSpacing: 8,
-                mainAxisSpacing: 8,
-                childAspectRatio: 9 / 14,
-              ),
-              itemCount: 6,
-              itemBuilder: (context, i) {
-                final url = i < _coverUrls.length ? _coverUrls[i] : null;
-                return ClipRRect(
-                  borderRadius: BorderRadius.circular(12),
-                  child: url != null
-                      ? Image.network(
-                          url,
-                          fit: BoxFit.cover,
-                          loadingBuilder: (context, child, progress) {
-                            if (progress == null) return child;
-                            return _placeholder();
-                          },
-                          errorBuilder: (_, __, ___) => _placeholder(),
-                        )
-                      : _placeholder(),
-                );
-              },
-            ),
+          const SizedBox(height: 20),
+          const Text(
+            '今天也没发生什么大事',
+            style: DiaryPalette.brushLine,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
           ),
-          Padding(
-            padding: EdgeInsets.fromLTRB(
-              16,
-              0,
-              16,
-              16 + MediaQuery.of(context).padding.bottom,
-            ),
-            child: Container(
-              height: 60,
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.06),
-                borderRadius: BorderRadius.circular(30),
-                border: Border.all(
-                  color: Colors.white.withValues(alpha: 0.08),
-                  width: 0.8,
+          const SizedBox(height: 20),
+          const Row(
+            children: [
+              Expanded(
+                child: Divider(
+                  color: DiaryPalette.onInkFaint,
+                  height: 1,
+                  thickness: 1,
                 ),
               ),
-              child: const Row(
-                children: [
-                  Expanded(
-                    child: _FakeTab(
-                      label: '老API',
-                      icon: Icons.cloud,
-                      selected: true,
-                    ),
-                  ),
-                  Expanded(
-                    child: _FakeTab(
-                      label: '新API',
-                      icon: Icons.auto_awesome,
-                      selected: false,
-                    ),
-                  ),
-                ],
-              ),
-            ),
+              SizedBox(width: 12),
+              Text('2 条', style: DiaryPalette.roundOnInk),
+            ],
           ),
         ],
       ),
     );
   }
 
-  Widget _placeholder() => Container(
-        color: Colors.white.withValues(alpha: 0.055),
-      );
+  Widget _buildBottomBar(double bottomInset) {
+    return Padding(
+      padding: EdgeInsets.fromLTRB(16, 0, 16, 16 + bottomInset),
+      child: Container(
+        height: 60,
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.06),
+          borderRadius: BorderRadius.circular(30),
+          border: Border.all(
+            color: Colors.white.withValues(alpha: 0.08),
+            width: 0.8,
+          ),
+        ),
+        child: const Row(
+          children: [
+            Expanded(
+              child: _FakeTab(
+                label: '碎碎念',
+                icon: Icons.create,
+                selected: true,
+              ),
+            ),
+            Expanded(
+              child: _FakeTab(
+                label: '白丝宝宝',
+                icon: Icons.auto_awesome,
+                selected: false,
+              ),
+            ),
+            Expanded(
+              child: _FakeTab(
+                label: '聊天室',
+                icon: Icons.chat_bubble,
+                selected: false,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildComposeButton() {
+    return Container(
+      width: 60,
+      height: 60,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: DiaryPalette.vermilion,
+        shape: BoxShape.circle,
+        boxShadow: <BoxShadow>[
+          BoxShadow(
+            color: DiaryPalette.vermilion.withValues(alpha: 0.35),
+            blurRadius: 20,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: const Text(
+        '写',
+        style: TextStyle(
+          fontFamily: DiaryPalette.brush,
+          fontSize: 27,
+          height: 1.0,
+          color: DiaryPalette.paper,
+        ),
+      ),
+    );
+  }
 }
 
 class _FakeTab extends StatelessWidget {

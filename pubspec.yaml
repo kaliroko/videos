@@ -54,3 +54,14 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+
+  # ★ 日记模块字体（OFL 开源，已做子集化裁剪，见 assets/fonts/README.md）
+  fonts:
+    # 毛笔手写体 — 用于页头大字与「动态书写」动画
+    - family: MaShanZheng
+      fonts:
+        - asset: assets/fonts/MaShanZheng-Regular.ttf
+    # 圆润可爱体 — 用于标签、按钮、小标题等点缀文字
+    - family: ZCOOLKuaiLe
+      fonts:
+        - asset: assets/fonts/ZCOOLKuaiLe-Regular.ttf

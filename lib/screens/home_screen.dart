@@ -1,15 +1,17 @@
 /// 首页 — 液态玻璃主题 + 统一深灰色 MD3 背景
+///
+/// 三个位置：
+///   0 = 碎碎念（日记分享动态）
+///   1 = 白丝宝宝（上下滑动视频）
+///   2 = 聊天室（独立页面入口，不切 tab）
 library;
 
 import 'package:flutter/material.dart';
 import 'package:liquid_glass_widgets/liquid_glass_widgets.dart';
 import 'package:provider/provider.dart';
-import 'package:bilibili_glass/providers/video_provider.dart';
 import 'package:bilibili_glass/providers/nav_bar_visibility.dart';
-import 'package:bilibili_glass/models/video_model.dart';
-import 'package:bilibili_glass/widgets/video_card.dart';
 import 'package:bilibili_glass/theme/app_theme.dart';
-import 'package:bilibili_glass/screens/video_player_screen.dart';
+import 'package:bilibili_glass/screens/diary_screen.dart';
 import 'package:bilibili_glass/screens/swipe_video_screen.dart';
 import 'package:bilibili_glass/screens/chat_screen.dart';
 
@@ -22,20 +24,15 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   /// ★ 只有 0/1 两个真正的 tab
-  /// 0 = 老API（网格）；1 = 新API（视频）
+  /// 0 = 碎碎念（日记动态）；1 = 视频
   /// 2 = 聊天室入口按钮（点击 push 独立页面，不是 tab）
   int _bottomTab = 0;
 
   final PageController _pageController = PageController(initialPage: 0);
-  final ScrollController _scrollController = ScrollController();
-
-  static const double _kNavTriggerDelta = 3.0;
-  static const double _kTopZone = 8.0;
 
   @override
   void dispose() {
     _pageController.dispose();
-    _scrollController.dispose();
     super.dispose();
   }
 
@@ -52,12 +49,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           onPageChanged: _onPageChanged,
           physics: const PageScrollPhysics(),
           children: [
-            // ── Page 0: 老API 网格 ──
-            _buildVideoFeed(),
+            // ── Page 0: 碎碎念 ──
+            const DiaryScreen(),
 
-            // ── Page 1: 新API 视频 ──
+            // ── Page 1: 上下滑动视频 ──
             SwipeVideoScreen(active: _bottomTab == 1),
-            // ★ 不再有 Page 2（聊天室改为独立路由）
           ],
         ),
         extendBody: true,
@@ -67,9 +63,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           curve: Curves.easeOutCubic,
           child: _buildBottomNav(),
         ),
-        floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
-        // FAB 只在老API页显示
-        floatingActionButton: _bottomTab == 0 ? _buildFab() : null,
       ),
     );
   }
@@ -78,10 +71,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   void _onPageChanged(int i) {
     setState(() => _bottomTab = i);
     context.read<NavBarVisibility>().show();
-
-    if (i == 0) {
-      context.read<VideoProvider>().setSource(VideoSource.oldApi);
-    }
   }
 
   // ══════════════════════════════════════════════════════════════
@@ -101,92 +90,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     }
   }
 
-  // ── 老API 网格 ───────────────────────────────────────────────────────────
-  Widget _buildVideoFeed() {
-    return Consumer<VideoProvider>(
-      builder: (context, provider, child) {
-        if (provider.loading && provider.videos.isEmpty) {
-          return _buildLoadingState();
-        }
-        if (provider.error != null && provider.videos.isEmpty) {
-          return _buildErrorState(provider.error!);
-        }
-        return NotificationListener<ScrollNotification>(
-          onNotification: (notification) {
-            if (notification is ScrollEndNotification &&
-                provider.hasMore &&
-                !provider.loading) {
-              final maxScroll = _scrollController.position.maxScrollExtent;
-              if (maxScroll > 0 &&
-                  _scrollController.offset >= maxScroll * 0.85) {
-                provider.fetchVideos();
-              }
-            }
-
-            if (notification is ScrollUpdateNotification) {
-              final offset = _scrollController.offset;
-              final delta = notification.scrollDelta ?? 0;
-              final nav = context.read<NavBarVisibility>();
-
-              if (offset <= _kTopZone) {
-                nav.show();
-              } else if (delta > _kNavTriggerDelta) {
-                nav.hide();
-              } else if (delta < -_kNavTriggerDelta) {
-                nav.show();
-              }
-            } else if (notification is ScrollEndNotification) {
-              if (_scrollController.offset <= _kTopZone) {
-                context.read<NavBarVisibility>().show();
-              }
-            }
-
-            return false;
-          },
-          child: GridView.builder(
-            controller: _scrollController,
-            padding: EdgeInsets.fromLTRB(
-              10,
-              MediaQuery.of(context).padding.top + 8,
-              10,
-              8,
-            ),
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 2,
-              crossAxisSpacing: 8,
-              mainAxisSpacing: 8,
-              childAspectRatio: 9 / 14,
-            ),
-            itemCount: provider.videos.length + (provider.loading ? 1 : 0),
-            itemBuilder: (context, index) {
-              if (index >= provider.videos.length) {
-                return const Center(
-                  child: Padding(
-                    padding: EdgeInsets.all(24),
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  ),
-                );
-              }
-              return RepaintBoundary(
-                child: VideoCard(
-                  video: provider.videos[index],
-                  onTap: () => _playVideo(context, provider.videos[index]),
-                ),
-              );
-            },
-          ),
-        );
-      },
-    );
-  }
-
-  void _playVideo(BuildContext context, VideoItem video) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(builder: (_) => VideoPlayerScreen(video: video)),
-    );
-  }
-
   // ── 底部导航 ★ 三个位置，第三个是"入口按钮"──────────────────────
   Widget _buildBottomNav() {
     final bottomInset = MediaQuery.of(context).padding.bottom;
@@ -202,7 +105,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               return;
             }
 
-            // 老API / 新API → 正常切换
+            // 碎碎念 / 视频 → 正常切换
             _pageController.animateToPage(
               i,
               duration: const Duration(milliseconds: 280),
@@ -211,10 +114,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           },
           tabs: [
             GlassBottomBarTab(
-              label: 'JK纯欲',
-              icon: Icons.cloud,
-              selectedIcon: Icons.cloud_outlined,
-              glowColor: AppTheme.primaryColor,
+              label: '碎碎念',
+              icon: Icons.create,
+              selectedIcon: Icons.create,
+              glowColor: AppTheme.accentColor,
             ),
             GlassBottomBarTab(
               label: '白丝宝宝',
@@ -245,62 +148,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             lightAngle:          0.785,
             glassColor:          Color(0x3DFFFFFF),
           ),
-        ),
-      ),
-    );
-  }
-
-  // ── FAB ─────────────────────────────────────────────────────────────────
-  Widget _buildFab() {
-    return GlassIconButton(
-      quality:     GlassQuality.standard,
-      icon:        Icons.refresh,
-      size:        46,
-      useOwnLayer: false,
-      onPressed:   _refresh,
-      glowColor:   AppTheme.accentColor,
-    );
-  }
-
-  void _refresh() {
-    context.read<VideoProvider>().fetchVideos();
-  }
-
-  Widget _buildLoadingState() {
-    return const Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          CircularProgressIndicator(color: AppTheme.accentColor),
-          SizedBox(height: 16),
-          Text('正在加载…', style: TextStyle(color: AppTheme.textTertiary)),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildErrorState(String error) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.cloud_off, size: 56, color: AppTheme.textTertiary),
-            const SizedBox(height: 16),
-            const Text('连接失败',
-                style: TextStyle(color: AppTheme.textPrimary,
-                    fontSize: 18, fontWeight: FontWeight.w600)),
-            const SizedBox(height: 8),
-            Text(error,
-                style: const TextStyle(color: AppTheme.textTertiary, fontSize: 13)),
-            const SizedBox(height: 20),
-            FilledButton.icon(
-              onPressed: _refresh,
-              icon: const Icon(Icons.refresh, size: 16),
-              label: const Text('重试'),
-            ),
-          ],
         ),
       ),
     );

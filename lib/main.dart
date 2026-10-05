@@ -12,7 +12,7 @@ import 'managers/app_update_manager.dart';
 import 'managers/analytics_manager.dart';
 import 'managers/remote_config_manager.dart';
 import 'permission_gate.dart';
-import 'providers/video_provider.dart';
+import 'providers/diary_provider.dart';
 import 'providers/nav_bar_visibility.dart';
 import 'security/integrity_guard.dart';
 import 'widgets/remote_gate.dart';
@@ -145,7 +145,7 @@ class _BiliGlassAppState extends State<BiliGlassApp> {
       onGranted: _onPermissionGranted,
       child: MultiProvider(
         providers: [
-          ChangeNotifierProvider(create: (_) => VideoProvider()..fetchVideos()),
+          ChangeNotifierProvider(create: (_) => DiaryProvider()..init()),
           ChangeNotifierProvider(create: (_) => NavBarVisibility()),
         ],
         child: MaterialApp(
