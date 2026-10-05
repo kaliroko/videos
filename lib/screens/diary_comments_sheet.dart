@@ -145,12 +145,16 @@ class _CommentRow extends StatelessWidget {
                       ),
                     ),
                   ],
-                  const SizedBox(width: 8),
-                  Text(
-                    diaryTimeLabel(comment.createdAt),
-                    style: DiaryPalette.brushOnPaper,
-                  ),
                 ],
+              ),
+              // ★ 时间和卡片一样单独占一行：完整日期（含年月日）挺长的，
+              //   和昵称挤在同一行会把名字压没
+              const SizedBox(height: 2),
+              Text(
+                diaryTimeLabel(comment.createdAt),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: DiaryPalette.timeOnPaper,
               ),
               const SizedBox(height: 4),
               Text(

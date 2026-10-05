@@ -225,8 +225,11 @@ class _DiaryCardState extends State<DiaryCard> {
               ),
               const SizedBox(height: 1),
               Text(
+                // 完整版：相对时间 + 年月日
                 diaryTimeLabel(post.createdAt),
-                style: DiaryPalette.brushOnPaper,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: DiaryPalette.timeOnPaper,
               ),
             ],
           ),

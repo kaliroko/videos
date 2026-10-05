@@ -189,6 +189,16 @@ class DiaryPalette {
         letterSpacing: 0.5,
       );
 
+  /// 纸片上的时间 / 日期。
+  /// ★ 圆体：日期里的「年」「月」不在毛笔子集里，用毛笔体会回退成系统字体。
+  static TextStyle get timeOnPaper => TextStyle(
+        fontFamily: round,
+        fontSize: 12,
+        height: 1.3,
+        color: onPaperFaint,
+        letterSpacing: 0.2,
+      );
+
   /// 页头大字下方的小字
   static TextStyle get heroNote => TextStyle(
         fontFamily: round,
