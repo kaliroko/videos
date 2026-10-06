@@ -26,7 +26,7 @@ if (keystorePropertiesFile.exists()) {
 val hasKeystore = keystorePropertiesFile.exists() && keystoreProperties.getProperty("storeFile")?.isNotEmpty() == true
 
 android {
-    namespace = "com.metamorphosis.bilibiliglass"
+    namespace = "com.suisuinian.app"
     compileSdk = 36
     ndkVersion = flutter.ndkVersion
 
@@ -47,7 +47,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.metamorphosis.bilibiliglass"
+        applicationId = "com.suisuinian.app"
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutterVersionCode.toInt()

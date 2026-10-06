@@ -1,4 +1,4 @@
-package com.metamorphosis.bilibiliglass
+package com.suisuinian.app
 
 import android.animation.Animator
 import android.animation.AnimatorListenerAdapter
@@ -47,11 +47,11 @@ class MainActivity : FlutterActivity() {
         super.onCreate(savedInstanceState)
 
         // ═══════════════════════════════════════════════════════
-        // ★★★ 最先执行：签名校验 ★★★
+        // ★★★ 最先执行：签名 + Frida + 抓包 综合校验 ★★★
         //   校验失败：Toast → finishAffinity → killProcess
         //   不区分 debug / release，一律强制校验
         // ═══════════════════════════════════════════════════════
-        if (!IntegrityGuard.verifySignature(this)) {
+        if (IntegrityGuard.fullCheck(this) != null) {
             exitForTampered()
             return
         }
