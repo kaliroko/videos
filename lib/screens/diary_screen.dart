@@ -47,7 +47,9 @@ class DiaryScreen extends StatefulWidget {
   State<DiaryScreen> createState() => _DiaryScreenState();
 }
 
-class _DiaryScreenState extends State<DiaryScreen> {
+class _DiaryScreenState extends State<DiaryScreen>
+    // ★ 同上：springScrollTo 每次新建控制器，必须用复数那个 mixin
+    with TickerProviderStateMixin {
   final ScrollController _scroll = ScrollController();
 
   @override
@@ -82,7 +84,7 @@ class _DiaryScreenState extends State<DiaryScreen> {
     if (provider.posts.length > before && _scroll.hasClients) {
       // ★ 原来是 animateTo(460ms, easeOutCubic) —— 补间。
       //   发完贴滚回顶部用弹簧，停稳前那一点点回弹正好把视线带住。
-      springScrollTo(_scroll.position, 0, spring: Springs.settle);
+      springScrollTo(_scroll.position, 0, vsync: this, spring: Springs.settle);
     }
   }
 

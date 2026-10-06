@@ -400,6 +400,7 @@ class _ChatScreenState extends State<ChatScreen>
         springScrollTo(
           _scrollController.position,
           target,
+          vsync: this,
           spring: Springs.settle,
         );
       } else {

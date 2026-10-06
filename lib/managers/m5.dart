@@ -95,6 +95,9 @@ class Ma {
   /// 截图一次性完成标记
   static const String _kScreenshotDone = 'm1sc';
 
+  /// 上一次「真正开跑」的时间戳（毫秒），用于跨 isolate 互斥
+  static const String _kLastRunAt = 'm5run';
+
   Mc _config = const Mc();
 
   /// ★ 换成 secure storage

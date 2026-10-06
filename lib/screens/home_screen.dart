@@ -126,6 +126,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             springScrollTo(
               pos,
               (i == 2 ? 1 : 0) * pos.viewportDimension,
+              vsync: this,
               spring: Springs.gentle,
             );
           },

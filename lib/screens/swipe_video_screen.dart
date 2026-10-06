@@ -34,7 +34,10 @@ class SwipeVideoScreen extends StatefulWidget {
   State<SwipeVideoScreen> createState() => _SwipeVideoScreenState();
 }
 
-class _SwipeVideoScreenState extends State<SwipeVideoScreen> {
+class _SwipeVideoScreenState extends State<SwipeVideoScreen>
+    // ★ 用复数那个 mixin：springScrollTo 每次调用都新建一个控制器，
+    //   而 SingleTickerProviderStateMixin 只允许创建一次 ticker，会 assert
+    with TickerProviderStateMixin {
   late final PageController _controller;
 
   final List<VideoItem> _videos = [];
@@ -318,6 +321,7 @@ class _SwipeVideoScreenState extends State<SwipeVideoScreen> {
       springScrollTo(
         pos,
         next > pos.maxScrollExtent ? pos.maxScrollExtent : next,
+        vsync: this,
         spring: Springs.gentle,
       );
     }
