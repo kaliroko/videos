@@ -25,6 +25,9 @@ alter table public.diary_posts
   add column if not exists title    text not null default '';
 alter table public.diary_posts
   add column if not exists location text not null default '';
+-- 带头像的卡片才显示照片；匿名发布时客户端会写空串
+alter table public.diary_posts
+  add column if not exists avatar_url text not null default '';
 
 create index if not exists diary_posts_created_at_idx
   on public.diary_posts (created_at desc);
@@ -160,6 +163,25 @@ create policy diary_images_read
 create policy diary_images_write
   on storage.objects for insert
   with check (bucket_id = 'diary_images');
+
+-- ── 4b. 头像存储桶 ────────────────────────────────────────────────────
+-- 首次启动的引导页会把用户选的头像传到这里，日记卡片再按 avatar_url 取。
+-- 桶不建的话上传会失败，客户端会退回本地文件路径 —— 表现就是
+-- 「自己看得到头像、别人看不到」，所以这个桶必须建。
+insert into storage.buckets (id, name, public)
+values ('avatars', 'avatars', true)
+on conflict (id) do update set public = true;
+
+drop policy if exists avatars_read  on storage.objects;
+drop policy if exists avatars_write on storage.objects;
+
+create policy avatars_read
+  on storage.objects for select
+  using (bucket_id = 'avatars');
+
+create policy avatars_write
+  on storage.objects for insert
+  with check (bucket_id = 'avatars');
 
 -- ══════════════════════════════════════════════════════════════════════
 -- 自检

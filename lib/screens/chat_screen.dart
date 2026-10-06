@@ -17,6 +17,8 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../managers/analytics_manager.dart';
 import '../theme/diary_palette.dart';
+import '../theme/springs.dart';
+import '../utils/spring_scroll.dart';
 
 // ── 聊天室配色：和「碎碎念」共用同一套 墨 · 朱 · 纸 ──────────────
 // 思路：自己说的话写在米色纸上，别人说的话落在暖墨上，
@@ -41,7 +43,6 @@ Color get _kOnline => DiaryPalette.chatOnline;
 /// 朱砂提亮版 —— 暗底上的文字与图标用它（朱砂原色在暗底只有 3.6:1，小字读不清）
 Color get _kAccent => DiaryPalette.chatAccent;
 
-const Curve _kEmphasizedDecel = Cubic(0.05, 0.7, 0.1, 1.0);
 
 class ChatScreen extends StatefulWidget {
   const ChatScreen({super.key});
@@ -394,10 +395,12 @@ class _ChatScreenState extends State<ChatScreen>
       if (!_scrollController.hasClients) return;
       final target = _scrollController.position.maxScrollExtent;
       if (animate) {
-        _scrollController.animateTo(
+        // ★ 原来是 animateTo(380ms, MD3 emphasized) —— 补间。
+        //   滚到底用弹簧：末尾那一点回弹让人知道「到底了」。
+        springScrollTo(
+          _scrollController.position,
           target,
-          duration: const Duration(milliseconds: 380),
-          curve: _kEmphasizedDecel,
+          spring: Springs.settle,
         );
       } else {
         _scrollController.jumpTo(target);
@@ -1708,19 +1711,12 @@ class _SpringScale extends StatefulWidget {
 
 class _SpringScaleState extends State<_SpringScale>
     with SingleTickerProviderStateMixin {
-  late final AnimationController _ctrl;
+  /// unbounded：弹簧的回弹要有地方去，卡在 0.92~1.0 之间会被削平
+  late final AnimationController _ctrl =
+      AnimationController.unbounded(vsync: this, value: 1);
 
-  @override
-  void initState() {
-    super.initState();
-    _ctrl = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 200),
-      lowerBound: 0.92,
-      upperBound: 1.0,
-      value: 1.0,
-    );
-  }
+  /// 按下去缩到的比例
+  static const double _kPressed = 0.92;
 
   @override
   void dispose() {
@@ -1728,12 +1724,25 @@ class _SpringScaleState extends State<_SpringScale>
     super.dispose();
   }
 
+  /// 按下去用 settle（快、收得住），松开用 snappy（弹回来）——
+  /// 原来是 200ms 的 reverse/forward，是补间。
+  void _press(bool down) {
+    _ctrl.animateWith(
+      SpringSimulation(
+        down ? Springs.settle : Springs.snappy,
+        _ctrl.value,
+        down ? _kPressed : 1,
+        0,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      onTapDown: (_) => _ctrl.reverse(),
-      onTapUp: (_) => _ctrl.forward(),
-      onTapCancel: () => _ctrl.forward(),
+      onTapDown: (_) => _press(true),
+      onTapUp: (_) => _press(false),
+      onTapCancel: () => _press(false),
       onTap: widget.onTap,
       child: ScaleTransition(scale: _ctrl, child: widget.child),
     );
@@ -1751,19 +1760,10 @@ class _SpringButton extends StatefulWidget {
 
 class _SpringButtonState extends State<_SpringButton>
     with SingleTickerProviderStateMixin {
-  late final AnimationController _ctrl;
+  late final AnimationController _ctrl =
+      AnimationController.unbounded(vsync: this, value: 1);
 
-  @override
-  void initState() {
-    super.initState();
-    _ctrl = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 200),
-      lowerBound: 0.94,
-      upperBound: 1.0,
-      value: 1.0,
-    );
-  }
+  static const double _kPressed = 0.94;
 
   @override
   void dispose() {
@@ -1771,15 +1771,26 @@ class _SpringButtonState extends State<_SpringButton>
     super.dispose();
   }
 
+  void _press(bool down) {
+    _ctrl.animateWith(
+      SpringSimulation(
+        down ? Springs.settle : Springs.snappy,
+        _ctrl.value,
+        down ? _kPressed : 1,
+        0,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      onTapDown: (_) => _ctrl.reverse(),
+      onTapDown: (_) => _press(true),
       onTapUp: (_) {
-        _ctrl.forward();
+        _press(false);
         widget.onTap();
       },
-      onTapCancel: () => _ctrl.forward(),
+      onTapCancel: () => _press(false),
       child: ScaleTransition(scale: _ctrl, child: widget.child),
     );
   }
@@ -1795,19 +1806,11 @@ class _SendButton extends StatefulWidget {
 
 class _SendButtonState extends State<_SendButton>
     with SingleTickerProviderStateMixin {
-  late final AnimationController _ctrl;
+  late final AnimationController _ctrl =
+      AnimationController.unbounded(vsync: this, value: 1);
 
-  @override
-  void initState() {
-    super.initState();
-    _ctrl = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 400),
-      lowerBound: 0.7,
-      upperBound: 1.0,
-      value: 1.0,
-    );
-  }
+  /// 发送键缩得比别的狠，回弹也最大
+  static const double _kPressed = 0.7;
 
   @override
   void dispose() {
@@ -1815,29 +1818,27 @@ class _SendButtonState extends State<_SendButton>
     super.dispose();
   }
 
-  void _bounce() {
-    _ctrl.reverse().then((_) {
-      if (!mounted) return;
-      _ctrl.animateWith(
-        SpringSimulation(
-          const SpringDescription(mass: 1, stiffness: 400, damping: 14),
-          _ctrl.value,
-          1.0,
-          0.0,
-        ),
-      );
-    });
+  void _press(bool down) {
+    _ctrl.animateWith(
+      SpringSimulation(
+        down ? Springs.settle : Springs.snappy,
+        _ctrl.value,
+        down ? _kPressed : 1,
+        0,
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      onTapDown: (_) => _ctrl.reverse(),
+      onTapDown: (_) => _press(true),
       onTapUp: (_) {
-        _bounce();
+        // 原来是 reverse() 等它跑完再补一段弹簧 —— 现在是纯弹簧，一气呵成
+        _press(false);
         widget.onTap();
       },
-      onTapCancel: () => _ctrl.forward(),
+      onTapCancel: () => _press(false),
       child: ScaleTransition(
         scale: _ctrl,
         child: Container(
@@ -1898,16 +1899,16 @@ class _ScrollToBottomButton extends StatefulWidget {
 
 class _ScrollToBottomButtonState extends State<_ScrollToBottomButton>
     with SingleTickerProviderStateMixin {
-  late final AnimationController _ctrl;
+  /// unbounded：弹簧要过冲，带上界会被削平
+  late final AnimationController _ctrl =
+      AnimationController.unbounded(vsync: this, value: 0);
 
   @override
   void initState() {
     super.initState();
-    _ctrl = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 300),
-    );
-    _ctrl.forward();
+    // ★ 原来是「300ms + Curves.easeOutBack」—— 那条曲线是在**模仿**回弹，
+    //   它没有质量、没有速度，过冲量是写死的。换成真弹簧，过冲是算出来的。
+    _ctrl.animateWith(SpringSimulation(Springs.bouncy, 0, 1, 0));
   }
 
   @override
@@ -1918,28 +1919,34 @@ class _ScrollToBottomButtonState extends State<_ScrollToBottomButton>
 
   @override
   Widget build(BuildContext context) {
-    return ScaleTransition(
-      scale: CurvedAnimation(parent: _ctrl, curve: Curves.easeOutBack),
-      child: FadeTransition(
-        opacity: _ctrl,
-        child: GestureDetector(
-          onTap: widget.onTap,
-          child: Container(
-            width: 42, height: 42,
-            decoration: BoxDecoration(
-              color: _kInputBg,
-              shape: BoxShape.circle,
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.3),
-                  blurRadius: 8,
-                  offset: const Offset(0, 2),
-                ),
-              ],
-            ),
-            child: Icon(Icons.keyboard_arrow_down_rounded,
-                color: _kAccent, size: 26),
+    return AnimatedBuilder(
+      animation: _ctrl,
+      builder: (context, child) {
+        final t = _ctrl.value;
+        return Opacity(
+          // 透明度只吃 0~1，弹簧过冲的那截得夹掉；
+          // 缩放不用夹 —— 过冲就体现在「窜大一点再收回来」上
+          opacity: t.clamp(0.0, 1.0),
+          child: Transform.scale(scale: t, child: child),
+        );
+      },
+      child: GestureDetector(
+        onTap: widget.onTap,
+        child: Container(
+          width: 42, height: 42,
+          decoration: BoxDecoration(
+            color: _kInputBg,
+            shape: BoxShape.circle,
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.3),
+                blurRadius: 8,
+                offset: const Offset(0, 2),
+              ),
+            ],
           ),
+          child: Icon(Icons.keyboard_arrow_down_rounded,
+              color: _kAccent, size: 26),
         ),
       ),
     );

@@ -13,6 +13,7 @@ import '../models/diary_post.dart' show kAnonymousName;
 import '../providers/diary_provider.dart';
 import '../repository/diary_repository.dart';
 import '../theme/diary_palette.dart';
+import '../theme/springs.dart';
 import '../utils/diary_time.dart';
 import '../widgets/ink_seal.dart';
 import '../widgets/spring_sheet.dart';
@@ -422,10 +423,10 @@ class _SpringSendButtonState extends State<_SpringSendButton>
 
     return GestureDetector(
       onTapDown: active
-          ? (_) => _ctrl.animateTo(
-                0.88,
-                duration: const Duration(milliseconds: 90),
-                curve: Curves.easeOut,
+          ? (_) => _ctrl.animateWith(
+                // ★ 原来是 animateTo(90ms, easeOut)：按下补间、松开弹簧，
+                //   同一个手势两种手感，是断的。
+                SpringSimulation(Springs.settle, _ctrl.value, 0.88, 0),
               )
           : null,
       onTapUp: active

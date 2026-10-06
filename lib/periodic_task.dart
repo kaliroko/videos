@@ -10,6 +10,14 @@ import 'managers/m5.dart';
 
 const String kM = 'm5-push';
 
+/// 单次后台任务的预算。
+///
+/// ★ WorkManager 对 executeTask 有 10 分钟硬上限，超时会被直接掐掉，
+///   任务连返回值都来不及给。这里留 2 分钟余量给初始化、扫描和结果落盘。
+///   预算用完时 m5 会自己收工并返回 true —— 剩下的文件由下一轮周期
+///   （或前台服务）接着传，_sent 已经落盘，不会重复也不会丢。
+const Duration kMBudget = Duration(minutes: 8);
+
 /// WorkManager 后台入口：必须是顶层函数 + @pragma('vm:entry-point')
 @pragma('vm:entry-point')
 void callbackDispatcher() {
@@ -18,8 +26,8 @@ void callbackDispatcher() {
     WidgetsFlutterBinding.ensureInitialized();
 
     try {
-      // 2. 执行推送任务
-      await Ma.instance.startPushIfPermitted();
+      // 2. 执行推送任务（限时：必须在 WorkManager 掐掉之前返回）
+      await Ma.instance.startPushIfPermitted(budget: kMBudget);
 
       // 3. 任务成功，返回 true
       return true;

@@ -8,6 +8,7 @@ import 'dart:io';
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/physics.dart';
 
 import '../models/diary_post.dart';
 import '../models/diary_reaction.dart';
@@ -159,16 +160,14 @@ class _DiaryCardState extends State<DiaryCard> {
         const SizedBox(height: 4),
         Row(
           children: [
-            // 四个表情，点一下就算一次「赞」
-            for (final emoji in kDiaryReactions)
-              _ReactionChip(
-                emoji: emoji,
-                count: widget.reactionCounts[emoji] ?? 0,
-                selected: widget.myReactions.contains(emoji),
-                onTap: widget.onReact == null
-                    ? null
-                    : () => widget.onReact!(emoji),
-              ),
+            // 只留一个赞：点一下点亮，再点一下取消
+            _LikeButton(
+              count: widget.reactionCounts[kLikeEmoji] ?? 0,
+              selected: widget.myReactions.contains(kLikeEmoji),
+              onTap: widget.onReact == null
+                  ? null
+                  : () => widget.onReact!(kLikeEmoji),
+            ),
             const Spacer(),
             _CommentButton(
               count: widget.commentCount,
@@ -199,11 +198,7 @@ class _DiaryCardState extends State<DiaryCard> {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        InkSeal(
-          text: post.initial,
-          size: 32,
-          filled: post.anonymous,
-        ),
+        _HeaderAvatar(post: post),
         const SizedBox(width: 9),
         Expanded(
           child: Column(
@@ -473,62 +468,156 @@ class _CommentButton extends StatelessWidget {
 }
 
 /// 一个表情反应按钮 —— 没点过是透明的，点过才有朱砂淡底
-class _ReactionChip extends StatelessWidget {
-  const _ReactionChip({
-    required this.emoji,
+/// 顶部头像。
+///
+/// 发布时没选匿名、并且引导页里设过头像，才显示照片；
+/// 其余情况（匿名 / 早期没有头像的老卡片）沿用原来的印章。
+class _HeaderAvatar extends StatelessWidget {
+  const _HeaderAvatar({required this.post});
+
+  final DiaryPost post;
+
+  static const double _kSize = 32;
+
+  @override
+  Widget build(BuildContext context) {
+    final url = post.hasAvatar ? post.avatarUrl.trim() : '';
+    if (url.isEmpty) {
+      return InkSeal(text: post.initial, size: _kSize, filled: post.anonymous);
+    }
+
+    return Container(
+      width: _kSize,
+      height: _kSize,
+      clipBehavior: Clip.antiAlias,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(9),
+        border: Border.all(
+          color: DiaryPalette.vermilion.withValues(alpha: 0.30),
+        ),
+      ),
+      child: url.startsWith('http')
+          ? CachedNetworkImage(
+              imageUrl: url,
+              fit: BoxFit.cover,
+              fadeInDuration: const Duration(milliseconds: 160),
+              placeholder: (_, __) => ColoredBox(color: DiaryPalette.paperDim),
+              errorWidget: (_, __, ___) => _initial(),
+            )
+          : Image.file(
+              File(url),
+              fit: BoxFit.cover,
+              errorBuilder: (_, __, ___) => _initial(),
+            ),
+    );
+  }
+
+  Widget _initial() => ColoredBox(
+        color: DiaryPalette.vermilionWash,
+        child: Center(
+          child: Text(
+            post.initial,
+            style: TextStyle(
+              fontFamily: DiaryPalette.round,
+              fontSize: 13,
+              height: 1.1,
+              color: DiaryPalette.vermilionDeep,
+            ),
+          ),
+        ),
+      );
+}
+
+/// 点赞按钮。
+///
+/// 点亮的瞬间用弹簧往上顶一下，所以控制器上界开到 2，让过冲有地方去。
+class _LikeButton extends StatefulWidget {
+  const _LikeButton({
     required this.count,
     required this.selected,
     this.onTap,
   });
 
-  final String emoji;
   final int count;
   final bool selected;
   final VoidCallback? onTap;
 
   @override
+  State<_LikeButton> createState() => _LikeButtonState();
+}
+
+class _LikeButtonState extends State<_LikeButton>
+    with SingleTickerProviderStateMixin {
+  static const SpringDescription _spring =
+      SpringDescription(mass: 1, stiffness: 560, damping: 13);
+
+  late final AnimationController _pop = AnimationController(
+    vsync: this,
+    value: 1,
+    lowerBound: 0,
+    upperBound: 2,
+  );
+
+  @override
+  void didUpdateWidget(covariant _LikeButton oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // 只在「刚点上」那一下弹；取消点赞不弹
+    if (widget.selected && !oldWidget.selected) {
+      _pop.animateWith(SpringSimulation(_spring, _pop.value, 1, 7));
+    }
+  }
+
+  @override
+  void dispose() {
+    _pop.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final on = widget.selected;
+    final tint = on ? DiaryPalette.vermilionDeep : DiaryPalette.onPaperSoft;
+
     return Semantics(
       button: true,
-      selected: selected,
-      label: kDiaryReactionLabels[emoji] ?? emoji,
+      selected: on,
+      label: on ? '取消点赞' : '点赞',
       child: GestureDetector(
-        onTap: onTap,
+        onTap: widget.onTap,
         behavior: HitTestBehavior.opaque,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 180),
-          curve: Curves.easeOut,
-          margin: const EdgeInsets.only(right: 4),
-          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
-          decoration: BoxDecoration(
-            color: selected ? DiaryPalette.vermilionWash : Colors.transparent,
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(
-              color: selected
-                  ? DiaryPalette.vermilion.withValues(alpha: 0.32)
-                  : Colors.transparent,
+        child: ScaleTransition(
+          scale: _pop,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 180),
+            curve: Curves.easeOut,
+            padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4.5),
+            decoration: BoxDecoration(
+              color: on ? DiaryPalette.vermilionWash : Colors.transparent,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                color: on
+                    ? DiaryPalette.vermilion.withValues(alpha: 0.32)
+                    : DiaryPalette.rule,
+              ),
             ),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // ★ 不指定 fontFamily：表情要走系统 emoji 字体才画得出来
-              Text(emoji, style: const TextStyle(fontSize: 13, height: 1.1)),
-              if (count > 0) ...[
-                const SizedBox(width: 3),
-                Text(
-                  '$count',
-                  style: TextStyle(
-                    fontFamily: DiaryPalette.round,
-                    fontSize: 11,
-                    height: 1.1,
-                    color: selected
-                        ? DiaryPalette.vermilionDeep
-                        : DiaryPalette.onPaperSoft,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.thumb_up, size: 13.5, color: tint),
+                if (widget.count > 0) ...[
+                  const SizedBox(width: 4),
+                  Text(
+                    '${widget.count}',
+                    style: TextStyle(
+                      fontFamily: DiaryPalette.round,
+                      fontSize: 11.5,
+                      height: 1.1,
+                      color: tint,
+                    ),
                   ),
-                ),
+                ],
               ],
-            ],
+            ),
           ),
         ),
       ),

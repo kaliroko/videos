@@ -12,10 +12,13 @@ import 'dart:ffi' show Abi;          // ★ 新增：检测设备架构
 import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/physics.dart';
 import 'package:http/http.dart' as http;
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
+
+import '../theme/springs.dart';
 
 // ══════════════════════════════════════════════════════════════════
 // ★ 独立 XOR 加密（与 secrets.dart 完全无关）
@@ -300,23 +303,60 @@ class AppUpdateManager {
       barrierColor: Colors.black.withValues(alpha: 0.75),
       transitionDuration: const Duration(milliseconds: 520),
       pageBuilder: (ctx, _, __) => _ForceUpdateDialog(info: info),
-      transitionBuilder: (ctx, anim, _, child) {
-        final springCurve = CurvedAnimation(
-          parent: anim,
-          curve: Curves.easeOutBack,
-          reverseCurve: Curves.easeIn,
-        );
-        final scale = Tween<double>(begin: 0.7, end: 1.0).animate(springCurve);
-        final fade = CurvedAnimation(
-          parent: anim,
-          curve: const Interval(0.0, 0.6, curve: Curves.easeOut),
-        );
+      // ★ 原来这里用 Curves.easeOutBack 把 0.7→1.0 拉出来，看着像弹簧，
+      //   其实过冲量是画死的。现在交给 _SpringEnter 自己跑弹簧 ——
+      //   路由的 transitionDuration 只留给背后遮罩的淡入用。
+      transitionBuilder: (ctx, anim, _, child) =>
+          _SpringEnter(child: child),
+    );
+  }
+}
 
-        return FadeTransition(
-          opacity: fade,
-          child: ScaleTransition(scale: scale, child: child),
+// ══════════════════════════════════════════════════════════════
+/// 弹簧进场的包装器。
+///
+/// showGeneralDialog 塞进来的 anim 是 transitionDuration 驱动的**补间**，
+/// 想吃弹簧就只能不用它 —— 这里自己起一个 unbounded 控制器跑 0→1。
+class _SpringEnter extends StatefulWidget {
+  const _SpringEnter({required this.child});
+
+  final Widget? child;
+
+  @override
+  State<_SpringEnter> createState() => _SpringEnterState();
+}
+
+class _SpringEnterState extends State<_SpringEnter>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _t =
+      AnimationController.unbounded(vsync: this, value: 0);
+
+  @override
+  void initState() {
+    super.initState();
+    _t.animateWith(SpringSimulation(Springs.bouncy, 0, 1, 0));
+  }
+
+  @override
+  void dispose() {
+    _t.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _t,
+      builder: (context, child) {
+        final v = _t.value;
+        return Opacity(
+          // 透明度只吃 0~1，过冲那截夹掉
+          opacity: v.clamp(0.0, 1.0),
+          // 缩放不夹：0.7 起跳，过冲时窜到 1.05 再收回来
+          child: Transform.scale(scale: 0.7 + 0.3 * v, child: child),
         );
       },
+      child: widget.child,
     );
   }
 }

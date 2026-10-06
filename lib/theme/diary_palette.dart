@@ -13,8 +13,10 @@
 ///   每帧同步一次系统亮度。系统切深浅色时 MaterialApp 会重建，
 ///   builder 跟着跑，整棵树就用新颜色重建了。
 ///
-/// ★ 纸色调过两轮：最初 #EFE9DC（对黑底 16.3:1）刺眼，
-///   后来压到 #B4AA96（8.6:1）又偏暗，现在深色取中间值 #CFC8B8（11.8:1）。
+/// ★ 纸色调过三轮：最初 #EFE9DC（对黑底 16.3:1）刺眼，
+///   后来压到 #B4AA96（8.6:1）又偏暗，再取中间值 #CFC8B8（11.8:1）——
+///   但这一版被指出「偏暗又偏黄」，于是降到饱和度、整体提亮到
+///   #DBD6CD（13.6:1）。详见 paper 上面的注释。
 library;
 
 import 'package:flutter/material.dart';
@@ -57,17 +59,27 @@ class DiaryPalette {
       isLight ? const Color(0xFFFBF8F1) : const Color(0xFF1F1A14);
 
   // ── 纸（卡片 / 弹窗）────────────────────────────────────────────
-  /// 深色对底 11.8:1；浅色靠影子分层，不靠对比
+  /// 深色对底 13.6:1；浅色靠影子分层，不靠对比
+  ///
+  /// ★ 2024 调色：原来暗色纸是 #CFC8B8，两点问题 ——
+  ///   * 太暗：L* 只有 58，压在近黑的底上显得发闷
+  ///   * 太黄：饱和度 11.1%、蓝通道比红低 23，米色变成了土黄
+  ///   现在把饱和度砍到 6.2%、整体提亮一档：
+  ///   L* 58 → 67.5，红蓝差 23 → 14。
+  ///   还是暖调的纸，但不再是「黄」的。
+  ///
+  ///   ★ 三个值是一套的，要改一起改，别只动 paper ——
+  ///     纸和凹陷/描边之间的层次关系就是这么维持的。
   static Color get paper =>
-      isLight ? const Color(0xFFFFFDF8) : const Color(0xFFCFC8B8);
+      isLight ? const Color(0xFFFFFDF8) : const Color(0xFFDBD6CD);
 
   /// 纸上的凹陷（输入框底、图片占位）
   static Color get paperDim =>
-      isLight ? const Color(0xFFF2EDE2) : const Color(0xFFC2BBAB);
+      isLight ? const Color(0xFFF2EDE2) : const Color(0xFFCDC9C1);
 
   /// 描边 / 拖拽把手
   static Color get paperEdge =>
-      isLight ? const Color(0xFFDED6C6) : const Color(0xFFACA595);
+      isLight ? const Color(0xFFDED6C6) : const Color(0xFFB6B3AB);
 
   // ── 纸上的字 ────────────────────────────────────────────────────
   static Color get onPaper =>

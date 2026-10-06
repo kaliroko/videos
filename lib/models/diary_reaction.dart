@@ -4,16 +4,13 @@
 /// 一条动态上，同一个人对同一种表情只能算一次；再点一次就是取消。
 library;
 
-/// 四个反应表情
-const List<String> kDiaryReactions = <String>['❤️', '😂', '👍', '😢'];
-
-/// 单个表情的说明，给无障碍朗读用
-const Map<String, String> kDiaryReactionLabels = <String, String>{
-  '❤️': '喜欢',
-  '😂': '好笑',
-  '👍': '赞同',
-  '😢': '心疼',
-};
+/// 点赞用的标识。
+///
+/// 原来有四个表情（❤️😂👍😢），现在只留一个赞。
+/// 存储键仍然是 `emoji` 这一列，值就是下面这个字符串 ——
+/// 表结构不用改；旧的另外三个表情会被 [DiaryReaction.isValidEmoji] 过滤掉，
+/// 不再显示、也不计数。
+const String kLikeEmoji = '👍';
 
 /// 一条反应记录
 ///
@@ -50,7 +47,6 @@ class DiaryReaction {
         emoji: (m['emoji'] ?? '').toString(),
       );
 
-  /// 只有固定的四个表情才认，脏数据直接丢掉
-  static bool isValidEmoji(String? e) =>
-      e != null && kDiaryReactions.contains(e);
+  /// 只认点赞；其余（包括历史遗留的 ❤️😂😢）一律丢掉
+  static bool isValidEmoji(String? e) => e == kLikeEmoji;
 }

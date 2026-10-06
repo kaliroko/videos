@@ -12,6 +12,8 @@ import 'package:provider/provider.dart';
 import '../models/diary_post.dart';
 import '../providers/diary_provider.dart';
 import '../theme/diary_palette.dart';
+import '../theme/springs.dart';
+import '../utils/spring_scroll.dart';
 import '../widgets/diary_card.dart';
 import '../widgets/handwriting_text.dart';
 import '../widgets/ink_seal.dart';
@@ -73,15 +75,14 @@ class _DiaryScreenState extends State<DiaryScreen> {
       context,
       initialName: provider.nickname,
       initialAnonymous: provider.anonymous,
+      initialAvatar: provider.avatarUrl,
     );
 
     if (!mounted) return;
     if (provider.posts.length > before && _scroll.hasClients) {
-      _scroll.animateTo(
-        0,
-        duration: const Duration(milliseconds: 460),
-        curve: Curves.easeOutCubic,
-      );
+      // ★ 原来是 animateTo(460ms, easeOutCubic) —— 补间。
+      //   发完贴滚回顶部用弹簧，停稳前那一点点回弹正好把视线带住。
+      springScrollTo(_scroll.position, 0, spring: Springs.settle);
     }
   }
 
@@ -357,11 +358,15 @@ class _SpringTapState extends State<_SpringTap>
     super.dispose();
   }
 
+  /// 按下去缩到 0.9。
+  ///
+  /// ★ 原来是 animateTo(90ms, easeOut) —— 补间。
+  ///   同一个手势里「按下是补间、松开是弹簧」手感是断的，
+  ///   按下去那一下也得是弹簧才连贯。
+  ///   用 settle 那一档：位移很小，回中要快、别晃。
   void _press() {
-    _ctrl.animateTo(
-      0.9,
-      duration: const Duration(milliseconds: 90),
-      curve: Curves.easeOut,
+    _ctrl.animateWith(
+      SpringSimulation(Springs.settle, _ctrl.value, 0.9, 0),
     );
   }
 
@@ -458,19 +463,18 @@ class _DelayedFade extends StatefulWidget {
 
 class _DelayedFadeState extends State<_DelayedFade>
     with SingleTickerProviderStateMixin {
-  late final AnimationController _ctrl = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 480),
-  );
-
-  late final Animation<double> _curved =
-      CurvedAnimation(parent: _ctrl, curve: Curves.easeOutCubic);
+  /// unbounded：弹簧收尾时那一下过冲要能出去
+  late final AnimationController _ctrl =
+      AnimationController.unbounded(vsync: this, value: 0);
 
   @override
   void initState() {
     super.initState();
     Future<void>.delayed(widget.delay, () {
-      if (mounted) _ctrl.forward();
+      if (!mounted) return;
+      // ★ 原来是 480ms + Curves.easeOutCubic —— 补间。
+      //   bouncy 那一档：纸片浮上来时轻轻过一点再落定。
+      _ctrl.animateWith(SpringSimulation(Springs.bouncy, 0, 1, 0));
     });
   }
 
@@ -483,14 +487,19 @@ class _DelayedFadeState extends State<_DelayedFade>
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
-      animation: _curved,
-      builder: (context, child) => Opacity(
-        opacity: _curved.value,
-        child: Transform.translate(
-          offset: Offset(0, (1 - _curved.value) * _DelayedFade._kSlide),
-          child: child,
-        ),
-      ),
+      animation: _ctrl,
+      builder: (context, child) {
+        final v = _ctrl.value;
+        return Opacity(
+          // 透明度只吃 0~1，过冲那截夹掉
+          opacity: v.clamp(0.0, 1.0),
+          child: Transform.translate(
+            // 位移不夹：浮上来时越过一点再回落，那才是弹簧
+            offset: Offset(0, (1 - v) * _DelayedFade._kSlide),
+            child: child,
+          ),
+        );
+      },
       child: widget.child,
     );
   }

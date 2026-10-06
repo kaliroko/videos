@@ -18,13 +18,16 @@ import '../models/diary_post.dart';
 import '../providers/diary_provider.dart';
 import '../repository/diary_repository.dart';
 import '../theme/diary_palette.dart';
+import '../theme/springs.dart';
 import '../widgets/ink_seal.dart';
+import '../widgets/spring_toggle.dart';
 
 /// 弹出发布卡片
 Future<void> showDiaryComposeSheet(
   BuildContext context, {
   required String initialName,
   required bool initialAnonymous,
+  String initialAvatar = '',
 }) async {
   await showGeneralDialog<void>(
     context: context,
@@ -35,6 +38,7 @@ Future<void> showDiaryComposeSheet(
     pageBuilder: (ctx, animation, secondaryAnimation) => DiaryComposeSheet(
       initialName: initialName,
       initialAnonymous: initialAnonymous,
+      initialAvatar: initialAvatar,
     ),
   );
 }
@@ -44,10 +48,14 @@ class DiaryComposeSheet extends StatefulWidget {
     super.key,
     this.initialName = '',
     this.initialAnonymous = false,
+    this.initialAvatar = '',
   });
 
   final String initialName;
   final bool initialAnonymous;
+
+  /// 引导页里设过的头像，匿名发布时不会带出去
+  final String initialAvatar;
 
   @override
   State<DiaryComposeSheet> createState() => _DiaryComposeSheetState();
@@ -168,6 +176,7 @@ class _DiaryComposeSheetState extends State<DiaryComposeSheet>
         title: _titleCtrl.text.trim(),
         // 双保险：匿名时一定传空
         location: _anonymous ? '' : _location,
+        avatarUrl: _anonymous ? '' : widget.initialAvatar,
         content: body,
         images: List<String>.from(_images),
         mood: _mood,
@@ -559,28 +568,46 @@ class _DiaryComposeSheetState extends State<DiaryComposeSheet>
             itemBuilder: (context, i) {
               final region = kDiaryRegions[i];
               final on = _location == region;
+              // ★ 原来是 AnimatedContainer(160ms, easeOut) —— 隐式补间。
+              //   换成弹簧驱动：颜色照样是 lerp 出来的，但**节奏**由弹簧说了算，
+              //   选中时还会轻轻鼓一下，不是一个匀速变色。
               return GestureDetector(
                 onTap: () => setState(() => _location = on ? '' : region),
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 160),
-                  curve: Curves.easeOut,
-                  alignment: Alignment.center,
-                  padding: const EdgeInsets.symmetric(horizontal: 12),
-                  decoration: BoxDecoration(
-                    color: on ? DiaryPalette.vermilion : DiaryPalette.paperDim,
-                    borderRadius: BorderRadius.circular(30),
-                  ),
-                  child: Text(
-                    region,
-                    style: TextStyle(
-                      fontFamily: DiaryPalette.round,
-                      fontSize: 12.5,
-                      height: 1.2,
-                      color: on
-                          ? DiaryPalette.onVermilion
-                          : DiaryPalette.onPaperSoft,
-                    ),
-                  ),
+                child: SpringToggle(
+                  active: on,
+                  spring: Springs.snappy,
+                  builder: (context, raw) {
+                    final t = raw.clamp(0.0, 1.0);
+                    return Container(
+                      alignment: Alignment.center,
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      decoration: BoxDecoration(
+                        color: Color.lerp(
+                          DiaryPalette.paperDim,
+                          DiaryPalette.vermilion,
+                          t,
+                        ),
+                        borderRadius: BorderRadius.circular(30),
+                      ),
+                      child: Transform.scale(
+                        // raw 不夹：选中那一下鼓到 1.06 再收回来
+                        scale: 1 + 0.06 * (raw - 1),
+                        child: Text(
+                          region,
+                          style: TextStyle(
+                            fontFamily: DiaryPalette.round,
+                            fontSize: 12.5,
+                            height: 1.2,
+                            color: Color.lerp(
+                              DiaryPalette.onPaperSoft,
+                              DiaryPalette.onVermilion,
+                              t,
+                            ),
+                          ),
+                        ),
+                      ),
+                    );
+                  },
                 ),
               );
             },
@@ -637,27 +664,41 @@ class _DiaryComposeSheetState extends State<DiaryComposeSheet>
           onTap: () => setState(() {
             _mood = selected ? DiaryMood.none : mood;
           }),
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 180),
-            curve: Curves.easeOut,
-            padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 7),
-            decoration: BoxDecoration(
-              color: selected
-                  ? DiaryPalette.vermilion
-                  : DiaryPalette.paperDim,
-              borderRadius: BorderRadius.circular(30),
-            ),
-            child: Text(
-              mood.label,
-              style: TextStyle(
-                fontFamily: DiaryPalette.round,
-                fontSize: 12.5,
-                height: 1.2,
-                color: selected
-                    ? DiaryPalette.onVermilion
-                    : DiaryPalette.onPaperSoft,
-              ),
-            ),
+          // ★ 同地区 chip：AnimatedContainer(180ms, easeOut) → 弹簧驱动
+          child: SpringToggle(
+            active: selected,
+            spring: Springs.snappy,
+            builder: (context, raw) {
+              final t = raw.clamp(0.0, 1.0);
+              return Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 13, vertical: 7),
+                decoration: BoxDecoration(
+                  color: Color.lerp(
+                    DiaryPalette.paperDim,
+                    DiaryPalette.vermilion,
+                    t,
+                  ),
+                  borderRadius: BorderRadius.circular(30),
+                ),
+                child: Transform.scale(
+                  scale: 1 + 0.06 * (raw - 1),
+                  child: Text(
+                    mood.label,
+                    style: TextStyle(
+                      fontFamily: DiaryPalette.round,
+                      fontSize: 12.5,
+                      height: 1.2,
+                      color: Color.lerp(
+                        DiaryPalette.onPaperSoft,
+                        DiaryPalette.onVermilion,
+                        t,
+                      ),
+                    ),
+                  ),
+                ),
+              );
+            },
           ),
         );
       }).toList(growable: false),

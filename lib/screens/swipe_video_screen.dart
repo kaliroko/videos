@@ -14,12 +14,15 @@ import 'dart:async';
 import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/material.dart';
+
 import 'package:provider/provider.dart';
 import 'package:video_player/video_player.dart';
 
 import '../models/video_model.dart';
 import '../repository/simple_api.dart';
 import '../theme/app_theme.dart';
+import '../theme/springs.dart';
+import '../utils/spring_scroll.dart';
 import '../providers/nav_bar_visibility.dart';
 
 class SwipeVideoScreen extends StatefulWidget {
@@ -307,9 +310,15 @@ class _SwipeVideoScreenState extends State<SwipeVideoScreen> {
     _players[index]?.pause();
 
     if (_controller.hasClients) {
-      _controller.nextPage(
-        duration: const Duration(milliseconds: 300),
-        curve: Curves.easeOut,
+      // ★ 原来是 nextPage(300ms, easeOut) —— 补间，没有物理。
+      //   换成真弹簧：末尾会「落」到位，末尾带一点点回弹。
+      final pos = _controller.position;
+      final next =
+          ((_controller.page ?? 0).round() + 1) * pos.viewportDimension;
+      springScrollTo(
+        pos,
+        next > pos.maxScrollExtent ? pos.maxScrollExtent : next,
+        spring: Springs.gentle,
       );
     }
 

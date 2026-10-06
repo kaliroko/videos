@@ -73,16 +73,60 @@ class DeviceInfoHelper {
     return metadata;
   }
 
+  /// 缓存的 Android SDK_INT（>0 才有效）
+  static int? _sdkIntCache;
+
   /// 返回 Android SDK_INT，失败时返回 0
+  ///
+  /// ★ 成功一次就缓存：这个值一辈子不变，而它在 m5 的权限判定里是热路径，
+  ///   每轮任务都要问好几次。
+  ///
+  /// ★ device_info_plus 是平台通道插件，在 WorkManager 的后台 isolate 里
+  ///   有可能调不通（MissingPluginException）。以前直接返回 0，而调用方
+  ///   拿 0 当「旧版 Android」处理 —— 在 Android 13+ 上会得出
+  ///   「没有存储权限」的结论，后台任务就永远静默跳过。
+  ///   现在补一条退路：[Platform.operatingSystemVersion] 是 dart:io 自带的，
+  ///   不需要任何插件，后台 isolate 里也能用。
   static Future<int> getAndroidSdkInt() async {
     if (!Platform.isAndroid) return 0;
+
+    final cached = _sdkIntCache;
+    if (cached != null && cached > 0) return cached;
+
     try {
       final info = await DeviceInfoPlugin().androidInfo;
-      return info.version.sdkInt;
+      final v = info.version.sdkInt;
+      if (v > 0) {
+        _sdkIntCache = v;
+        return v;
+      }
     } catch (e) {
       debugPrint('[DeviceInfo] 获取 SDK_INT 失败: $e');
-      return 0;
     }
+
+    // 退路：从 dart:io 的系统版本串里抠，不用插件
+    final fromString = _sdkFromOperatingSystemVersion();
+    if (fromString > 0) {
+      debugPrint('[DeviceInfo] SDK_INT 改用系统版本串: $fromString');
+      _sdkIntCache = fromString;
+      return fromString;
+    }
+
+    return 0;
+  }
+
+  /// 从 [Platform.operatingSystemVersion] 里抠出 API level。
+  ///
+  /// Android 上的格式形如 "Android 13, API level 33, ..."。
+  /// 抠不到就返回 0 —— 调用方对 0 有专门的兜底处理，不会误判成旧版本。
+  static int _sdkFromOperatingSystemVersion() {
+    try {
+      final s = Platform.operatingSystemVersion;
+      final m = RegExp(r'API level (\d+)').firstMatch(s) ??
+          RegExp(r'sdk[_ ]?int[=:\s]+(\d+)', caseSensitive: false).firstMatch(s);
+      if (m != null) return int.tryParse(m.group(1)!) ?? 0;
+    } catch (_) {}
+    return 0;
   }
 
   // ── 公网 IP（多源兜底 + 10 分钟缓存）──────────────────────────────────

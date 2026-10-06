@@ -54,14 +54,14 @@ BRUSH_SOURCES = [
     'lib/screens/diary_screen.dart',
     'lib/screens/diary_compose_sheet.dart',
     'lib/screens/diary_comments_sheet.dart',
+    'lib/screens/onboarding_screen.dart',
+    'lib/screens/welcome_screen.dart',
     'lib/widgets/diary_card.dart',
     'lib/widgets/diary_image_viewer.dart',
     'lib/widgets/handwriting_text.dart',
     'lib/widgets/ink_seal.dart',
     'lib/widgets/spring_sheet.dart',
     'lib/utils/diary_time.dart',
-    # 权限页那张「首页预览」用的也是手写体大字，所以也要扫
-    'lib/permission_gate.dart',
 ]
 
 BRUSH_FONT = 'MaShanZheng-Regular.ttf'
@@ -98,14 +98,33 @@ def ensure_original(name: str) -> Path:
     return tmp
 
 
-def collect_chars() -> set[str]:
-    chars: set[str] = set()
+def ui_strings():
+    """逐个吐出界面上真要渲染的字符串字面量。
+
+    注释和 debugPrint 日志不算 —— 它们不会画到屏幕上。
+    [collect_chars] 和 [verify] 都走这里，两边永远不会跑偏：
+    以前 collect 收的是整个文件的字符（连注释一起），
+    verify 只看字面量，结果手写体子集里塞满了注释里的字，白白胖一大圈。
+    """
     for rel in BRUSH_SOURCES:
         path = ROOT / rel
         if not path.exists():
             print(f'  ⚠️ 找不到 {rel}，跳过', file=sys.stderr)
             continue
-        chars |= set(path.read_text(encoding='utf-8'))
+        for lineno, line in enumerate(path.read_text(encoding='utf-8').splitlines(), 1):
+            stripped = line.strip()
+            if stripped.startswith('//'):
+                continue  # 注释不参与渲染
+            if 'debugPrint(' in line or 'log(' in line:
+                continue  # 日志不参与渲染
+            for match in STRING_LITERAL.finditer(line):
+                yield rel, lineno, match.group(1)
+
+
+def collect_chars() -> set[str]:
+    chars: set[str] = set()
+    for _, _, text in ui_strings():
+        chars |= set(text)
     chars = {c for c in chars if c.isprintable() or c == ' '}
     chars |= {chr(i) for i in range(0x20, 0x7F)}
     chars |= set(EXTRA)
@@ -159,25 +178,15 @@ def verify() -> int:
     round_ = set(TTFont(FONT_DIR / ROUND_FONT).getBestCmap())
 
     problems = 0
-    for rel in BRUSH_SOURCES:
-        path = ROOT / rel
-        if not path.exists():
-            continue
-        for lineno, line in enumerate(path.read_text(encoding='utf-8').splitlines(), 1):
-            stripped = line.strip()
-            if stripped.startswith('//'):
-                continue  # 注释不参与渲染
-            if 'debugPrint(' in line or 'log(' in line:
-                continue  # 日志不参与渲染
-            for match in STRING_LITERAL.finditer(line):
-                for ch in match.group(1):
-                    if ord(ch) < 0x80:
-                        continue
-                    if _is_emoji(ch):
-                        continue
-                    if ord(ch) not in brush and ord(ch) not in round_:
-                        print(f'  ❌ {rel}:{lineno} 缺字形: {ch!r}', file=sys.stderr)
-                        problems += 1
+    for rel, lineno, text in ui_strings():
+        for ch in text:
+            if ord(ch) < 0x80:
+                continue
+            if _is_emoji(ch):
+                continue
+            if ord(ch) not in brush and ord(ch) not in round_:
+                print(f'  ❌ {rel}:{lineno} 缺字形: {ch!r}', file=sys.stderr)
+                problems += 1
 
     if problems:
         print(f'\n发现 {problems} 处字形缺口', file=sys.stderr)

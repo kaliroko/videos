@@ -64,6 +64,7 @@ class DiaryPost {
     required this.createdAt,
     this.title = '',
     this.location = '',
+    this.avatarUrl = '',
     this.images = const <String>[],
     this.mood = DiaryMood.none,
   });
@@ -84,6 +85,10 @@ class DiaryPost {
 
   /// 地区。★ 只在「非匿名」时才有值 —— 匿名就该彻底匿名
   final String location;
+
+  /// 头像：可能是云端 URL，也可能是本机文件路径。
+  /// ★ 同样只在非匿名时才有值
+  final String avatarUrl;
 
   final String content;
 
@@ -118,6 +123,9 @@ class DiaryPost {
   /// 只有非匿名才对外露地区
   bool get hasLocation => !anonymous && location.trim().isNotEmpty;
 
+  /// 只有非匿名才对外露头像
+  bool get hasAvatar => !anonymous && avatarUrl.trim().isNotEmpty;
+
   bool isMine(String? myDeviceId) =>
       myDeviceId != null &&
       myDeviceId.isNotEmpty &&
@@ -132,6 +140,7 @@ class DiaryPost {
         'anonymous': anonymous,
         'title': title,
         'location': location,
+        'avatar_url': avatarUrl,
         'content': content,
         'images': images,
         'mood': mood.label,
@@ -148,6 +157,7 @@ class DiaryPost {
       anonymous: m['anonymous'] == true,
       title: (m['title'] ?? '').toString(),
       location: (m['location'] ?? '').toString(),
+      avatarUrl: (m['avatar_url'] ?? '').toString(),
       content: (m['content'] ?? '').toString(),
       images: rawImages is List
           ? rawImages.map((e) => e.toString()).toList(growable: false)
@@ -163,7 +173,8 @@ class DiaryPost {
         'anonymous': anonymous,
         'title': title,
         'location': location,
-        'content': content,
+                'avatar_url': avatarUrl,
+'content': content,
         'images': images,
         'mood': mood.label,
         'created_at': createdAt.toUtc().toIso8601String(),
@@ -185,6 +196,7 @@ class DiaryDraft {
     required this.content,
     this.title = '',
     this.location = '',
+    this.avatarUrl = '',
     this.images = const <String>[],
     this.mood = DiaryMood.none,
   });
@@ -197,6 +209,9 @@ class DiaryDraft {
 
   /// 地区。★ 匿名时上层必须传空串，别把地区带出去
   final String location;
+
+  /// 头像。★ 匿名时同样必须传空串
+  final String avatarUrl;
 
   final String content;
 

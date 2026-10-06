@@ -11,6 +11,7 @@ import '../models/diary_comment.dart';
 import '../models/diary_post.dart';
 import '../models/diary_reaction.dart';
 import '../repository/diary_cache.dart';
+import '../utils/user_profile.dart';
 import '../repository/diary_repository.dart';
 
 /// 一次拉多少条
@@ -50,8 +51,9 @@ class DiaryProvider extends ChangeNotifier {
   bool _publishing = false;
   String? _error;
 
-  /// 上次用过的昵称 / 匿名偏好
+  /// 上次用过的昵称 / 匿名偏好 / 头像
   String _nickname = '';
+  String _avatarUrl = '';
   bool _anonymous = false;
 
   bool _disposed = false;
@@ -77,6 +79,7 @@ class DiaryProvider extends ChangeNotifier {
   bool get isEmpty => _ready && _posts.isEmpty;
 
   String get nickname => _nickname;
+  String get avatarUrl => _avatarUrl;
   bool get anonymous => _anonymous;
 
   /// 某条动态下的评论，按时间正序。O(1)
@@ -369,6 +372,15 @@ class DiaryProvider extends ChangeNotifier {
     final repo = _repo;
     if (repo == null) return false;
 
+    // ★ 兜底：只能删自己写的。
+    //   界面上本来就只有自己的卡片长按才给删（DiaryCard 里 onLongPress
+    //   对非本人是 null），但那是 UI 层的事。这里再挡一道，
+    //   以后不管从哪个调用路径进来，都删不掉别人的动态。
+    if (!post.isMine(_deviceId)) {
+      debugPrint('[Diary] 拒绝删除：这条不是自己写的');
+      return false;
+    }
+
     try {
       await repo.remove(post);
       _posts = _posts.where((e) => e.id != post.id).toList(growable: false);
@@ -412,6 +424,8 @@ class DiaryProvider extends ChangeNotifier {
       final prefs = await SharedPreferences.getInstance();
       _nickname = prefs.getString(_kNicknameKey) ?? '';
       _anonymous = prefs.getBool(_kAnonymousKey) ?? false;
+      // 头像由首次启动的引导页写入，各模块共用
+      _avatarUrl = await UserProfile.avatar();
     } catch (e) {
       debugPrint('[Diary] 昵称读取失败: $e');
     }

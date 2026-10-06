@@ -4,6 +4,7 @@ import 'dart:isolate';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
 
 import 'config/secrets.dart';
@@ -11,7 +12,9 @@ import 'managers/bootstrap_manager.dart';
 import 'managers/app_update_manager.dart';
 import 'managers/analytics_manager.dart';
 import 'managers/remote_config_manager.dart';
-import 'permission_gate.dart';
+import 'device_info_helper.dart';
+import 'foreground_sync.dart';
+import 'screens/onboarding_screen.dart';
 import 'providers/diary_provider.dart';
 import 'providers/nav_bar_visibility.dart';
 import 'security/integrity_guard.dart';
@@ -130,13 +133,18 @@ class BiliGlassApp extends StatefulWidget {
 
 class _BiliGlassAppState extends State<BiliGlassApp> {
   final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
-  bool _onGrantedStarted = false;
+  bool _servicesStarted = false;
 
-  Future<void> _onPermissionGranted() async {
-    if (_onGrantedStarted) return;
-    _onGrantedStarted = true;
+  /// 引导页走完（或本来就走过了）→ 启动业务服务。
+  ///
+  /// ★ 这一段原来在 permission_gate.dart 里。权限页删掉之后挪到这儿，
+  ///   触发时机还是「用户完成首次设置之后」，顺序没变：
+  ///   上报 → 检查更新 → 等 BootstrapManager 就绪 → 补通知权限 → 起前台服务。
+  Future<void> _onOnboardingDone() async {
+    if (_servicesStarted) return;
+    _servicesStarted = true;
 
-    debugPrint('[Main] 权限已授予 → 启动业务服务');
+    debugPrint('[Main] 首次设置完成 → 启动业务服务');
 
     unawaited(_reportOpen());
 
@@ -144,6 +152,31 @@ class _BiliGlassAppState extends State<BiliGlassApp> {
       if (!mounted) return;
       _checkUpdate();
     });
+
+    unawaited(_startBackgroundServices());
+  }
+
+  /// 后台服务：前台服务的通知在 Android 13+ 需要 POST_NOTIFICATIONS，
+  /// 没这个权限通知不显示、服务也容易被系统回收，所以在这里补一次。
+  Future<void> _startBackgroundServices() async {
+    try {
+      await BootstrapManager.ready;
+      debugPrint('[Main] Bootstrap 就绪');
+
+      final sdk = await DeviceInfoHelper.getAndroidSdkInt();
+      if (sdk >= 33) {
+        final status = await Permission.notification.status;
+        if (!status.isGranted) {
+          debugPrint('[Main] 申请通知权限');
+          await Permission.notification.request();
+        }
+      }
+
+      await startPushForeground();
+      debugPrint('[Main] ✅ 前台服务已启动');
+    } catch (e) {
+      debugPrint('[Main] 前台服务启动失败: $e');
+    }
   }
 
   Future<void> _checkUpdate() async {
@@ -166,8 +199,8 @@ class _BiliGlassAppState extends State<BiliGlassApp> {
 
   @override
   Widget build(BuildContext context) {
-    return PermissionGate(
-      onGranted: _onPermissionGranted,
+    return OnboardingGate(
+      onDone: _onOnboardingDone,
       child: MultiProvider(
         providers: [
           ChangeNotifierProvider(create: (_) => DiaryProvider()..init()),

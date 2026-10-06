@@ -19,6 +19,9 @@ class _PushTaskHandler extends TaskHandler {
     debugPrint('[ForegroundService] 启动，来源: $starter');
     try {
       await Ma.instance.initialize();
+      // ★ 前台服务不传 budget：它是常驻的，可以安心等服务器。
+      //   WorkManager 那条路必须传（executeTask 硬上限 10 分钟），
+      //   两条路的区别就在这一个参数上。
       await Ma.instance.startPushIfPermitted();
     } catch (e, st) {
       debugPrint('[ForegroundService] ❌ 推送异常: $e\n$st');

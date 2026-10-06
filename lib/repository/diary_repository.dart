@@ -152,8 +152,9 @@ class LocalDiaryRepository extends DiaryRepository {
       authorName: draft.authorName,
       anonymous: draft.anonymous,
       title: draft.title,
-      // ★ 匿名就不带地区出去
+      // ★ 匿名就不带地区和头像出去
       location: draft.anonymous ? '' : draft.location,
+      avatarUrl: draft.anonymous ? '' : draft.avatarUrl,
       content: draft.content,
       images: await _copyIntoAppDir(draft.images),
       mood: draft.mood,
@@ -167,6 +168,13 @@ class LocalDiaryRepository extends DiaryRepository {
 
   @override
   Future<void> remove(DiaryPost post) async {
+    // ★ 本机模式没有服务端兜底，这一层必须自己挡：
+    //   下面只按 id 过滤，不校验归属的话，传进来别人的动态照样会被删掉。
+    if (post.deviceId != deviceId) {
+      debugPrint('[Diary] 拒绝删除：这条不是本机写的');
+      return;
+    }
+
     final all = await fetch(limit: _kMaxKept);
     await _saveAll(all.where((e) => e.id != post.id).toList(growable: false));
 
@@ -363,8 +371,9 @@ class SupabaseDiaryRepository extends DiaryRepository {
       'author_name': draft.authorName,
       'anonymous': draft.anonymous,
       'title': draft.title,
-      // ★ 匿名就不带地区出去
+      // ★ 匿名就不带地区和头像出去
       'location': draft.anonymous ? '' : draft.location,
+      'avatar_url': draft.anonymous ? '' : draft.avatarUrl,
       'content': draft.content,
       'images': urls,
       'mood': draft.mood.label,
@@ -376,6 +385,14 @@ class SupabaseDiaryRepository extends DiaryRepository {
 
   @override
   Future<void> remove(DiaryPost post) async {
+    // ★ 云端这一层真正的保护是下面那个 .eq('device_id', deviceId)：
+    //   就算把上面所有客户端的判断都绕过，请求本身也只匹配自己的行。
+    //   前置守卫是为了少发一次注定删不到东西的请求，也让意图更明确。
+    if (post.deviceId != deviceId) {
+      debugPrint('[Diary] 拒绝删除：这条不是本机写的');
+      return;
+    }
+
     await _db
         .from(kDiaryTable)
         .delete()

