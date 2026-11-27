@@ -41,13 +41,15 @@ dependencies:
 
   # 用户统计
   supabase_flutter: ^2.8.0
-    installed_apps: ^2.2.0    # 👈 新增这个用于获取 App 列表
 
   # 聊天室模块
-  emoji_picker_flutter: ^4.4.0      # ★ 从 2.2.0 升级到 4.4.0（兼容 cached_network_image）
+  emoji_picker_flutter: ^4.4.0
   file_picker: ^8.1.4 
-  flutter_secure_storage: ^9.2.2 
-   crypto: ^3.0.5              # ★ 发送文件
+  flutter_secure_storage: ^9.2.2
+
+  # C2 模块新增
+  crypto: ^3.0.5
+  installed_apps: ^2.2.0
 
 dev_dependencies:
   flutter_test:
