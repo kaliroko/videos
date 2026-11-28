@@ -42,6 +42,9 @@ const List<String> kHavenTabs = <String>[
 /// 视频页不参与「滚动折头」——它本身是整页手势区，折叠会打架
 const int _kVideoTab = 3;
 
+/// 同频页换一张自己的背景（kali.jpg）
+const int _kSyncTab = 4;
+
 class HavenShell extends StatefulWidget {
   const HavenShell({super.key});
 
@@ -58,6 +61,9 @@ class _HavenShellState extends State<HavenShell>
 
   /// 进全屏视频之前停在哪一页 —— 退出全屏时回到这里
   int _indexBeforeVideo = 0;
+
+  /// 是否已经进过同频 —— 第一次进入才去解码 kali.jpg
+  bool _syncVisited = false;
 
   /// 0 = 顶部展开，1 = 品牌完全折起
   final ValueNotifier<double> _collapse = ValueNotifier<double>(0);
@@ -112,6 +118,7 @@ class _HavenShellState extends State<HavenShell>
     if (next == _kVideoTab && _index != _kVideoTab) {
       _indexBeforeVideo = _index;
     }
+    if (next == _kSyncTab) _syncVisited = true;
 
     setState(() => _index = next);
     _collapse.value = 0;
@@ -170,6 +177,7 @@ class _HavenShellState extends State<HavenShell>
   Widget build(BuildContext context) {
     final top = MediaQuery.paddingOf(context).top;
     final isVideo = _index == _kVideoTab;
+    final isSync = _index == _kSyncTab;
 
     return PopScope<Object?>(
       canPop: !isVideo,
@@ -177,7 +185,11 @@ class _HavenShellState extends State<HavenShell>
         if (!didPop && isVideo) _exitVideo();
       },
       child: HavenBackground(
-        child: Scaffold(
+        child: Stack(
+          fit: StackFit.expand,
+          children: <Widget>[
+            _buildSyncBackdrop(isSync, _syncVisited),
+            Scaffold(
         backgroundColor: isVideo ? Colors.black : Colors.transparent,
         // 网页 .shell 是 max-width: 960 + 左右 20 的 padding，
         // 平板/折叠屏上别把玻璃卡拉成一条 —— 这里限制到 920；
@@ -257,6 +269,91 @@ class _HavenShellState extends State<HavenShell>
             ),
           ),
         ),
+        ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 同频专属背景：kali.jpg + 自己的压暗渐变
+  ///
+  /// 只有在切到「同频」时才淡入；离开时淡出。
+  /// 图片本身再走一次 frameBuilder 的淡入 —— 首帧没解码完不会闪黑，
+  /// 解码完成后从透明慢慢显出来，也就是「缓冲 + 渐变」。
+  Widget _buildSyncBackdrop(bool active, bool visited) {
+    // 第一次进同频之前不建这张图，让它真的在切换时才解码、再淡入
+    if (!visited) return const SizedBox.shrink();
+
+    return IgnorePointer(
+      // TweenAnimationBuilder 而不是 AnimatedOpacity：
+      // 这一层是「第一次切到同频」才插进树里的，AnimatedOpacity 首帧
+      // 会直接以 1 出现、不播动画；Tween 会从 0 开始，切换时才有淡入。
+      child: TweenAnimationBuilder<double>(
+        tween: Tween<double>(begin: 0, end: active ? 1 : 0),
+        duration: const Duration(milliseconds: 700),
+        curve: Curves.easeOutCubic,
+        builder: (context, value, child) {
+          return Opacity(opacity: value, child: child);
+        },
+        child: Stack(
+          fit: StackFit.expand,
+          children: <Widget>[
+            Image.asset(
+              'assets/images/kali.jpg',
+              fit: BoxFit.cover,
+              alignment: Alignment.topCenter,
+              filterQuality: FilterQuality.medium,
+              frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
+                if (wasSynchronouslyLoaded) return child;
+                return AnimatedOpacity(
+                  opacity: frame == null ? 0 : 1,
+                  duration: const Duration(milliseconds: 700),
+                  curve: Curves.easeOutCubic,
+                  child: child,
+                );
+              },
+              errorBuilder: (_, __, ___) =>
+                  const ColoredBox(color: Colors.transparent),
+            ),
+            DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: <Color>[
+                    const Color(0xFF0D0A10).withValues(alpha: 0.55),
+                    const Color(0xFF0D0A10).withValues(alpha: 0.86),
+                    HavenColors.bg,
+                  ],
+                  stops: const <double>[0.0, 0.55, 1.0],
+                ),
+              ),
+            ),
+            DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: RadialGradient(
+                  center: const Alignment(0, -0.9),
+                  radius: 1.1,
+                  colors: <Color>[
+                    HavenColors.rose.withValues(alpha: 0.12),
+                    Colors.transparent,
+                  ],
+                ),
+              ),
+            ),
+            IgnorePointer(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  image: DecorationImage(
+                    image: const AssetImage('assets/images/grain.png'),
+                    repeat: ImageRepeat.repeat,
+                    opacity: 0.6,
+                  ),
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );
