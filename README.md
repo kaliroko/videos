@@ -93,11 +93,11 @@ flutter run
 
 ## 图标
 
-新图标源图是 `再次新的软件图标.jpg`，处理链：
+新图标源图是 `新软件图标.png`，处理链：
 
 ```bash
-python3 tool/haven_icon_source.py   # 竖图 → 1024 方形源图（顶对齐裁切 + 玫瑰暗角）
-python3 tool/generate_icons.py      # 出 Android 各密度 PNG（圆角烘焙在 PNG 里）
+python3 tool/haven_icon_source.py   # 裁掉外圈白边 → 1024 方形源图
+python3 tool/generate_icons.py      # 出 Android 各密度 PNG（圆角烘焙，顺带切掉白边/水印）
 ```
 
 启动闪屏背景色与网页底色一致（`#0D0A10`）。
