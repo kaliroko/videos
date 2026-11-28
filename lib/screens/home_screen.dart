@@ -106,6 +106,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   // ── 底部导航 ★ 三个位置，中间那个是聊天室入口────────────────────
   Widget _buildBottomNav() {
     final bottomInset = MediaQuery.of(context).padding.bottom;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
     return RepaintBoundary(
       child: Padding(
         padding: EdgeInsets.fromLTRB(16, 0, 16, 16 + bottomInset),
@@ -146,7 +148,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             ),
             // 视频页（原来是第 2 个位置，和聊天室对调了）
             GlassBottomBarTab(
-              label: '白丝宝宝',
+              label: '姐妹隐私空间哦',
               icon: Icons.auto_awesome,
               selectedIcon: Icons.auto_awesome_outlined,
               glowColor: AppTheme.accentColor,
@@ -156,16 +158,23 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           iconSize: 24,
           selectedIconColor: AppTheme.accentColor,
           unselectedIconColor: AppTheme.textTertiary,
-          glassSettings: const LiquidGlassSettings(
-            thickness:           26,
-            blur:                6,
-            refractiveIndex:     1.55,
-            saturation:          0.7,
-            lightIntensity:      0.55,
-            chromaticAberration: 0.05,
-            ambientStrength:     0.9,
-            lightAngle:          0.785,
-            glassColor:          Color(0x3DFFFFFF),
+          
+          // 👇 苹果风格液态玻璃调校参数
+          glassSettings: LiquidGlassSettings(
+            thickness: 12,            // 变薄，更轻盈
+            blur: 24,                 // 高模糊，让背景完全虚化
+            refractiveIndex: 1.52,    // 真实玻璃折射
+            saturation: 0.35,         // 低饱和，吸走背景杂色
+            lightIntensity: 0.25,     // 弱高光
+            chromaticAberration: 0.01,// 极低色散，消除彩虹光晕
+            ambientStrength: 0.8,
+            lightAngle: 0.785,
+            
+            // 👇 底部乳白底色（深色模式自动切为微黑）
+            // 15% 不透明度的白色 / 黑色，是 Apple 毛玻璃的灵魂
+            glassColor: isDark 
+                ? const Color(0x33000000) 
+                : const Color(0x26FFFFFF),
           ),
         ),
       ),
