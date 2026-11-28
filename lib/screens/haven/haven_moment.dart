@@ -296,9 +296,15 @@ class _HavenMomentViewState extends State<HavenMomentView> {
         ),
         const SizedBox(height: 16),
         FadeUpIn(
-          delay: const Duration(milliseconds: 120),
+          delay: const Duration(milliseconds: 100),
+          child: _buildWeekCard(),
+        ),
+        const SizedBox(height: 16),
+        FadeUpIn(
+          delay: const Duration(milliseconds: 140),
           child: GlassCard(
-            padding: const EdgeInsets.all(22),
+            blur: false,
+            padding: const EdgeInsets.all(20),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
@@ -438,6 +444,115 @@ class _HavenMomentViewState extends State<HavenMomentView> {
             ),
         ],
       ],
+    );
+  }
+
+  // ── 最近 7 天 ───────────────────────────────────────────────────
+
+  Widget _buildWeekCard() {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+
+    final counts = List<int>.filled(7, 0);
+    final minutes = List<int>.filled(7, 0);
+    final methods = <String, int>{};
+    var orgasms = 0;
+
+    for (final e in _entries) {
+      final day = DateTime(e.at.year, e.at.month, e.at.day);
+      final diff = today.difference(day).inDays;
+      if (diff < 0 || diff > 6) continue;
+      final idx = 6 - diff;
+      counts[idx]++;
+      minutes[idx] += e.minutes;
+      if (e.orgasm) orgasms += e.orgasmCount;
+      for (final m in e.methods) {
+        methods[m] = (methods[m] ?? 0) + 1;
+      }
+    }
+
+    final ranked = methods.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+    final topMethods = ranked
+        .take(3)
+        .map((e) => e.key + ' ' + e.value.toString())
+        .join(' · ');
+
+    final maxCount = counts.fold<int>(1, (m, c) => c > m ? c : m);
+    final total = counts.fold<int>(0, (a, b) => a + b);
+    final totalMin = minutes.fold<int>(0, (a, b) => a + b);
+    const labels = <String>['一', '二', '三', '四', '五', '六', '日'];
+
+    return GlassCard(
+      blur: false,
+      padding: const EdgeInsets.all(18),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              Expanded(child: Text('最近 7 天', style: HavenColors.eyebrow)),
+              Text(
+                total.toString() + ' 次 · ' + totalMin.toString() + ' 分钟',
+                style: HavenColors.small,
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text('到顶 ' + orgasms.toString() + ' 次', style: HavenColors.small),
+          if (topMethods.isNotEmpty) ...<Widget>[
+            const SizedBox(height: 4),
+            Text('常用 · ' + topMethods, style: HavenColors.small),
+          ],
+          const SizedBox(height: 16),
+          SizedBox(
+            height: 96,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: <Widget>[
+                for (int i = 0; i < 7; i++)
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 3),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: <Widget>[
+                          Text(
+                            counts[i] > 0 ? counts[i].toString() : '',
+                            style: HavenColors.small.copyWith(fontSize: 10),
+                          ),
+                          const SizedBox(height: 4),
+                          Container(
+                            height: counts[i] == 0
+                                ? 5
+                                : 6 + 42 * (counts[i] / maxCount),
+                            decoration: BoxDecoration(
+                              color: counts[i] == 0
+                                  ? HavenColors.inkStrong.withValues(alpha: 0.06)
+                                  : (i == 6
+                                      ? HavenColors.rose
+                                      : HavenColors.rose
+                                          .withValues(alpha: 0.45)),
+                              borderRadius: BorderRadius.circular(2),
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            labels[today
+                                    .subtract(Duration(days: 6 - i))
+                                    .weekday -
+                                1],
+                            style: HavenColors.small.copyWith(fontSize: 10),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 

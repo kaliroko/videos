@@ -65,10 +65,34 @@ class _HavenShellState extends State<HavenShell>
   /// 当前页的滚动进度 0~1，喂给底部那根玫瑰线
   final ValueNotifier<double> _progress = ValueNotifier<double>(0);
 
+  bool _precached = false;
+
+  /// 标签栏 + 进度线只建一次：滚动折头时只重建品牌区，TabBar 不跟每帧重建
+  late final Widget _tabsBlock = Column(
+    mainAxisSize: MainAxisSize.min,
+    children: <Widget>[
+      _buildTabs(),
+      _buildProgressLine(),
+    ],
+  );
+
   @override
   void initState() {
     super.initState();
     _tab.addListener(_onTabChanged);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_precached) return;
+    _precached = true;
+    // 背景图提前解码，首帧不会先黑一下再出现
+    // （资源在包里，失败只会记一条日志，不影响启动）
+    precacheImage(
+      const AssetImage('assets/images/haven_bg.png'),
+      context,
+    );
   }
 
   @override
@@ -173,7 +197,9 @@ class _HavenShellState extends State<HavenShell>
                     heightFactor: isVideo ? 0.0 : 1.0,
                     child: ValueListenableBuilder<double>(
                       valueListenable: _collapse,
-                      builder: (context, t, _) => _buildHeader(top, t),
+                      child: _tabsBlock,
+                      builder: (context, t, tabs) =>
+                          _buildHeader(top, t, tabs!),
                     ),
                   ),
                 ),
@@ -236,7 +262,7 @@ class _HavenShellState extends State<HavenShell>
     );
   }
 
-  Widget _buildHeader(double top, double t) {
+  Widget _buildHeader(double top, double t, Widget tabs) {
     final dim = t.clamp(0.0, 1.0);
 
     return Container(
@@ -258,8 +284,7 @@ class _HavenShellState extends State<HavenShell>
             ),
           ),
           SizedBox(height: 14 * (1 - dim)),
-          _buildTabs(),
-          _buildProgressLine(),
+          tabs,
         ],
       ),
     );

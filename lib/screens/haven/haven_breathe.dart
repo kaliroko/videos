@@ -130,7 +130,8 @@ class _HavenBreatheViewState extends State<HavenBreatheView>
         FadeUpIn(
           delay: const Duration(milliseconds: 80),
           child: GlassCard(
-            padding: const EdgeInsets.all(22),
+            blur: false,
+            padding: const EdgeInsets.all(20),
             child: Column(
               children: <Widget>[
                 SizedBox(

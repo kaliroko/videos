@@ -83,22 +83,23 @@ class _HavenHomeViewState extends State<HavenHomeView> {
   Widget build(BuildContext context) {
     final width = MediaQuery.sizeOf(context).width;
     final narrow = width < 760;
+    final bottom = MediaQuery.paddingOf(context).bottom;
 
     return ListView(
-      padding: const EdgeInsets.fromLTRB(20, 6, 20, 40),
+      padding: EdgeInsets.fromLTRB(20, 6, 20, 40 + bottom),
       physics: const BouncingScrollPhysics(
         parent: AlwaysScrollableScrollPhysics(),
       ),
       children: <Widget>[
         FadeUpIn(child: _buildHero(narrow)),
-        const SizedBox(height: 14),
+        const SizedBox(height: 16),
         FadeUpIn(
           delay: const Duration(milliseconds: 60),
           child: _buildChatCard(),
         ),
-        const SizedBox(height: 14),
+        const SizedBox(height: 16),
         FadeUpIn(delay: const Duration(milliseconds: 110), child: _buildQuick(narrow)),
-        const SizedBox(height: 14),
+        const SizedBox(height: 16),
         FadeUpIn(delay: const Duration(milliseconds: 170), child: _buildGrid()),
         const SizedBox(height: 24),
         FadeUpIn(
@@ -130,11 +131,12 @@ class _HavenHomeViewState extends State<HavenHomeView> {
   }
 
   Widget _buildChatCard() {
-    return SpringTap(
-      onTap: _openChatRoom,
-      pressedScale: 0.98,
-      child: Container(
-        padding: const EdgeInsets.all(18),
+    return RepaintBoundary(
+      child: SpringTap(
+        onTap: _openChatRoom,
+        pressedScale: 0.98,
+        child: Container(
+          padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
           color: HavenColors.glass,
           borderRadius: BorderRadius.circular(HavenColors.radiusCard),
@@ -175,7 +177,21 @@ class _HavenHomeViewState extends State<HavenHomeView> {
                         ),
                       ),
                       const SizedBox(width: 8),
-                      const HavenPulse(size: 6),
+                      // 静态小圆点：常驻的脉冲动画会一直排帧，滚动时白耗
+                      Container(
+                        width: 6,
+                        height: 6,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: HavenColors.rose,
+                          boxShadow: <BoxShadow>[
+                            BoxShadow(
+                              color: HavenColors.rose.withValues(alpha: 0.5),
+                              blurRadius: 6,
+                            ),
+                          ],
+                        ),
+                      ),
                     ],
                   ),
                   const SizedBox(height: 4),
@@ -190,11 +206,12 @@ class _HavenHomeViewState extends State<HavenHomeView> {
             ),
             const SizedBox(width: 10),
             Icon(
-              Icons.arrow_forward_ios,
-              size: 13,
-              color: HavenColors.inkFaint,
-            ),
-          ],
+                Icons.arrow_forward_ios,
+                size: 13,
+                color: HavenColors.inkFaint,
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -248,7 +265,8 @@ class _HavenHomeViewState extends State<HavenHomeView> {
     return GlassCard(
       tint: true,
       accentLeft: true,
-      padding: const EdgeInsets.all(24),
+      iridescent: true,
+      padding: const EdgeInsets.all(22),
       child: narrow
           ? Column(
               mainAxisSize: MainAxisSize.min,
@@ -273,7 +291,8 @@ class _HavenHomeViewState extends State<HavenHomeView> {
 
   Widget _buildQuick(bool narrow) {
     final timerCard = GlassCard(
-      padding: const EdgeInsets.all(20),
+      blur: false,
+      padding: const EdgeInsets.all(18),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         mainAxisSize: MainAxisSize.min,
@@ -325,7 +344,8 @@ class _HavenHomeViewState extends State<HavenHomeView> {
     );
 
     final resonanceCard = GlassCard(
-      padding: const EdgeInsets.all(20),
+      blur: false,
+      padding: const EdgeInsets.all(18),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         mainAxisSize: MainAxisSize.min,
@@ -342,7 +362,7 @@ class _HavenHomeViewState extends State<HavenHomeView> {
           ),
           const SizedBox(height: 6),
           Text('找懂你的姐妹，也可以一起共振', style: HavenColors.small),
-          const SizedBox(height: 14),
+          const SizedBox(height: 16),
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: <Widget>[

@@ -43,6 +43,27 @@ const List<String> _kPrompts = <String>[
   '你可以停下来，随时都可以。',
 ];
 
+/// 共振中她「发过来」的性挑逗 —— 到暗示为止，不写具体动作。
+/// 想更露骨 / 更收，改这一张表就够了。
+const List<String> _kTeases = <String>[
+  '刚才那下，声音漏出来了。',
+  '别装没事，我看见你抖了一下。',
+  '手再往下一点，我想听你呼吸乱掉。',
+  '你是不是已经在想我了。',
+  '慢一点，别这么快就到。',
+  '叫我的名字。',
+  '我想听你说「还要」。',
+  '乖，再忍一会。',
+  '你现在的样子，我很喜欢。',
+  '停一下，看着我。',
+  '别停，继续。',
+  '告诉我，现在几分。',
+  '今晚你只准想我。',
+  '做得很好，再一下。',
+  '把眼睛闭上，跟着我。',
+  '我想贴着你耳朵说话。',
+];
+
 /// 还没连接时，她轮流说给你听的那几句（陪伴感）
 const List<String> _kHerIdle = <String>[
   '今晚的夜色很安静。',
@@ -85,8 +106,15 @@ class _HavenSyncViewState extends State<HavenSyncView> {
   int _syncRate = 0;
   Timer? _rateTimer;
 
-  /// 她刚刚回的那句话
-  String? _herReply;
+  /// 她刚刚发来的那句挑逗 / 回应
+  String? _herMessage;
+
+  /// 她正在输入（三个点）
+  bool _herTyping = false;
+
+  int _teaseIndex = 0;
+  Timer? _teaseTimer;
+  Timer? _typingTimer;
 
   /// 上一段共振结束后的余韵
   int _lastSessionSeconds = 0;
@@ -121,6 +149,8 @@ class _HavenSyncViewState extends State<HavenSyncView> {
     _resoTimer?.cancel();
     _promptTimer?.cancel();
     _rateTimer?.cancel();
+    _teaseTimer?.cancel();
+    _typingTimer?.cancel();
     super.dispose();
   }
 
@@ -156,6 +186,8 @@ class _HavenSyncViewState extends State<HavenSyncView> {
     _resoTimer?.cancel();
     _promptTimer?.cancel();
     _rateTimer?.cancel();
+    _teaseTimer?.cancel();
+    _typingTimer?.cancel();
     setState(() {
       _connected = false;
       _syncing = false;
@@ -165,7 +197,8 @@ class _HavenSyncViewState extends State<HavenSyncView> {
       _syncRounds = 0;
       _promptIndex = 0;
       _syncRate = 0;
-      _herReply = null;
+      _herMessage = null;
+      _herTyping = false;
       _afterglow = null;
       _lastSessionSeconds = 0;
       _lastRate = 0;
@@ -215,7 +248,9 @@ class _HavenSyncViewState extends State<HavenSyncView> {
       _resonanceSeconds = 0;
       _promptIndex = 0;
       _syncRate = 18;
-      _herReply = null;
+      _herMessage = null;
+      _herTyping = false;
+      _teaseIndex = 0;
       _afterglow = null;
     });
 
@@ -241,6 +276,34 @@ class _HavenSyncViewState extends State<HavenSyncView> {
     });
 
     _float('她也开始了。' + _kPrompts[0]);
+    _scheduleTease();
+  }
+
+  /// 每 7~13 秒，她「正在输入」1.5 秒，然后发来一句挑逗
+  void _scheduleTease() {
+    _teaseTimer?.cancel();
+    _teaseTimer = Timer(
+      Duration(seconds: 7 + (_teaseIndex % 4) * 2),
+      () {
+        if (!mounted || !_resonating) return;
+        setState(() {
+          _herTyping = true;
+          _herMessage = null;
+        });
+        _typingTimer?.cancel();
+        _typingTimer = Timer(const Duration(milliseconds: 1500), () {
+          if (!mounted || !_resonating) return;
+          final line = _kTeases[_teaseIndex % _kTeases.length];
+          setState(() {
+            _teaseIndex++;
+            _herTyping = false;
+            _herMessage = line;
+          });
+          _float(line);
+          _scheduleTease();
+        });
+      },
+    );
   }
 
   void _stopResonance() {
@@ -250,9 +313,12 @@ class _HavenSyncViewState extends State<HavenSyncView> {
     _resoTimer?.cancel();
     _promptTimer?.cancel();
     _rateTimer?.cancel();
+    _teaseTimer?.cancel();
+    _typingTimer?.cancel();
 
     setState(() {
       _resonating = false;
+      _herTyping = false;
       _lastSessionSeconds = seconds;
       _lastRate = rate;
       if (seconds >= 3) {
@@ -290,8 +356,14 @@ class _HavenSyncViewState extends State<HavenSyncView> {
       reply = '我在。';
     }
 
-    setState(() => _herReply = reply);
+    _typingTimer?.cancel();
+    setState(() {
+      _herTyping = false;
+      _herMessage = reply;
+    });
     _float(reply);
+    // 快捷回应会打断「正在输入」，这里把挑逗的节奏接回去，别让后面断档
+    _scheduleTease();
   }
 
   // ── 渲染 ────────────────────────────────────────────────────────
@@ -347,6 +419,7 @@ class _HavenSyncViewState extends State<HavenSyncView> {
 
   Widget _buildIdle() {
     return GlassCard(
+      blur: false,
       padding: const EdgeInsets.fromLTRB(24, 40, 24, 40),
       child: Column(
         children: <Widget>[
@@ -616,7 +689,8 @@ class _HavenSyncViewState extends State<HavenSyncView> {
     final period = Duration(milliseconds: _tempoMs[_tempo]);
 
     return GlassCard(
-      padding: const EdgeInsets.all(22),
+      blur: false,
+      padding: const EdgeInsets.all(20),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
@@ -708,9 +782,11 @@ class _HavenSyncViewState extends State<HavenSyncView> {
             duration: const Duration(milliseconds: 320),
             switchInCurve: Curves.easeOutCubic,
             switchOutCurve: Curves.easeInCubic,
-            child: (_resonating && _herReply != null)
+            child: (_resonating && (_herTyping || _herMessage != null))
                 ? Container(
-                    key: ValueKey<String>(_herReply!),
+                    key: ValueKey<String>(
+                      _herTyping ? 'typing' : (_herMessage ?? ''),
+                    ),
                     margin: const EdgeInsets.only(top: 12),
                     padding: const EdgeInsets.symmetric(
                       horizontal: 14,
@@ -734,15 +810,17 @@ class _HavenSyncViewState extends State<HavenSyncView> {
                         ),
                         const SizedBox(width: 10),
                         Expanded(
-                          child: Text(
-                            _herReply!,
-                            style: TextStyle(
-                              fontFamily: HavenColors.sans,
-                              fontSize: 13,
-                              height: 1.7,
-                              color: HavenColors.inkSoft,
-                            ),
-                          ),
+                          child: _herTyping
+                              ? const _TypingDots()
+                              : Text(
+                                  _herMessage!,
+                                  style: TextStyle(
+                                    fontFamily: HavenColors.sans,
+                                    fontSize: 13,
+                                    height: 1.7,
+                                    color: HavenColors.inkSoft,
+                                  ),
+                                ),
                         ),
                       ],
                     ),
@@ -1009,6 +1087,62 @@ class _ResonancePulseState extends State<_ResonancePulse>
           ),
         ),
       ),
+    );
+  }
+}
+
+/// 她「正在输入」的三个点 —— 只在 1.5 秒的输入窗口里跑
+class _TypingDots extends StatefulWidget {
+  const _TypingDots();
+
+  @override
+  State<_TypingDots> createState() => _TypingDotsState();
+}
+
+class _TypingDotsState extends State<_TypingDots>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1000),
+  )..repeat();
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  double _tri(int i) {
+    final t = (_ctrl.value + i * 0.18) % 1.0;
+    return t < 0.5 ? t * 2 : (1 - t) * 2;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _ctrl,
+      builder: (context, _) {
+        return Row(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            for (int i = 0; i < 3; i++)
+              Padding(
+                padding: EdgeInsets.only(right: i == 2 ? 0 : 5),
+                child: Opacity(
+                  opacity: 0.25 + 0.65 * _tri(i),
+                  child: Container(
+                    width: 5,
+                    height: 5,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: HavenColors.rose,
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        );
+      },
     );
   }
 }

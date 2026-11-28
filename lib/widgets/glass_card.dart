@@ -37,6 +37,7 @@ class GlassCard extends StatelessWidget {
     this.blur = true,
     this.tint = false,
     this.accentLeft = false,
+    this.iridescent = false,
     this.onTap,
     this.onLongPress,
     this.haptic = false,
@@ -67,8 +68,12 @@ class GlassCard extends StatelessWidget {
 
     Widget surface = Container(
       padding: padding,
+      // 无模糊时要自己裁圆角，否则子内容会从圆角里溢出来
+      clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
-        color: tint ? null : HavenColors.glass,
+        color: tint
+            ? null
+            : (blur ? HavenColors.glass : HavenColors.glassOpaque),
         gradient: tint ? HavenColors.tintGradient : null,
         borderRadius: borderRadius,
         border: Border.all(color: HavenColors.glassBorder),
@@ -107,6 +112,13 @@ class GlassCard extends StatelessWidget {
     // 玻璃卡往往在列表里，隔一层边界省掉不必要的重绘
     result = RepaintBoundary(child: result);
 
+    if (iridescent) {
+      result = CustomPaint(
+        foregroundPainter: _IridescentBorderPainter(radius: radius),
+        child: result,
+      );
+    }
+
     if (margin != null) {
       result = Padding(padding: margin!, child: result);
     }
@@ -123,4 +135,44 @@ class GlassCard extends StatelessWidget {
 
     return result;
   }
+}
+
+
+/// 1px 镭射描边：玫瑰 → 冷白 → 薰衣草。
+///
+/// 静态绘制，不随帧变化；比再加一层 BackdropFilter 便宜得多，
+/// 但能让主角卡的边缘「有一道金属反光」。
+class _IridescentBorderPainter extends CustomPainter {
+  const _IridescentBorderPainter({required this.radius});
+
+  final double radius;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final rect = Offset.zero & size;
+    final paint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1
+      ..shader = const LinearGradient(
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+        colors: <Color>[
+          Color(0x00D17997),
+          Color(0x80D17997),
+          Color(0x80FFFFFF),
+          Color(0x808E7BB5),
+          Color(0x008E7BB5),
+        ],
+        stops: <double>[0.0, 0.35, 0.5, 0.65, 1.0],
+      ).createShader(rect);
+
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(rect.deflate(0.5), Radius.circular(radius)),
+      paint,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _IridescentBorderPainter oldDelegate) =>
+      oldDelegate.radius != radius;
 }

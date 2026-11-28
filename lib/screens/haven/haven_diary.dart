@@ -211,14 +211,14 @@ class _HavenDiaryViewState extends State<HavenDiaryView>
           final entry = item.entry;
           if (entry != null) {
             return Padding(
-              padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
-              child: _privateCard(entry),
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+              child: RepaintBoundary(child: _privateCard(entry)),
             );
           }
 
           final post = item.post!;
           return Padding(
-            padding: const EdgeInsets.fromLTRB(9, 0, 9, 12),
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
             child: RepaintBoundary(
               child: DiaryCard(
                 post: post,
@@ -332,7 +332,8 @@ class _HavenDiaryViewState extends State<HavenDiaryView>
 
   Widget _buildPrivateEntry() {
     return GlassCard(
-      padding: const EdgeInsets.all(20),
+      blur: false,
+      padding: const EdgeInsets.all(18),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
@@ -481,7 +482,7 @@ class _HavenDiaryViewState extends State<HavenDiaryView>
     return GlassCard(
       // 列表里关掉背景模糊：底色够暗，省掉每帧一次高斯模糊
       blur: false,
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.all(18),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[

@@ -94,15 +94,26 @@ class HavenColors {
       : const Color(0xFF1C1620).withValues(alpha: 0.09);
 
   /// 玻璃卡投影 —— 网页 0 20px 40px rgba(0,0,0,.6)
+  /// ★ 阴影从 40/20 收到 22/10、透明度也降了 ——
+  ///   滚动时大半径阴影每帧都要重新合成，是掉帧的隐形大户；
+  ///   收小之后卡片的层级反而更干净。
   static List<BoxShadow> glassShadow({double lift = 1}) => <BoxShadow>[
         BoxShadow(
           color: isDark
-              ? const Color(0xFF000000).withValues(alpha: 0.60)
-              : const Color(0xFF2A2230).withValues(alpha: 0.10),
-          blurRadius: 40 * lift,
-          offset: Offset(0, 20 * lift),
+              ? const Color(0xFF000000).withValues(alpha: 0.42)
+              : const Color(0xFF2A2230).withValues(alpha: 0.08),
+          blurRadius: 22 * lift,
+          offset: Offset(0, 10 * lift),
         ),
       ];
+
+  /// 不开背景模糊时用的「厚玻璃」底色
+  ///
+  /// 模糊很贵：滚动列表里每张卡一层 BackdropFilter，等于每帧多几次
+  /// 离屏合成。关掉模糊之后底色要稍微实一点，字才不会和背景图打架。
+  static Color get glassOpaque => isDark
+      ? const Color(0xFF16111A).withValues(alpha: 0.74)
+      : const Color(0xFFFFFFFF).withValues(alpha: 0.86);
 
   // ══════════════════════════════════════════════════════════════════
   // 玫瑰 —— 网页 --rose: #D17997

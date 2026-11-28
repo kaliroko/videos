@@ -62,8 +62,8 @@ class HavenBackground extends StatelessWidget {
               'assets/images/haven_bg.png',
               fit: BoxFit.cover,
               alignment: Alignment.topCenter,
-              // 竖屏全屏图，按 1080 宽解码够了，省一半显存
-              cacheWidth: 1080,
+              // 不设 cacheWidth：和 HavenShell 里的 precacheImage 用同一个
+              // AssetImage，解码结果直接复用，首帧不黑、也不会解两次
               errorBuilder: (_, __, ___) => ColoredBox(color: HavenColors.bg),
             ),
           ),
@@ -71,6 +71,19 @@ class HavenBackground extends StatelessWidget {
         // #bgOverlay
         DecoratedBox(
           decoration: BoxDecoration(gradient: HavenColors.overlayGradient),
+        ),
+        // 细颗粒 —— 暗色大面积渐变容易有 banding，压一层 96px 的噪点
+        // 就有胶片/印刷的质感。静态平铺，不参与每帧重绘。
+        IgnorePointer(
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              image: DecorationImage(
+                image: const AssetImage('assets/images/grain.png'),
+                repeat: ImageRepeat.repeat,
+                opacity: 0.6,
+              ),
+            ),
+          ),
         ),
         child,
       ],
@@ -217,12 +230,20 @@ class HavenButton extends StatelessWidget {
 
     Color bg = HavenColors.rose;
     Color fg = HavenColors.onRose;
+    Gradient? gradient;
     Border? border;
     switch (type) {
       case HavenButtonType.primary:
-        bg = HavenColors.rose;
         fg = HavenColors.onRose;
-        border = null;
+        // 玫瑰的轻微对角渐变 + 一道 12% 的顶光，比纯色更「有材质」
+        gradient = LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: <Color>[HavenColors.rose, HavenColors.roseDeep],
+        );
+        border = Border.all(
+          color: Colors.white.withValues(alpha: 0.12),
+        );
         break;
       case HavenButtonType.ghost:
         bg = Colors.transparent;
@@ -273,7 +294,8 @@ class HavenButton extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 24),
         alignment: Alignment.center,
         decoration: BoxDecoration(
-          color: bg,
+          color: gradient == null ? bg : null,
+          gradient: gradient,
           border: border,
           borderRadius: BorderRadius.circular(HavenColors.radiusChip),
         ),
