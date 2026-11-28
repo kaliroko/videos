@@ -6,7 +6,6 @@
 ///   2 = 聊天室（独立页面入口，不切 tab）
 library;
 
-import 'dart:ui'; // 👈 新增：用于 ImageFilter.blur 实现边缘模糊
 import 'package:flutter/material.dart';
 import 'package:liquid_glass_widgets/liquid_glass_widgets.dart';
 import 'package:provider/provider.dart';
@@ -107,100 +106,66 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   // ── 底部导航 ★ 三个位置，中间那个是聊天室入口────────────────────
   Widget _buildBottomNav() {
     final bottomInset = MediaQuery.of(context).padding.bottom;
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final bool isActive = _barIndex != 1; 
-
     return RepaintBoundary(
       child: Padding(
         padding: EdgeInsets.fromLTRB(16, 0, 16, 16 + bottomInset),
-        
-        // 👇 核心：向外溢出的边缘模糊层，实现 0.5mm 羽化扩散
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(35), // 略大于底栏的圆角
-          child: BackdropFilter(
-            // 使用高斯模糊让背景产生泛光，溢出底栏边缘
-            filter: ImageFilter.blur(sigmaX: 15, sigmaY: 15),
-            child: Padding(
-              padding: const EdgeInsets.all(4.0), // 向外扩展 4dp 模糊范围
-              
-              // 原有玻璃组件
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 300),
-                curve: Curves.easeOutCubic,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(30),
-                  // 👇 选中状态下，增加一层微弱的外发光
-                  boxShadow: isActive
-                      ? [
-                          BoxShadow(
-                            color: AppTheme.accentColor.withOpacity(isDark ? 0.3 : 0.15),
-                            blurRadius: 25,
-                            spreadRadius: 2,
-                          )
-                        ]
-                      : [],
-                ),
-                child: GlassBottomBar(
-                  selectedIndex: _barIndex,
-                  onTabSelected: (i) {
-                    // ★ 中间位置 → 进入独立聊天室页面（不改变当前页）
-                    if (i == 1) {
-                      _openChatRoom();
-                      return;
-                    }
+        child: GlassBottomBar(
+          selectedIndex: _barIndex,
+          onTabSelected: (i) {
+            // ★ 中间位置 → 进入独立聊天室页面（不改变当前页）
+            if (i == 1) {
+              _openChatRoom();
+              return;
+            }
 
-                    // 碎碎念(0) / 视频(2) → 切到对应 PageView 页
-                    final pos = _pageController.position;
-                    springScrollTo(
-                      pos,
-                      (i == 2 ? 1 : 0) * pos.viewportDimension,
-                      vsync: this,
-                      spring: Springs.gentle,
-                    );
-                  },
-                  tabs: [
-                    GlassBottomBarTab(
-                      label: '碎碎念',
-                      icon: Icons.create,
-                      selectedIcon: Icons.create,
-                      glowColor: AppTheme.accentColor,
-                    ),
-                    GlassBottomBarTab(
-                      label: '聊天室',
-                      icon: Icons.chat_bubble,
-                      selectedIcon: Icons.chat_bubble_outline,
-                      glowColor: const Color(0xFF64B5EF),
-                    ),
-                    GlassBottomBarTab(
-                      label: '姐妹啦啦',
-                      icon: Icons.auto_awesome,
-                      selectedIcon: Icons.auto_awesome_outlined,
-                      glowColor: AppTheme.accentColor,
-                    ),
-                  ],
-                  barHeight: 60,
-                  iconSize: 24,
-                  selectedIconColor: AppTheme.accentColor,
-                  // 👇 动态颜色：深色模式白色，浅色模式深灰，确保绝不隐形
-                  unselectedIconColor: isDark ? Colors.white70 : Colors.black54,
-                  
-                  // 👇 动态液态玻璃参数：选中时增强折射和模糊
-                  glassSettings: LiquidGlassSettings(
-                    thickness: isActive ? 25 : 15,       
-                    blur: isActive ? 35 : 20,            
-                    refractiveIndex: 1.5,      
-                    saturation: isActive ? 0.9 : 0.8,          
-                    lightIntensity: isActive ? 1.2 : 0.8,      
-                    chromaticAberration: isActive ? 0.05 : 0.02, 
-                    ambientStrength: 1.0,      
-                    lightAngle: 0.785,
-                    glassColor: isDark
-                        ? Color(isActive ? 0x55FFFFFF : 0x40FFFFFF) 
-                        : Color(isActive ? 0x44FFFFFF : 0x33FFFFFF), 
-                  ),
-                ),
-              ),
+            // 碎碎念(0) / 视频(2) → 切到对应 PageView 页
+            // ★ 原来是 animateToPage(280ms, easeOutCubic) —— 补间。
+            //   换成弹簧：和手指左右滑切页是同一套物理，
+            //   点底栏和手滑的手感才是一回事。
+            final pos = _pageController.position;
+            springScrollTo(
+              pos,
+              (i == 2 ? 1 : 0) * pos.viewportDimension,
+              vsync: this,
+              spring: Springs.gentle,
+            );
+          },
+          tabs: [
+            GlassBottomBarTab(
+              label: '碎碎念',
+              icon: Icons.create,
+              selectedIcon: Icons.create,
+              glowColor: AppTheme.accentColor,
             ),
+            // ★ 聊天室 = 入口按钮（点击进入独立页面），放在中间
+            GlassBottomBarTab(
+              label: '聊天室',
+              icon: Icons.chat_bubble,
+              selectedIcon: Icons.chat_bubble_outline,
+              glowColor: const Color(0xFF64B5EF),
+            ),
+            // 视频页（原来是第 2 个位置，和聊天室对调了）
+            GlassBottomBarTab(
+              label: '白丝宝宝',
+              icon: Icons.auto_awesome,
+              selectedIcon: Icons.auto_awesome_outlined,
+              glowColor: AppTheme.accentColor,
+            ),
+          ],
+          barHeight: 60,
+          iconSize: 24,
+          selectedIconColor: AppTheme.accentColor,
+          unselectedIconColor: AppTheme.textTertiary,
+          glassSettings: const LiquidGlassSettings(
+            thickness:           26,
+            blur:                20,
+            refractiveIndex:     1.55,
+            saturation:          0.7,
+            lightIntensity:      0.55,
+            chromaticAberration: 0.05,
+            ambientStrength:     0.9,
+            lightAngle:          0.785,
+            glassColor:          Color(0x3DFFFFFF),
           ),
         ),
       ),
