@@ -30,28 +30,27 @@ class _Slide {
 const List<_Slide> _kSlides = <_Slide>[
   _Slide(
     eyebrow: 'Her Haven',
-    title: '只有全然的\n接纳与共振',
-    body: '这里没有男性的凝视，也没有世俗的评判。\n'
-        '记录你的情绪、探索身体的愉悦、寻找同频的姐妹 ——\n'
-        '欲望在这里是一件正大光明的事。',
+    title: '今晚，\n只属于你',
+    body: '这里没有凝视，也没有评判。\n'
+        '只有女孩和女孩之间，心照不宣的那点事。',
   ),
   _Slide(
-    eyebrow: 'Private Diary',
-    title: '写给自己',
-    body: '情绪、身体感受、注意力程度 ——\n'
-        '写下来的东西只留在这台设备里，不上传、不同步。',
+    eyebrow: 'Private',
+    title: '想被怎样对待',
+    body: '情绪、身体、节奏、欲望 ——\n'
+        '写下来，只留在这台设备里。',
   ),
   _Slide(
-    eyebrow: 'Resonance',
-    title: '同频与呼吸',
-    body: '和懂你的女孩一起共频、共振，或者只是安静地\n'
-        '做一轮 4-4-6 呼吸，让身体自己热起来。',
+    eyebrow: 'Together',
+    title: '和她一起',
+    body: '匹配一个懂你的女孩，一起共振、一起呼吸，\n'
+        '或者只是听她说一句「我在」。',
   ),
   _Slide(
-    eyebrow: 'Before Entering',
-    title: '这里是成年人的空间',
-    body: 'Her Haven 面向 18 岁以上的成年女性。\n'
-        '请确认你已经成年，再进入这个温柔的乌托邦。',
+    eyebrow: 'Come In',
+    title: '门没锁',
+    body: '成年女孩的乌托邦。\n'
+        '随时可以进来，也随时可以停。',
   ),
 ];
 
@@ -77,9 +76,6 @@ class _WelcomeScreenState extends State<WelcomeScreen>
       AnimationController.unbounded(vsync: this, value: 0);
 
   double _viewport = 1;
-
-  /// 最后一页的年龄确认
-  bool _adult = false;
 
   /// 每页动漫图的初始种子
   late final int _baseSeed = DateTime.now().millisecondsSinceEpoch;
@@ -157,11 +153,6 @@ class _WelcomeScreenState extends State<WelcomeScreen>
       _springTo(_pos.value.roundToDouble() + 1);
       return;
     }
-
-    if (!_adult) {
-      showHavenToast(context, '请先确认你已经年满 18 岁');
-      return;
-    }
     widget.onFinished();
   }
 
@@ -232,7 +223,6 @@ class _WelcomeScreenState extends State<WelcomeScreen>
 
     final enter = _entrance.value;
     final enterFade = enter.clamp(0.0, 1.0);
-    final isLast = i == _kSlides.length - 1;
 
     return Opacity(
       opacity: pageFade * enterFade,
@@ -253,8 +243,9 @@ class _WelcomeScreenState extends State<WelcomeScreen>
                   scale: 0.86 + 0.14 * enter,
                   child: MoeImagePanel(
                     initialSeed: _baseSeed + i * 31,
-                    width: 158,
-                    height: 216,
+                    width: 170,
+                    height: 232,
+                    kenBurns: true,
                   ),
                 ),
                 const SizedBox(height: 30),
@@ -287,16 +278,6 @@ class _WelcomeScreenState extends State<WelcomeScreen>
                     style: HavenColors.body.copyWith(height: 1.9),
                   ),
                 ),
-                if (isLast) ...<Widget>[
-                  const SizedBox(height: 24),
-                  Center(
-                    child: HavenChip(
-                      label: _adult ? '✓ 我已年满 18 岁' : '我已年满 18 岁',
-                      selected: _adult,
-                      onTap: () => setState(() => _adult = !_adult),
-                    ),
-                  ),
-                ],
                 const SizedBox(height: 30),
                   ],
                 ),
@@ -349,7 +330,7 @@ class _WelcomeScreenState extends State<WelcomeScreen>
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 30),
       child: HavenButton(
-        label: atEnd ? '进入安全区' : '下一步',
+        label: atEnd ? '进来' : '再近一点',
         expand: true,
         height: 52,
         onPressed: _next,

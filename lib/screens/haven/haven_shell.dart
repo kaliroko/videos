@@ -15,9 +15,11 @@
 library;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../theme/haven.dart';
 import '../../widgets/haven_widgets.dart';
+import '../../widgets/spring_tap.dart';
 import '../swipe_video_screen.dart';
 import 'haven_breathe.dart';
 import 'haven_diary.dart';
@@ -30,7 +32,7 @@ import 'haven_sync.dart';
 const List<String> kHavenTabs = <String>[
   '首页',
   '私语',
-  '身体时刻',
+  '自慰时刻',
   '影像',
   '同频',
   '健康科普',
@@ -54,6 +56,9 @@ class _HavenShellState extends State<HavenShell>
 
   int _index = 0;
 
+  /// 进全屏视频之前停在哪一页 —— 退出全屏时回到这里
+  int _indexBeforeVideo = 0;
+
   /// 0 = 顶部展开，1 = 品牌完全折起
   final ValueNotifier<double> _collapse = ValueNotifier<double>(0);
 
@@ -72,14 +77,44 @@ class _HavenShellState extends State<HavenShell>
     _tab.dispose();
     _collapse.dispose();
     _progress.dispose();
+    _restoreSystemUi();
     super.dispose();
   }
 
   void _onTabChanged() {
     if (_index == _tab.index) return;
-    setState(() => _index = _tab.index);
+    final next = _tab.index;
+
+    if (next == _kVideoTab && _index != _kVideoTab) {
+      _indexBeforeVideo = _index;
+    }
+
+    setState(() => _index = next);
     _collapse.value = 0;
     _progress.value = 0;
+
+    // 视频页进沉浸式全屏；其余页面回到边到边
+    if (next == _kVideoTab) {
+      SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+    } else {
+      _restoreSystemUi();
+    }
+  }
+
+  void _restoreSystemUi() {
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+    SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
+      statusBarColor: Colors.transparent,
+      statusBarIconBrightness: Brightness.light,
+      statusBarBrightness: Brightness.dark,
+      systemNavigationBarColor: Colors.transparent,
+      systemNavigationBarIconBrightness: Brightness.light,
+      systemNavigationBarDividerColor: Colors.transparent,
+    ));
+  }
+
+  void _exitVideo() {
+    _goTo(_indexBeforeVideo);
   }
 
   void _goTo(int i) {
@@ -110,42 +145,92 @@ class _HavenShellState extends State<HavenShell>
   @override
   Widget build(BuildContext context) {
     final top = MediaQuery.paddingOf(context).top;
+    final isVideo = _index == _kVideoTab;
 
-    return HavenBackground(
-      child: Scaffold(
-        backgroundColor: Colors.transparent,
+    return PopScope<Object?>(
+      canPop: !isVideo,
+      onPopInvokedWithResult: (didPop, result) {
+        if (!didPop && isVideo) _exitVideo();
+      },
+      child: HavenBackground(
+        child: Scaffold(
+        backgroundColor: isVideo ? Colors.black : Colors.transparent,
         // 网页 .shell 是 max-width: 960 + 左右 20 的 padding，
-        // 平板/折叠屏上别把玻璃卡拉成一条 —— 这里限制到 920。
+        // 平板/折叠屏上别把玻璃卡拉成一条 —— 这里限制到 920；
+        // 视频页则放开到全宽，配 immersive 才是真全屏。
         body: Center(
           child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 920),
+            constraints: BoxConstraints(
+              maxWidth: isVideo ? double.infinity : 920.0,
+            ),
             child: Column(
               children: <Widget>[
-                ValueListenableBuilder<double>(
-                  valueListenable: _collapse,
-                  builder: (context, t, _) => _buildHeader(top, t),
+                // ★ 视频页把头部「折」成 0 高，而不是从 children 里删掉 ——
+                //   删掉会让下面的 Expanded 换位置，七个页面的状态就全丢了。
+                ClipRect(
+                  child: Align(
+                    alignment: Alignment.topCenter,
+                    heightFactor: isVideo ? 0.0 : 1.0,
+                    child: ValueListenableBuilder<double>(
+                      valueListenable: _collapse,
+                      builder: (context, t, _) => _buildHeader(top, t),
+                    ),
+                  ),
                 ),
                 Expanded(
-                  child: NotificationListener<ScrollNotification>(
-                    onNotification: _onScroll,
-                    child: _FadeThroughBody(
-                      index: _index,
-                      children: <Widget>[
-                        HavenHomeView(onGo: _goTo),
-                        const HavenDiaryView(),
-                        const HavenMomentView(),
-                        // ★ active 控制视频的播放 / 暂停：切走就停，别在后台烧电
-                        SwipeVideoScreen(active: _index == _kVideoTab),
-                        const HavenSyncView(),
-                        const HavenLearnView(),
-                        const HavenBreatheView(),
-                      ],
-                    ),
+                  child: Stack(
+                    children: <Widget>[
+                      Positioned.fill(
+                        child: NotificationListener<ScrollNotification>(
+                          onNotification: _onScroll,
+                          child: _FadeThroughBody(
+                            index: _index,
+                            children: <Widget>[
+                              HavenHomeView(onGo: _goTo),
+                              const HavenDiaryView(),
+                              const HavenMomentView(),
+                              // ★ active 控制视频的播放 / 暂停：切走就停，别在后台烧电
+                              SwipeVideoScreen(active: isVideo),
+                              const HavenSyncView(),
+                              const HavenLearnView(),
+                              const HavenBreatheView(),
+                            ],
+                          ),
+                        ),
+                      ),
+                      if (isVideo)
+                        Positioned(
+                          top: top + 10,
+                          left: 14,
+                          child: SpringTap(
+                            onTap: _exitVideo,
+                            pressedScale: 0.9,
+                            child: Container(
+                              width: 40,
+                              height: 40,
+                              alignment: Alignment.center,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: Colors.black.withValues(alpha: 0.45),
+                                border: Border.all(
+                                  color: Colors.white.withValues(alpha: 0.18),
+                                ),
+                              ),
+                              child: const Icon(
+                                Icons.close,
+                                size: 18,
+                                color: Colors.white,
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
                   ),
                 ),
               ],
             ),
           ),
+        ),
         ),
       ),
     );
@@ -193,18 +278,6 @@ class _HavenShellState extends State<HavenShell>
               const SizedBox(height: 4),
               Text('SAPPHIC · 专属空间', style: HavenColors.brandSub),
             ],
-          ),
-        ),
-        Padding(
-          padding: const EdgeInsets.only(bottom: 4),
-          child: Text(
-            '18+',
-            style: TextStyle(
-              fontFamily: HavenColors.sans,
-              fontSize: 11,
-              letterSpacing: 1,
-              color: HavenColors.inkFaint,
-            ),
           ),
         ),
       ],

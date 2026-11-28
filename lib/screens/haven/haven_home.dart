@@ -99,7 +99,7 @@ class _HavenHomeViewState extends State<HavenHomeView> {
           delay: const Duration(milliseconds: 220),
           child: HavenTip(
             title: 'SAPPHIC WISDOM',
-            body: '女孩，请把身体的感受放在第一位。任何让你感到疼痛、异常出血或持续不适的情况，'
+            body: '女孩，请把自己的感受放在第一位。任何让你感到疼痛、异常出血或持续不适的情况，'
                 '都不是「忍一忍就好」。欲望也一样：先问一句想不想，再伸手；'
                 '任何时候都可以停下来。',
           ),
@@ -204,7 +204,7 @@ class _HavenHomeViewState extends State<HavenHomeView> {
             ),
           ),
           const SizedBox(height: 6),
-          Text('专注当下，感受身体的反馈', style: HavenColors.small),
+          Text('专注当下，感受自己的节奏', style: HavenColors.small),
           const SizedBox(height: 10),
           Center(
             child: RollingDigits(
@@ -338,8 +338,8 @@ class _HavenHomeViewState extends State<HavenHomeView> {
       ),
       HavenMiniCard(
         index: '02',
-        title: '身体时刻',
-        subtitle: '私密欢愉与探索',
+        title: '自慰时刻',
+        subtitle: '私密欢愉 · 详细记录',
         onTap: () => widget.onGo(2),
       ),
       HavenMiniCard(

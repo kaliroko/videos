@@ -1,7 +1,7 @@
 name: suisuinian
 description: Her Haven —— 暗玻璃玫瑰风的女性私密空间（日记 / 影像 / 同频 / 科普）
 publish_to: 'none'
-version: 2.1.1+1
+version: 2.2.0+2
 
 environment:
   sdk: '>=3.5.0 <4.0.0'

@@ -1,4 +1,4 @@
-/// 身体时刻 —— 网页 Her Body & Pleasure 的 1:1 还原
+/// 自慰时刻 —— 网页 Her Body & Pleasure 的 1:1 还原，并加了详细记录
 ///
 /// 一块实时计时器、一个时长滑杆、三段自由书写、一个「是否疼痛」开关，
 /// 下面是写过的记录。所有内容只写本机。
@@ -263,8 +263,8 @@ class _HavenMomentViewState extends State<HavenMomentView> {
       children: <Widget>[
         FadeUpIn(
           child: HavenSectionTitle(
-            title: 'Her Body & Pleasure',
-            note: '私密探索记录',
+            title: 'Her Pleasure',
+            note: '自慰记录 · 仅本机',
           ),
         ),
         FadeUpIn(
@@ -362,7 +362,7 @@ class _HavenMomentViewState extends State<HavenMomentView> {
                 const HavenFieldLabel('结束后'),
                 HavenTextField(
                   controller: _afterCtrl,
-                  hint: '身体反馈、想要的拥抱……',
+                  hint: '高潮之后、想要的拥抱……',
                   minLines: 3,
                   maxLines: 6,
                 ),

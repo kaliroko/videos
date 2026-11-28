@@ -31,6 +31,7 @@ import '../../widgets/glass_card.dart';
 import '../../widgets/handwriting_text.dart';
 import '../../widgets/haven_widgets.dart';
 import '../../widgets/ink_seal.dart';
+import '../../widgets/spring_sheet.dart';
 import '../../widgets/spring_tap.dart';
 import '../diary_comments_sheet.dart';
 import '../diary_compose_sheet.dart';
@@ -75,14 +76,8 @@ class _HavenDiaryViewState extends State<HavenDiaryView>
     // springScrollTo 每次都会新建控制器，必须用复数那个 mixin
     with TickerProviderStateMixin {
   final ScrollController _scroll = ScrollController();
-  final TextEditingController _noteCtrl = TextEditingController();
 
   List<PrivateDiaryEntry> _entries = const <PrivateDiaryEntry>[];
-
-  DateTime _date = DateTime.now();
-  String _mood = kHavenMoods[0];
-  final Set<String> _tags = <String>{};
-  int _intensity = 0;
 
   /// 时间线筛选：0 全部 / 1 只给自己 / 2 碎碎念
   int _filter = 0;
@@ -96,7 +91,6 @@ class _HavenDiaryViewState extends State<HavenDiaryView>
   @override
   void dispose() {
     _scroll.dispose();
-    _noteCtrl.dispose();
     super.dispose();
   }
 
@@ -116,50 +110,6 @@ class _HavenDiaryViewState extends State<HavenDiaryView>
   }
 
   // ── 写给自己的那一页 ────────────────────────────────────────────
-
-  Future<void> _pickDate() async {
-    final now = DateTime.now();
-    final picked = await showDatePicker(
-      context: context,
-      initialDate: _date.isAfter(now) ? now : _date,
-      firstDate: DateTime(2000),
-      lastDate: now,
-      helpText: '选择日期',
-      cancelText: '取消',
-      confirmText: '好',
-    );
-    if (picked != null && mounted) setState(() => _date = picked);
-  }
-
-  Future<void> _savePrivate() async {
-    final note = _noteCtrl.text.trim();
-    if (note.isEmpty && _tags.isEmpty && _mood.isEmpty) {
-      showHavenToast(context, '写点什么再保存吧');
-      return;
-    }
-
-    final entry = PrivateDiaryEntry(
-      id: DateTime.now().microsecondsSinceEpoch.toString(),
-      date: _date,
-      mood: _mood,
-      tags: _tags.toList(growable: false),
-      intensity: _intensity,
-      note: note,
-    );
-
-    final next = <PrivateDiaryEntry>[entry, ..._entries];
-    setState(() {
-      _entries = next;
-      _noteCtrl.clear();
-      _tags.clear();
-      _intensity = 0;
-      _date = DateTime.now();
-    });
-    await HavenStore.savePrivateDiary(next);
-    if (!mounted) return;
-    showHavenToast(context, '已收好，只留在这台设备里');
-    _scrollToTop();
-  }
 
   Future<void> _deletePrivate(PrivateDiaryEntry entry) async {
     final ok = await showDialog<bool>(
@@ -367,7 +317,7 @@ class _HavenDiaryViewState extends State<HavenDiaryView>
             penColor: DiaryPalette.vermilion,
           ),
           const SizedBox(height: 20),
-          _buildPrivateForm(),
+          _buildPrivateEntry(),
           const SizedBox(height: 12),
           _buildComposeRow(),
           const SizedBox(height: 20),
@@ -378,89 +328,68 @@ class _HavenDiaryViewState extends State<HavenDiaryView>
     );
   }
 
-  Widget _buildPrivateForm() {
+  // ── 私密日记入口（一个按钮）────────────────────────────────────
+
+  Widget _buildPrivateEntry() {
     return GlassCard(
-      padding: const EdgeInsets.all(22),
+      padding: const EdgeInsets.all(20),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
           Row(
             children: <Widget>[
               Expanded(
-                child: Text(
-                  '写给自己',
-                  style: HavenColors.viewTitle,
-                ),
+                child: Text('写给自己', style: HavenColors.viewTitle),
               ),
               Text('仅本机', style: HavenColors.small),
             ],
           ),
           const SizedBox(height: 6),
           Text(
-            '写下来不是为了被谁看见，是为了别把自己弄丢。',
+            '情绪、节奏、欲望、想被怎样对待 —— 写下来，只留在这台设备。',
             style: HavenColors.caption,
           ),
-          const SizedBox(height: 20),
-          const HavenFieldLabel('日期'),
-          HavenFieldTile(value: _fmtDate(_date), onTap: _pickDate),
-          const SizedBox(height: 20),
-          const HavenFieldLabel('今日情绪'),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: <Widget>[
-              for (final m in kHavenMoods)
-                HavenChip(
-                  label: m,
-                  selected: _mood == m,
-                  onTap: () => setState(() => _mood = m),
-                ),
-            ],
+          const SizedBox(height: 16),
+          HavenButton(
+            label: '写一页',
+            icon: Icons.edit_note,
+            expand: true,
+            onPressed: _openPrivateSheet,
           ),
-          const SizedBox(height: 20),
-          const HavenFieldLabel('身体感受'),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: <Widget>[
-              for (final t in kHavenBodyTags)
-                HavenChip(
-                  label: t,
-                  selected: _tags.contains(t),
-                  onTap: () => setState(() {
-                    if (!_tags.remove(t)) _tags.add(t);
-                  }),
-                ),
-            ],
-          ),
-          const SizedBox(height: 20),
-          HavenFieldLabel(
-            '注意力程度',
-            accent: kHavenIntensityLabels[_intensity],
-          ),
-          SliderTheme(
-            data: _sliderTheme(),
-            child: Slider(
-              value: _intensity.toDouble(),
-              min: 0,
-              max: 5,
-              divisions: 5,
-              onChanged: (v) => setState(() => _intensity = v.round()),
-            ),
-          ),
-          const SizedBox(height: 8),
-          const HavenFieldLabel('想对自己说些什么'),
-          HavenTextField(
-            controller: _noteCtrl,
-            hint: '今晚想被怎样对待，写下来……',
-            minLines: 4,
-            maxLines: 8,
-          ),
-          const SizedBox(height: 18),
-          HavenButton(label: '保存这一页', expand: true, onPressed: _savePrivate),
         ],
       ),
     );
+  }
+
+  Future<void> _openPrivateSheet() async {
+    await showSpringSheet(
+      context,
+      maxHeightFactor: 0.92,
+      header: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 4, 20, 0),
+        child: Row(
+          children: <Widget>[
+            Expanded(
+              child: Text('写给自己', style: HavenColors.viewTitle),
+            ),
+            Text('仅本机', style: HavenColors.small),
+          ],
+        ),
+      ),
+      scroller: SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(20, 16, 20, 30),
+        child: _PrivateDiarySheet(onSaved: _onPrivateSaved),
+      ),
+    );
+  }
+
+  Future<void> _onPrivateSaved(PrivateDiaryEntry entry) async {
+    final next = <PrivateDiaryEntry>[entry, ..._entries];
+    setState(() => _entries = next);
+    await HavenStore.savePrivateDiary(next);
+    if (!mounted) return;
+    showHavenToast(context, '已收好，只留在这台设备里');
+    _scrollToTop();
   }
 
   Widget _buildComposeRow() {
@@ -644,6 +573,68 @@ class _HavenDiaryViewState extends State<HavenDiaryView>
     );
   }
 
+}
+// ══════════════════════════════════════════════════════════════════════
+// 私密日记表单 —— 收进一张弹簧抽屉里，页面上只留一个「写一页」按钮
+// ══════════════════════════════════════════════════════════════════════
+
+class _PrivateDiarySheet extends StatefulWidget {
+  const _PrivateDiarySheet({required this.onSaved});
+
+  final ValueChanged<PrivateDiaryEntry> onSaved;
+
+  @override
+  State<_PrivateDiarySheet> createState() => _PrivateDiarySheetState();
+}
+
+class _PrivateDiarySheetState extends State<_PrivateDiarySheet> {
+  final TextEditingController _noteCtrl = TextEditingController();
+
+  DateTime _date = DateTime.now();
+  String _mood = kHavenMoods[0];
+  final Set<String> _tags = <String>{};
+  int _intensity = 0;
+
+  @override
+  void dispose() {
+    _noteCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _pickDate() async {
+    final now = DateTime.now();
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _date.isAfter(now) ? now : _date,
+      firstDate: DateTime(2000),
+      lastDate: now,
+      helpText: '选择日期',
+      cancelText: '取消',
+      confirmText: '好',
+    );
+    if (picked != null && mounted) setState(() => _date = picked);
+  }
+
+  void _save() {
+    final note = _noteCtrl.text.trim();
+    if (note.isEmpty && _tags.isEmpty && _mood.isEmpty) {
+      showHavenToast(context, '写点什么再保存吧');
+      return;
+    }
+
+    final entry = PrivateDiaryEntry(
+      id: DateTime.now().microsecondsSinceEpoch.toString(),
+      date: _date,
+      mood: _mood,
+      tags: _tags.toList(growable: false),
+      intensity: _intensity,
+      note: note,
+    );
+
+    widget.onSaved(entry);
+    Navigator.of(context).pop();
+  }
+
   SliderThemeData _sliderTheme() {
     return SliderTheme.of(context).copyWith(
       activeTrackColor: HavenColors.rose,
@@ -653,6 +644,77 @@ class _HavenDiaryViewState extends State<HavenDiaryView>
       trackHeight: 2,
       thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7),
       overlayShape: const RoundSliderOverlayShape(overlayRadius: 16),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        const HavenFieldLabel('日期'),
+        HavenFieldTile(value: _fmtDate(_date), onTap: _pickDate),
+        const SizedBox(height: 20),
+        const HavenFieldLabel('今日情绪'),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: <Widget>[
+            for (final m in kHavenMoods)
+              HavenChip(
+                label: m,
+                selected: _mood == m,
+                onTap: () => setState(() => _mood = m),
+              ),
+          ],
+        ),
+        const SizedBox(height: 20),
+        const HavenFieldLabel('身体反应'),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: <Widget>[
+            for (final t in kHavenBodyTags)
+              HavenChip(
+                label: t,
+                selected: _tags.contains(t),
+                onTap: () => setState(() {
+                  if (!_tags.remove(t)) _tags.add(t);
+                }),
+              ),
+          ],
+        ),
+        const SizedBox(height: 20),
+        HavenFieldLabel(
+          '注意力程度',
+          accent: kHavenIntensityLabels[_intensity],
+        ),
+        SliderTheme(
+          data: _sliderTheme(),
+          child: Slider(
+            value: _intensity.toDouble(),
+            min: 0,
+            max: 5,
+            divisions: 5,
+            onChanged: (v) => setState(() => _intensity = v.round()),
+          ),
+        ),
+        const SizedBox(height: 8),
+        const HavenFieldLabel('想对自己说些什么'),
+        HavenTextField(
+          controller: _noteCtrl,
+          hint: '今晚想被怎样对待，写下来……',
+          minLines: 5,
+          maxLines: 10,
+        ),
+        const SizedBox(height: 20),
+        HavenButton(
+          label: '保存这一页',
+          expand: true,
+          onPressed: _save,
+        ),
+        const SizedBox(height: 8),
+      ],
     );
   }
 }

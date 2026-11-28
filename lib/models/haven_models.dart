@@ -1,4 +1,4 @@
-/// Her Haven 本地记录模型 —— 私密日记 / 身体时刻
+/// Her Haven 本地记录模型 —— 私密日记 / 自慰时刻
 ///
 /// ★ 这两个模块的数据只存在本机 SharedPreferences 里（JSON），
 ///   不上传、不联网 —— 和网页「所有数据均加密保存在本机」的说法一致。
@@ -26,7 +26,7 @@ const List<String> kHavenBodyTags = <String>[
   '疲惫',
 ];
 
-/// 身体时刻的「当时状态」
+/// 自慰时刻的「当时状态」
 const List<String> kHavenMomentStates = <String>[
   '独处',
   '两个人',
@@ -36,7 +36,7 @@ const List<String> kHavenMomentStates = <String>[
   '慢慢来',
 ];
 
-/// 身体时刻的「方式」——详细记录用的多选项
+/// 自慰时刻的「方式」——详细记录用的多选项
 const List<String> kHavenMethods = <String>[
   '手指',
   '玩具',
@@ -116,7 +116,7 @@ class PrivateDiaryEntry {
   }
 }
 
-/// 一条身体时刻记录
+/// 一条自慰时刻记录
 class MomentEntry {
   const MomentEntry({
     required this.id,

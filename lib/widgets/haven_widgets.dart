@@ -1317,19 +1317,46 @@ class MoeImagePanel extends StatefulWidget {
     this.initialSeed,
     this.width = 180,
     this.height = 250,
+    this.kenBurns = false,
   });
 
   final int? initialSeed;
   final double width;
   final double height;
 
+  /// 缓慢呼吸式放大 —— 欢迎页用，静态图也会显得「活着」
+  final bool kenBurns;
+
   @override
   State<MoeImagePanel> createState() => _MoeImagePanelState();
 }
 
-class _MoeImagePanelState extends State<MoeImagePanel> {
+class _MoeImagePanelState extends State<MoeImagePanel>
+    with SingleTickerProviderStateMixin {
   late int _seed = widget.initialSeed ?? DateTime.now().millisecondsSinceEpoch;
   double _opacity = 1;
+
+  late final AnimationController _kb = AnimationController(
+    vsync: this,
+    duration: const Duration(seconds: 14),
+  );
+
+  late final Animation<double> _kbScale = Tween<double>(
+    begin: 1.0,
+    end: 1.06,
+  ).animate(CurvedAnimation(parent: _kb, curve: Curves.easeInOut));
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.kenBurns) _kb.repeat(reverse: true);
+  }
+
+  @override
+  void dispose() {
+    _kb.dispose();
+    super.dispose();
+  }
 
   void _refresh() {
     setState(() {
@@ -1360,7 +1387,16 @@ class _MoeImagePanelState extends State<MoeImagePanel> {
           AnimatedOpacity(
             duration: const Duration(milliseconds: 300),
             opacity: _opacity,
-            child: MoeImage(seed: _seed),
+            child: AnimatedBuilder(
+              animation: _kbScale,
+              builder: (context, child) {
+                return Transform.scale(
+                  scale: widget.kenBurns ? _kbScale.value : 1.0,
+                  child: child,
+                );
+              },
+              child: MoeImage(seed: _seed),
+            ),
           ),
           Positioned(
             top: 12,

@@ -1,4 +1,4 @@
-/// Her Haven 本地存储 —— 私密日记 / 身体时刻
+/// Her Haven 本地存储 —— 私密日记 / 自慰时刻
 ///
 /// ★ 只用 SharedPreferences 存 JSON 字符串：
 ///   条数少（各留最近 200 条）、结构简单，不值得上数据库。
@@ -49,7 +49,7 @@ class HavenStore {
     );
   }
 
-  /// 读身体时刻（按时间倒序）
+  /// 读自慰时刻（按时间倒序）
   static Future<List<MomentEntry>> loadMoments() async {
     final raw = await _readList(_kMoments);
     final list = <MomentEntry>[];
@@ -57,14 +57,14 @@ class HavenStore {
       try {
         list.add(MomentEntry.fromJson(m));
       } catch (e) {
-        debugPrint('[HavenStore] 跳过一条坏的身体时刻数据: $e');
+        debugPrint('[HavenStore] 跳过一条坏的自慰时刻数据: $e');
       }
     }
     list.sort((a, b) => b.at.compareTo(a.at));
     return list;
   }
 
-  /// 写身体时刻
+  /// 写自慰时刻
   static Future<void> saveMoments(List<MomentEntry> entries) async {
     final sorted = List<MomentEntry>.of(entries)
       ..sort((a, b) => b.at.compareTo(a.at));

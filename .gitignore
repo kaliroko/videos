@@ -45,6 +45,9 @@ assets/**
 # ★ 字体必须入库，否则 CI 构建时 pubspec 声明的字体文件不存在 → 构建失败
 !assets/fonts/
 !assets/fonts/**
+# ★ 背景图 / 兜底动漫图也必须入库，否则 CI 构建出来的包没有背景
+!assets/images/
+!assets/images/**
 
 # Other
 *.log
