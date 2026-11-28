@@ -58,6 +58,9 @@ class GlassCard extends StatelessWidget {
   /// 左侧玫瑰竖条（网页 `.hero` 的 `border-left: 2px solid var(--rose)`）
   final bool accentLeft;
 
+  /// 玫瑰 → 冷白 → 薰衣草的 1px 镭射描边（给主角卡用）
+  final bool iridescent;
+
   final VoidCallback? onTap;
   final VoidCallback? onLongPress;
   final bool haptic;

@@ -332,7 +332,6 @@ class _HavenDiaryViewState extends State<HavenDiaryView>
 
   Widget _buildPrivateEntry() {
     return GlassCard(
-      blur: false,
       padding: const EdgeInsets.all(18),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -480,8 +479,6 @@ class _HavenDiaryViewState extends State<HavenDiaryView>
 
   Widget _privateCard(PrivateDiaryEntry entry) {
     return GlassCard(
-      // 列表里关掉背景模糊：底色够暗，省掉每帧一次高斯模糊
-      blur: false,
       padding: const EdgeInsets.all(18),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,

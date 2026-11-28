@@ -291,7 +291,6 @@ class _HavenHomeViewState extends State<HavenHomeView> {
 
   Widget _buildQuick(bool narrow) {
     final timerCard = GlassCard(
-      blur: false,
       padding: const EdgeInsets.all(18),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -344,7 +343,6 @@ class _HavenHomeViewState extends State<HavenHomeView> {
     );
 
     final resonanceCard = GlassCard(
-      blur: false,
       padding: const EdgeInsets.all(18),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,

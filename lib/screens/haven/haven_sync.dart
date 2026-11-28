@@ -25,8 +25,8 @@ import '../../widgets/spring_tap.dart';
 /// 共振时轮流浮起来的那几句 —— 只到「暗示」为止，不写具体动作。
 /// 想再露骨/再收敛，改这一张表就够了，别去散落的文案里找。
 const List<String> _kPrompts = <String>[
-  '把灯关掉，只留屏幕的光。',
-  '手心是不是已经热了。',
+  '把灯关掉。',
+  '身体是不是已经热了呀。',
   '先别往下，等我。',
   '跟着我的呼吸，慢一点。',
   '膝盖软了也没有关系。',
@@ -58,7 +58,8 @@ const List<String> _kTeases = <String>[
   '停一下，看着我。',
   '别停，继续。',
   '告诉我，现在几分。',
-  '今晚你只准想我。',
+  '今晚，{name}只准想我。',
+  '{name}，看着我。',
   '做得很好，再一下。',
   '把眼睛闭上，跟着我。',
   '我想贴着你耳朵说话。',
@@ -116,6 +117,12 @@ class _HavenSyncViewState extends State<HavenSyncView> {
   Timer? _teaseTimer;
   Timer? _typingTimer;
 
+  /// 你的昵称（连上时取一次，用来称呼你）
+  String _myName = '';
+
+  /// 40 秒没互动，她会先开口
+  Timer? _nudgeTimer;
+
   /// 上一段共振结束后的余韵
   int _lastSessionSeconds = 0;
   int _lastRate = 0;
@@ -151,6 +158,7 @@ class _HavenSyncViewState extends State<HavenSyncView> {
     _rateTimer?.cancel();
     _teaseTimer?.cancel();
     _typingTimer?.cancel();
+    _nudgeTimer?.cancel();
     super.dispose();
   }
 
@@ -172,13 +180,31 @@ class _HavenSyncViewState extends State<HavenSyncView> {
     if (!mounted) return;
 
     final seed = DateTime.now().millisecondsSinceEpoch;
+    final name = context.read<DiaryProvider>().nickname.trim();
     setState(() {
       _connecting = false;
       _connected = true;
       _herSeed = seed;
       _herName = _names[seed % _names.length];
+      _myName = name;
+      _herMessage = null;
+      _herTyping = false;
     });
-    _float('嗨，今晚的夜色很安静。');
+
+    // 先「正在输入」，再开口 —— 比直接弹一句话更像真人
+    _typingTimer?.cancel();
+    setState(() => _herTyping = true);
+    _typingTimer = Timer(const Duration(milliseconds: 1200), () {
+      if (!mounted) return;
+      final hello = _myName.isEmpty
+          ? '宝宝，你终于来了呀。'
+          : '宝宝，' + _myName + '。你终于来了呀。';
+      setState(() {
+        _herTyping = false;
+        _herMessage = hello;
+      });
+      _float(hello);
+    });
   }
 
   void _disconnect() {
@@ -188,6 +214,7 @@ class _HavenSyncViewState extends State<HavenSyncView> {
     _rateTimer?.cancel();
     _teaseTimer?.cancel();
     _typingTimer?.cancel();
+    _nudgeTimer?.cancel();
     setState(() {
       _connected = false;
       _syncing = false;
@@ -277,6 +304,44 @@ class _HavenSyncViewState extends State<HavenSyncView> {
 
     _float('她也开始了。' + _kPrompts[0]);
     _scheduleTease();
+    _armNudge();
+  }
+
+  /// 称呼你：没设昵称时去掉占位，用「你」兜底
+  String _withName(String line) {
+    final name = _myName.trim();
+    if (name.isNotEmpty) return line.replaceAll('{name}', name);
+    return line.replaceAll('{name}，', '').replaceAll('{name}', '你');
+  }
+
+  /// 她说一句话：打字时长跟句子长度走，长句慢、短句快
+  void _herSay(String line) {
+    final text = _withName(line);
+    _typingTimer?.cancel();
+    setState(() {
+      _herTyping = true;
+      _herMessage = null;
+    });
+
+    final ms = (700 + text.length * 90).clamp(900, 2800).toInt();
+    _typingTimer = Timer(Duration(milliseconds: ms), () {
+      if (!mounted) return;
+      setState(() {
+        _herTyping = false;
+        _herMessage = text;
+      });
+      _float(text);
+    });
+  }
+
+  /// 你 40 秒没动作，她先开口
+  void _armNudge() {
+    _nudgeTimer?.cancel();
+    if (!_resonating) return;
+    _nudgeTimer = Timer(const Duration(seconds: 40), () {
+      if (!mounted || !_resonating) return;
+      _herSay('还在吗宝宝。');
+    });
   }
 
   /// 每 7~13 秒，她「正在输入」1.5 秒，然后发来一句挑逗
@@ -286,22 +351,10 @@ class _HavenSyncViewState extends State<HavenSyncView> {
       Duration(seconds: 7 + (_teaseIndex % 4) * 2),
       () {
         if (!mounted || !_resonating) return;
-        setState(() {
-          _herTyping = true;
-          _herMessage = null;
-        });
-        _typingTimer?.cancel();
-        _typingTimer = Timer(const Duration(milliseconds: 1500), () {
-          if (!mounted || !_resonating) return;
-          final line = _kTeases[_teaseIndex % _kTeases.length];
-          setState(() {
-            _teaseIndex++;
-            _herTyping = false;
-            _herMessage = line;
-          });
-          _float(line);
-          _scheduleTease();
-        });
+        final line = _kTeases[_teaseIndex % _kTeases.length];
+        _teaseIndex++;
+        _herSay(line);
+        _scheduleTease();
       },
     );
   }
@@ -315,16 +368,19 @@ class _HavenSyncViewState extends State<HavenSyncView> {
     _rateTimer?.cancel();
     _teaseTimer?.cancel();
     _typingTimer?.cancel();
+    _nudgeTimer?.cancel();
 
     setState(() {
       _resonating = false;
       _herTyping = false;
+      _herMessage = null;
       _lastSessionSeconds = seconds;
       _lastRate = rate;
       if (seconds >= 3) {
-        _afterglow = rate >= 70
+        final glow = rate >= 70
             ? '刚才很合拍。现在别急着起来，先抱一会自己。'
             : '下次可以再慢一点。不用勉强，我在。';
+        _afterglow = _myName.isEmpty ? glow : _myName + '，' + glow;
       }
     });
     _float('结束了。抱抱自己，记得喝口温水。');
@@ -364,6 +420,7 @@ class _HavenSyncViewState extends State<HavenSyncView> {
     _float(reply);
     // 快捷回应会打断「正在输入」，这里把挑逗的节奏接回去，别让后面断档
     _scheduleTease();
+    _armNudge();
   }
 
   // ── 渲染 ────────────────────────────────────────────────────────
@@ -384,7 +441,7 @@ class _HavenSyncViewState extends State<HavenSyncView> {
             FadeUpIn(
               child: HavenSectionTitle(
                 title: 'Sisterhood Space',
-                note: '共频与共振都是本地演示',
+                note: '只属于两个人的频率',
               ),
             ),
             FadeUpIn(
@@ -396,8 +453,8 @@ class _HavenSyncViewState extends State<HavenSyncView> {
               delay: const Duration(milliseconds: 140),
               child: const HavenTip(
                 title: '只属于两个人的边界',
-                body: '同频仪式不会真的连到别人的设备，它只是让你安静下来的一小段仪式。'
-                    '共振是两个人的事：任何一方说停，就停；不舒服就退出来，不需要解释。'
+                body: '共振是陪你的一段节奏：任何一方说停，就停；'
+                    '不舒服就退出来，不需要解释。'
                     '「聊天室」是真实的公共房间 —— 请不要在里面透露住址、'
                     '真实姓名或任何能定位到你的信息。',
               ),
@@ -419,7 +476,6 @@ class _HavenSyncViewState extends State<HavenSyncView> {
 
   Widget _buildIdle() {
     return GlassCard(
-      blur: false,
       padding: const EdgeInsets.fromLTRB(24, 40, 24, 40),
       child: Column(
         children: <Widget>[
@@ -559,10 +615,12 @@ class _HavenSyncViewState extends State<HavenSyncView> {
                     circular: true,
                   ),
                   name: _herName,
-                  status: _resonating
-                      ? '共振中...'
-                      : (_syncing ? '共频中...' : '准备就绪'),
-                  live: _resonating,
+                  status: _herTyping
+                      ? '正在输入...'
+                      : (_resonating
+                          ? '共振中...'
+                          : (_syncing ? '共频中...' : '准备就绪')),
+                  live: _resonating || _herTyping,
                 ),
               ),
             ],
@@ -689,7 +747,6 @@ class _HavenSyncViewState extends State<HavenSyncView> {
     final period = Duration(milliseconds: _tempoMs[_tempo]);
 
     return GlassCard(
-      blur: false,
       padding: const EdgeInsets.all(20),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -708,7 +765,7 @@ class _HavenSyncViewState extends State<HavenSyncView> {
                 ),
               ),
               Text(
-                _resonating ? 'LIVE' : '18+',
+                _resonating ? ' 陪伴 · LIVE' : ' 陪伴',
                 style: TextStyle(
                   fontFamily: HavenColors.sans,
                   fontSize: 10.5,
@@ -782,7 +839,7 @@ class _HavenSyncViewState extends State<HavenSyncView> {
             duration: const Duration(milliseconds: 320),
             switchInCurve: Curves.easeOutCubic,
             switchOutCurve: Curves.easeInCubic,
-            child: (_resonating && (_herTyping || _herMessage != null))
+            child: (_herTyping || _herMessage != null)
                 ? Container(
                     key: ValueKey<String>(
                       _herTyping ? 'typing' : (_herMessage ?? ''),
@@ -857,7 +914,10 @@ class _HavenSyncViewState extends State<HavenSyncView> {
                 HavenChip(
                   label: _tempoLabels[i],
                   selected: _tempo == i,
-                  onTap: () => setState(() => _tempo = i),
+                  onTap: () {
+                    setState(() => _tempo = i);
+                    if (_resonating) _armNudge();
+                  },
                 ),
               ],
             ],

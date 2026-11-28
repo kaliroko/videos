@@ -1,7 +1,7 @@
 /// 健康科普 —— 网页 Sapphic Care 的 1:1 还原
 ///
 /// 六条折叠条目，+ 号会转成 ×，展开/收起是补间（AnimatedSize），
-/// 和网页 <details> 的默认开合观感一致。
+/// 和网页 details 元素的默认开合观感一致。
 library;
 
 import 'package:flutter/material.dart';

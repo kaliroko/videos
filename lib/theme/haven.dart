@@ -20,8 +20,6 @@
 ///   拿不到模糊的地方（比如超长列表）退化成这个半透明底色也站得住。
 library;
 
-import 'dart:ui' show FontFeature;
-
 import 'package:flutter/material.dart';
 
 /// 当前配色模式
