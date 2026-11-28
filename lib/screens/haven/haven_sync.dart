@@ -21,7 +21,6 @@ import '../../theme/haven.dart';
 import '../../widgets/glass_card.dart';
 import '../../widgets/haven_widgets.dart';
 import '../../widgets/spring_tap.dart';
-import '../chat_screen.dart';
 
 /// 共振时轮流浮起来的那几句 —— 只到「暗示」为止，不写具体动作。
 /// 想再露骨/再收敛，改这一张表就够了，别去散落的文案里找。
@@ -313,7 +312,7 @@ class _HavenSyncViewState extends State<HavenSyncView> {
             FadeUpIn(
               child: HavenSectionTitle(
                 title: 'Sisterhood Space',
-                note: '共频是本地演示，聊天室是真实联网',
+                note: '共频与共振都是本地演示',
               ),
             ),
             FadeUpIn(
@@ -501,36 +500,6 @@ class _HavenSyncViewState extends State<HavenSyncView> {
         const SizedBox(height: 14),
         _buildResonanceCard(),
         const SizedBox(height: 14),
-        GlassCard(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              Text(
-                '想说话的时候',
-                style: TextStyle(
-                  fontFamily: HavenColors.serif,
-                  fontSize: 16,
-                  letterSpacing: 1,
-                  color: HavenColors.inkStrong,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                '共振只是节奏。真的想聊天、发图、发表情，去聊天室 —— '
-                '那里有真实的人，也支持撤回与回复。',
-                style: HavenColors.caption,
-              ),
-              const SizedBox(height: 16),
-              HavenButton(
-                label: '进入加密聊天室',
-                icon: Icons.chat_bubble_outline,
-                expand: true,
-                onPressed: _openChatRoom,
-              ),
-            ],
-          ),
-        ),
       ],
     );
   }
@@ -911,11 +880,6 @@ class _HavenSyncViewState extends State<HavenSyncView> {
     );
   }
 
-  Future<void> _openChatRoom() async {
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(builder: (_) => const ChatScreen()),
-    );
-  }
 }
 
 // ══════════════════════════════════════════════════════════════════════

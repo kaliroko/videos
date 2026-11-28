@@ -12,6 +12,7 @@ import '../../theme/haven.dart';
 import '../../widgets/glass_card.dart';
 import '../../widgets/haven_widgets.dart';
 import '../../widgets/spring_tap.dart';
+import '../chat_screen.dart';
 
 class HavenHomeView extends StatefulWidget {
   const HavenHomeView({super.key, required this.onGo});
@@ -91,9 +92,14 @@ class _HavenHomeViewState extends State<HavenHomeView> {
       children: <Widget>[
         FadeUpIn(child: _buildHero(narrow)),
         const SizedBox(height: 14),
-        FadeUpIn(delay: const Duration(milliseconds: 80), child: _buildQuick(narrow)),
+        FadeUpIn(
+          delay: const Duration(milliseconds: 60),
+          child: _buildChatCard(),
+        ),
         const SizedBox(height: 14),
-        FadeUpIn(delay: const Duration(milliseconds: 150), child: _buildGrid()),
+        FadeUpIn(delay: const Duration(milliseconds: 110), child: _buildQuick(narrow)),
+        const SizedBox(height: 14),
+        FadeUpIn(delay: const Duration(milliseconds: 170), child: _buildGrid()),
         const SizedBox(height: 24),
         FadeUpIn(
           delay: const Duration(milliseconds: 220),
@@ -112,6 +118,85 @@ class _HavenHomeViewState extends State<HavenHomeView> {
         ),
         const SizedBox(height: 12),
       ],
+    );
+  }
+
+  // ── 聊天室入口 ───────────────────────────────────────────────────
+
+  Future<void> _openChatRoom() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(builder: (_) => const ChatScreen()),
+    );
+  }
+
+  Widget _buildChatCard() {
+    return SpringTap(
+      onTap: _openChatRoom,
+      pressedScale: 0.98,
+      child: Container(
+        padding: const EdgeInsets.all(18),
+        decoration: BoxDecoration(
+          color: HavenColors.glass,
+          borderRadius: BorderRadius.circular(HavenColors.radiusCard),
+          border: Border.all(color: HavenColors.glassBorder),
+          boxShadow: HavenColors.glassShadow(lift: 0.8),
+        ),
+        child: Row(
+          children: <Widget>[
+            Container(
+              width: 46,
+              height: 46,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: HavenColors.roseWash,
+                borderRadius: BorderRadius.circular(HavenColors.radiusSm),
+                border: Border.all(color: HavenColors.roseEdge),
+              ),
+              child: Icon(
+                Icons.forum_outlined,
+                size: 20,
+                color: HavenColors.rose,
+              ),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
+                  Row(
+                    children: <Widget>[
+                      Flexible(
+                        child: Text(
+                          '聊天室 / CHAT ROOM',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: HavenColors.cardTitle,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      const HavenPulse(size: 6),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '真实的公共房间 · 图片、表情、回复、撤回',
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: HavenColors.small,
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 10),
+            Icon(
+              Icons.arrow_forward_ios,
+              size: 13,
+              color: HavenColors.inkFaint,
+            ),
+          ],
+        ),
+      ),
     );
   }
 
