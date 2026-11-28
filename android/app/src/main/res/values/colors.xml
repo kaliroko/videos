@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Her Haven 的暗底：和网页 --bg-base 一致，启动闪屏到首帧不跳色 -->
+    <!-- Her Haven 的暗底：与网页 bg-base 一致，启动闪屏到首帧不跳色 -->
     <color name="splash_background">#0D0A10</color>
 </resources>
