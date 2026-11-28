@@ -19,7 +19,7 @@ import 'providers/diary_provider.dart';
 import 'providers/nav_bar_visibility.dart';
 import 'security/integrity_guard.dart';
 import 'widgets/remote_gate.dart';
-import 'screens/home_screen.dart';
+import 'screens/haven/haven_shell.dart';
 import 'theme/app_theme.dart';
 import 'theme/diary_palette.dart';
 
@@ -201,11 +201,12 @@ class _BiliGlassAppState extends State<BiliGlassApp> {
         ],
         child: MaterialApp(
           navigatorKey: _navigatorKey,
-          title: '碎碎念',
+          title: 'Her Haven',
           debugShowCheckedModeBanner: false,
           theme: AppTheme.lightTheme,
           darkTheme: AppTheme.darkTheme,
-          themeMode: ThemeMode.system,
+          // ★ 网页只有暗色。要做 1:1 的观感，就不再跟随系统切浅色了。
+          themeMode: ThemeMode.dark,
           builder: (context, child) {
             DiaryPalette.syncWith(Theme.of(context).brightness);
             return RemoteGate(
@@ -217,7 +218,7 @@ class _BiliGlassAppState extends State<BiliGlassApp> {
               child: child ?? const SizedBox.shrink(),
             );
           },
-          home: const HomeScreen(),
+          home: const HavenShell(),
         ),
       ),
     );

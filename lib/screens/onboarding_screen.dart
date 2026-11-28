@@ -34,6 +34,7 @@ import '../theme/app_theme.dart';
 import '../theme/diary_palette.dart';
 import '../utils/user_profile.dart';
 import '../widgets/handwriting_text.dart';
+import '../widgets/haven_widgets.dart';
 import '../widgets/ink_seal.dart';
 import 'welcome_screen.dart';
 
@@ -134,7 +135,7 @@ class _OnboardingGateState extends State<OnboardingGate> {
       debugShowCheckedModeBanner: false,
       theme: AppTheme.lightTheme,
       darkTheme: AppTheme.darkTheme,
-      themeMode: ThemeMode.system,
+      themeMode: ThemeMode.dark,
       builder: (context, child) {
         DiaryPalette.syncWith(Theme.of(context).brightness);
         return child ?? const SizedBox.shrink();
@@ -433,14 +434,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     return Scaffold(
       backgroundColor: DiaryPalette.ink,
       resizeToAvoidBottomInset: true,
-      body: DecoratedBox(
-        decoration: BoxDecoration(
-          gradient: RadialGradient(
-            center: const Alignment(0, -1.05),
-            radius: 1.15,
-            colors: <Color>[DiaryPalette.inkGlow, DiaryPalette.ink],
-          ),
-        ),
+      body: HavenBackground(
         child: SafeArea(
           child: Center(
             child: SingleChildScrollView(
@@ -469,15 +463,20 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       mainAxisSize: MainAxisSize.min,
       children: [
         HandwritingText(
-          lines: const <String>['碎碎念'],
-          style: DiaryPalette.brushHero,
-          charDuration: const Duration(milliseconds: 260),
+          lines: const <String>['Her Haven'],
+          style: DiaryPalette.brushHero.copyWith(fontSize: 44),
+          charDuration: const Duration(milliseconds: 200),
           penColor: DiaryPalette.vermilion,
         ),
-        const SizedBox(height: 10),
+        const SizedBox(height: 12),
         Text(
           '先留个名字，再挑张头像',
           style: DiaryPalette.heroTagline,
+        ),
+        const SizedBox(height: 6),
+        Text(
+          'SAPPHIC · 专属空间',
+          style: DiaryPalette.heroTaglineEn,
         ),
       ],
     );
@@ -508,7 +507,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 ? Center(
                     child: InkSeal(
                       text: _nameCtrl.text.trim().isEmpty
-                          ? '念'
+                          ? 'H'
                           : String.fromCharCode(
                               _nameCtrl.text.trim().runes.first),
                       size: 62,

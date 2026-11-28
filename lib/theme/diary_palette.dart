@@ -1,27 +1,26 @@
-/// 碎碎念 · 视觉基调：墨 · 朱 · 纸
+/// 旧配色门面 —— 现在只是 [HavenColors] 的转发层
 ///
-/// 深色是「暗桌上摊着纸片」，浅色是「浅木桌上摊着纸片」。
-/// 唯一的高饱和色始终是印章的朱砂红，只出现在印章、强调和主按钮上。
+/// ★ 为什么不直接删掉它：
+///   全 App 有 197 个 `DiaryPalette.xxx` 调用点。保留这一层转发，
+///   旧界面一行不用改就整体换成 Her Haven 的暗玻璃玫瑰风；
+///   新界面直接写 HavenColors。两边共用同一份真值，改一处全都生效。
 ///
-/// ★ 关于「为什么会有一个可变的静态 mode」
-///   这些颜色被 197 处引用，而且大量嵌在 `const` 构造里。
-///   要改成按 BuildContext 取色（ThemeExtension 那一套），
-///   就得把整棵树的 const 全部摘掉、引用全部重写 —— 改动面极大、
-///   而且没法在本地编译验证。
-///   所以这里用「静态当前模式 + getter」：
-///   成员名一个都不变，调用点完全不用动，只在 MaterialApp 的 builder 里
-///   每帧同步一次系统亮度。系统切深浅色时 MaterialApp 会重建，
-///   builder 跟着跑，整棵树就用新颜色重建了。
-///
-/// ★ 纸色调过三轮：最初 #EFE9DC（对黑底 16.3:1）刺眼，
-///   后来压到 #B4AA96（8.6:1）又偏暗，再取中间值 #CFC8B8（11.8:1）——
-///   但这一版被指出「偏暗又偏黄」，于是降到饱和度、整体提亮到
-///   #DBD6CD（13.6:1）。详见 paper 上面的注释。
+/// ★ 名字保留但语义已经变了，对照表（旧 → 新）：
+///     ink          页面底        → HavenColors.bg
+///     paper        卡片底        → HavenColors.glass
+///     onPaper      卡片上的字    → HavenColors.ink
+///     vermilion    朱砂          → HavenColors.rose（玫瑰）
+///     brush        毛笔体        → 衬线体 Noto Serif SC
+///     round        圆体          → 系统无衬线（PingFang SC）
+///   「纸」和「朱砂」这套词已经名不副实，但改名等于动 197 个调用点，
+///   所以先留着，等新模块铺完再逐步收掉。
 library;
 
 import 'package:flutter/material.dart';
 
-/// 当前配色模式
+import 'haven.dart';
+
+/// 当前配色模式（旧名，实际值来自 HavenColors）
 enum DiaryMode { dark, light }
 
 class DiaryPalette {
@@ -31,112 +30,67 @@ class DiaryPalette {
   // 模式开关
   // ══════════════════════════════════════════════════════════════════
 
-  static DiaryMode _mode = DiaryMode.dark;
+  static DiaryMode get mode =>
+      HavenColors.isLight ? DiaryMode.light : DiaryMode.dark;
 
-  static DiaryMode get mode => _mode;
-  static bool get isLight => _mode == DiaryMode.light;
+  static bool get isLight => HavenColors.isLight;
 
-  /// 由 MaterialApp 的 builder 每帧调用一次，跟随系统深/浅色
+  /// 由 MaterialApp 的 builder 每帧调用一次，跟随系统深/浅色。
+  /// 直接转发给 HavenColors —— 两个门面必须同步，否则会一半新色一半旧色。
   static void syncWith(Brightness brightness) {
-    final next =
-        brightness == Brightness.light ? DiaryMode.light : DiaryMode.dark;
-    if (next != _mode) _mode = next;
+    HavenColors.syncWith(brightness);
   }
 
   // ══════════════════════════════════════════════════════════════════
-  // 颜色 —— 深色 / 浅色两套
+  // 底色
   // ══════════════════════════════════════════════════════════════════
 
-  // ── 底色（App 背景）──────────────────────────────────────────────
-  static Color get ink =>
-      isLight ? const Color(0xFFEDE7DA) : const Color(0xFF0C0B0A);
+  static Color get ink => HavenColors.bg;
+  static Color get inkSoft => HavenColors.bgSoft;
+  static Color get inkGlow => HavenColors.bgGlow;
 
-  static Color get inkSoft =>
-      isLight ? const Color(0xFFE3DCCB) : const Color(0xFF16130F);
+  // ══════════════════════════════════════════════════════════════════
+  // 「纸」→ 玻璃卡
+  // ══════════════════════════════════════════════════════════════════
 
-  /// 背景顶部那层很淡的光晕（碎碎念首页和聊天室都用它）
-  static Color get inkGlow =>
-      isLight ? const Color(0xFFFBF8F1) : const Color(0xFF1F1A14);
+  static Color get paper => HavenColors.glass;
+  static Color get paperDim => HavenColors.glassSunken;
+  static Color get paperEdge => HavenColors.glassBorder;
 
-  // ── 纸（卡片 / 弹窗）────────────────────────────────────────────
-  /// 深色对底 13.6:1；浅色靠影子分层，不靠对比
-  ///
-  /// ★ 2024 调色：原来暗色纸是 #CFC8B8，两点问题 ——
-  ///   * 太暗：L* 只有 58，压在近黑的底上显得发闷
-  ///   * 太黄：饱和度 11.1%、蓝通道比红低 23，米色变成了土黄
-  ///   现在把饱和度砍到 6.2%、整体提亮一档：
-  ///   L* 58 → 67.5，红蓝差 23 → 14。
-  ///   还是暖调的纸，但不再是「黄」的。
-  ///
-  ///   ★ 三个值是一套的，要改一起改，别只动 paper ——
-  ///     纸和凹陷/描边之间的层次关系就是这么维持的。
-  static Color get paper =>
-      isLight ? const Color(0xFFFFFDF8) : const Color(0xFFDBD6CD);
+  static Color get onPaper => HavenColors.ink;
+  static Color get onPaperSoft => HavenColors.inkSoft;
+  static Color get onPaperFaint => HavenColors.inkFaint;
 
-  /// 纸上的凹陷（输入框底、图片占位）
-  static Color get paperDim =>
-      isLight ? const Color(0xFFF2EDE2) : const Color(0xFFCDC9C1);
+  static Color get rule => HavenColors.hairline;
 
-  /// 描边 / 拖拽把手
-  static Color get paperEdge =>
-      isLight ? const Color(0xFFDED6C6) : const Color(0xFFB6B3AB);
+  // ══════════════════════════════════════════════════════════════════
+  // 「朱砂」→ 玫瑰
+  // ══════════════════════════════════════════════════════════════════
 
-  // ── 纸上的字 ────────────────────────────────────────────────────
-  static Color get onPaper =>
-      isLight ? const Color(0xFF23201C) : const Color(0xFF1A1714);
+  static Color get vermilion => HavenColors.rose;
+  static Color get vermilionDeep => HavenColors.roseDeep;
+  static Color get vermilionWash => HavenColors.roseWash;
+  static Color get onVermilion => HavenColors.onRose;
 
-  static Color get onPaperSoft =>
-      isLight ? const Color(0xFF5A5245) : const Color(0xFF3D3830);
+  // ══════════════════════════════════════════════════════════════════
+  // 底色上的字
+  // ══════════════════════════════════════════════════════════════════
 
-  static Color get onPaperFaint =>
-      isLight ? const Color(0xFF8A8070) : const Color(0xFF5C5548);
+  static Color get onInk => HavenColors.ink;
+  static Color get onInkSoft => HavenColors.inkSoft;
+  static Color get onInkFaint => HavenColors.inkFaint;
 
-  /// 纸上的细线
-  static Color get rule =>
-      isLight ? const Color(0x1A3A342C) : const Color(0x1A2A241C);
+  // ══════════════════════════════════════════════════════════════════
+  // 聊天室
+  // ══════════════════════════════════════════════════════════════════
 
-  // ── 朱砂（唯一强调色）──────────────────────────────────────────
-  static Color get vermilion => const Color(0xFFC8452F);
+  static Color get chatBubbleOther => HavenColors.bubbleOther;
+  static Color get chatInputBg => HavenColors.chatInput;
+  static Color get chatAccent => HavenColors.rose;
+  static Color get chatTimeOther => HavenColors.inkFaint;
 
-  /// 纸上的朱砂文字 —— 比 vermilion 深，保证读得清
-  static Color get vermilionDeep =>
-      isLight ? const Color(0xFFB03A26) : const Color(0xFF641D11);
-
-  /// 朱砂淡底（标签胶囊）
-  static Color get vermilionWash =>
-      isLight ? const Color(0x1FC8452F) : const Color(0x24C8452F);
-
-  /// 朱砂底上的文字 —— 别用 paper，纸色在深色模式下会糊
-  static Color get onVermilion => const Color(0xFFFBF7EF);
-
-  // ── 底色上的字 ──────────────────────────────────────────────────
-  static Color get onInk =>
-      isLight ? const Color(0xFF23201C) : const Color(0xFFF1EBE1);
-
-  static Color get onInkSoft =>
-      isLight ? const Color(0xFF5A5245) : const Color(0x99F1EBE1);
-
-  static Color get onInkFaint =>
-      isLight ? const Color(0xFF8A8070) : const Color(0x42F1EBE1);
-
-  // ── 聊天室专用（和碎碎念同一套，只是各模式取值不同）──────────────
-  /// 别人的气泡
-  static Color get chatBubbleOther =>
-      isLight ? const Color(0xFFE8E2D5) : const Color(0xFF221E19);
-
-  /// 输入框 / 顶栏的底
-  static Color get chatInputBg =>
-      isLight ? const Color(0xFFFFFFFF) : const Color(0xFF1C1813);
-
-  /// 暗底上的朱砂提亮版（深色下朱砂原色对比不够）
-  static Color get chatAccent =>
-      isLight ? const Color(0xFFB03A26) : const Color(0xFFE07A62);
-
-  /// 别人气泡上的时间
-  static Color get chatTimeOther =>
-      isLight ? const Color(0xFF7A7266) : const Color(0xFF8C8375);
-
-  /// 在线小绿点
+  /// 在线小绿点 —— 绿色是状态语义，Her Haven 的玫瑰里没有对应色，
+  /// 保留绿，只把明度调到和暗玻璃搭得上。
   static Color get chatOnline =>
       isLight ? const Color(0xFF3E9E5B) : const Color(0xFF5FB878);
 
@@ -144,130 +98,112 @@ class DiaryPalette {
   // 字体族
   // ══════════════════════════════════════════════════════════════════
 
-  /// 毛笔手写体 —— 只用于装饰性文字
-  static const String brush = 'MaShanZheng';
+  /// 衬线体 —— 标题、题词。
+  ///
+  /// ★ 打包的是子集版（只含 UI 固定文案），用户输入的正文走系统字库。
+  ///   完整 Noto Serif SC 有 24MB，全量打包 APK 直接爆。
+  static const String brush = 'NotoSerifSC';
 
-  /// 圆润可爱体 —— 昵称、标签、按钮
-  static const String round = 'ZCOOLKuaiLe';
+  /// 无衬线体 —— 标签、按钮、正文小字。
+  ///
+  /// ★ 故意**不打包**：完整中文无衬线也有 10MB+。
+  ///   'PingFang SC' 在 iOS 上是系统字体，能直接解析；
+  ///   Android 上没有这个族名，Flutter 会优雅回退到系统默认中文字体。
+  ///   这跟原网页写 `"PingFang SC", "Microsoft YaHei", sans-serif`
+  ///   的策略是一样的 —— 声明优先，没有就用系统的。
+  static const String round = 'PingFang SC';
 
   // ══════════════════════════════════════════════════════════════════
-  // 常用文字样式（随模式变化，所以是 getter 不是 const）
+  // 常用文字样式
   // ══════════════════════════════════════════════════════════════════
 
   /// 页头大字
   static TextStyle get brushHero => TextStyle(
         fontFamily: brush,
-        fontSize: 54,
-        height: 1.1,
-        color: onInk,
-        letterSpacing: 1.5,
+        fontSize: 52,
+        height: 1.15,
+        color: HavenColors.inkStrong,
+        fontWeight: FontWeight.w300,
+        letterSpacing: 3,
       );
 
-  /// 循环书写的那句话（顶部会动的那行小字）
+  /// 循环书写的那句话
   static TextStyle get brushLine => TextStyle(
         fontFamily: brush,
-        fontSize: 23,
+        fontSize: 22,
         height: 1.5,
-        color: onInkSoft,
-        letterSpacing: 0.8,
+        color: HavenColors.inkSoft,
+        fontWeight: FontWeight.w300,
+        letterSpacing: 2,
       );
 
-  /// 纸片上的日期 / 小字
+  /// 卡片上的日期 / 小字
   static TextStyle get brushOnPaper => TextStyle(
         fontFamily: brush,
-        fontSize: 15,
-        height: 1.15,
-        color: onPaperFaint,
-        letterSpacing: 0.6,
+        fontSize: 14,
+        height: 1.2,
+        color: HavenColors.inkFaint,
+        fontWeight: FontWeight.w300,
+        letterSpacing: 1,
       );
 
-  /// 页头那句固定题词（不参与动态书写）。
-  /// ★ 用圆体：这句话里有「棵树藏秘密」等毛笔子集里没有的字，
-  ///   硬用毛笔体只会回退成系统字体。
+  /// 页头那句固定题词
   static TextStyle get heroTagline => TextStyle(
         fontFamily: round,
-        fontSize: 15,
-        height: 1.5,
-        color: onInkSoft,
-        letterSpacing: 1.6,
+        fontSize: 14,
+        height: 1.6,
+        color: HavenColors.inkSoft,
+        letterSpacing: 2,
       );
 
   /// 题词的英文翻译 —— 比中文小一号、更淡，当注解看
   static TextStyle get heroTaglineEn => TextStyle(
         fontFamily: round,
-        fontSize: 12,
-        height: 1.5,
-        color: onInkFaint,
-        letterSpacing: 0.5,
+        fontSize: 11.5,
+        height: 1.6,
+        color: HavenColors.inkFaint,
+        letterSpacing: 1.2,
       );
 
-  /// 纸片上的时间 / 日期。
-  /// ★ 圆体：日期里的「年」「月」不在毛笔子集里，用毛笔体会回退成系统字体。
+  /// 卡片上的时间 / 日期
   static TextStyle get timeOnPaper => TextStyle(
         fontFamily: round,
-        fontSize: 12,
-        height: 1.3,
-        color: onPaperFaint,
-        letterSpacing: 0.2,
+        fontSize: 11.5,
+        height: 1.35,
+        color: HavenColors.inkFaint,
+        letterSpacing: 0.4,
       );
 
   /// 页头大字下方的小字
   static TextStyle get heroNote => TextStyle(
         fontFamily: round,
         fontSize: 12.5,
-        height: 1.6,
-        color: onInkSoft,
-        letterSpacing: 0.3,
+        height: 1.7,
+        color: HavenColors.inkSoft,
+        letterSpacing: 0.8,
       );
 
   /// 按钮 / 标签
   static TextStyle get roundLabel => TextStyle(
         fontFamily: round,
-        fontSize: 13.5,
-        height: 1.3,
-        color: onPaperSoft,
-        letterSpacing: 0.4,
+        fontSize: 13,
+        height: 1.35,
+        color: HavenColors.inkSoft,
+        letterSpacing: 1,
       );
 
   static TextStyle get roundOnInk => TextStyle(
         fontFamily: round,
-        fontSize: 13.5,
-        height: 1.3,
-        color: onInkSoft,
-        letterSpacing: 0.4,
+        fontSize: 13,
+        height: 1.35,
+        color: HavenColors.inkSoft,
+        letterSpacing: 1,
       );
 
   // ══════════════════════════════════════════════════════════════════
   // 影子
   // ══════════════════════════════════════════════════════════════════
 
-  /// 浅色模式下卡片和背景对比很低，全靠这层影子分层，所以要更实一点
-  static List<BoxShadow> paperShadow({double lift = 1}) {
-    if (isLight) {
-      return <BoxShadow>[
-        BoxShadow(
-          color: const Color(0xFF3A342C).withValues(alpha: 0.18),
-          blurRadius: 16 * lift,
-          offset: Offset(0, 8 * lift),
-        ),
-        BoxShadow(
-          color: const Color(0xFF3A342C).withValues(alpha: 0.08),
-          blurRadius: 3,
-          offset: const Offset(0, 1),
-        ),
-      ];
-    }
-    return <BoxShadow>[
-      BoxShadow(
-        color: Colors.black.withValues(alpha: 0.30),
-        blurRadius: 16 * lift,
-        offset: Offset(0, 8 * lift),
-      ),
-      BoxShadow(
-        color: Colors.black.withValues(alpha: 0.14),
-        blurRadius: 3,
-        offset: const Offset(0, 1),
-      ),
-    ];
-  }
+  static List<BoxShadow> paperShadow({double lift = 1}) =>
+      HavenColors.glassShadow(lift: lift);
 }

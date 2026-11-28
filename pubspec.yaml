@@ -1,5 +1,5 @@
 name: suisuinian
-description: 碎碎念 —— 日记分享动态 + 视频 + 聊天室
+description: Her Haven —— 暗玻璃玫瑰风的女性私密空间（日记 / 影像 / 同频 / 科普）
 publish_to: 'none'
 version: 2.1.1+1
 
@@ -59,13 +59,14 @@ dev_dependencies:
 flutter:
   uses-material-design: true
 
-  # ★ 日记模块字体（OFL 开源，已做子集化裁剪，见 assets/fonts/README.md）
+  assets:
+    # 网页原图：1.png 直接打包，App 背景与网页完全一致
+    - assets/images/
+
+  # ★ 衬线字体（OFL 开源，按源码实际用到的字做了子集裁剪，见 assets/fonts/README.md）
+  #   网页标题是 Noto Serif SC 的 300 字重；这里先只打进 Light 一档，
+  #   粗一点的标题会由同一份字面渲染 —— 少一个文件，也少一处缺资源的风险。
   fonts:
-    # 毛笔手写体 — 用于页头大字与「动态书写」动画
-    - family: MaShanZheng
+    - family: NotoSerifSC
       fonts:
-        - asset: assets/fonts/MaShanZheng-Regular.ttf
-    # 圆润可爱体 — 用于标签、按钮、小标题等点缀文字
-    - family: ZCOOLKuaiLe
-      fonts:
-        - asset: assets/fonts/ZCOOLKuaiLe-Regular.ttf
+        - asset: assets/fonts/NotoSerifSC-Light.ttf
