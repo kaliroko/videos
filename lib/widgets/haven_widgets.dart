@@ -1340,6 +1340,8 @@ class MoeImagePanel extends StatefulWidget {
     this.width = 180,
     this.height = 250,
     this.kenBurns = false,
+    this.radius = HavenColors.radiusSm,
+    this.overlay,
   });
 
   final int? initialSeed;
@@ -1348,6 +1350,12 @@ class MoeImagePanel extends StatefulWidget {
 
   /// 缓慢呼吸式放大 —— 欢迎页用，静态图也会显得「活着」
   final bool kenBurns;
+
+  /// 圆角，默认 8；hero banner 用 12
+  final double radius;
+
+  /// 压在图片上的内容（标题 / 按钮）。会盖住图片，但「换一张」仍在最上层
+  final Widget? overlay;
 
   @override
   State<MoeImagePanel> createState() => _MoeImagePanelState();
@@ -1399,7 +1407,7 @@ class _MoeImagePanelState extends State<MoeImagePanel>
       clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
         color: const Color(0xFF111111),
-        borderRadius: BorderRadius.circular(HavenColors.radiusSm),
+        borderRadius: BorderRadius.circular(widget.radius),
         border: Border.all(color: HavenColors.glassBorder),
         boxShadow: HavenColors.glassShadow(lift: 1.1),
       ),
@@ -1420,6 +1428,7 @@ class _MoeImagePanelState extends State<MoeImagePanel>
               child: MoeImage(seed: _seed),
             ),
           ),
+          if (widget.overlay != null) Positioned.fill(child: widget.overlay!),
           Positioned(
             top: 12,
             right: 12,

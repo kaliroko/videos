@@ -170,7 +170,7 @@ class _HavenHomeViewState extends State<HavenHomeView> {
                     children: <Widget>[
                       Flexible(
                         child: Text(
-                          '聊天室 / CHAT ROOM',
+                          '社区交流 / CHAT ROOM',
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: HavenColors.cardTitle,
@@ -196,7 +196,7 @@ class _HavenHomeViewState extends State<HavenHomeView> {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    '真实的公共房间 · 图片、表情、回复、撤回',
+                    '隐私加密的公共房间 · 图片、表情、回复、撤回',
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: HavenColors.small,
@@ -219,71 +219,95 @@ class _HavenHomeViewState extends State<HavenHomeView> {
 
   // ── hero ─────────────────────────────────────────────────────────
 
+  /// 现在是「杂志封面」式横幅：动漫图铺满，文字压在底部渐变上。
+  /// 高度从原来的 ~500 收到 320，随机动漫图还在，右上角照样能换一张。
   Widget _buildHero(bool narrow) {
-    final text = Column(
-      crossAxisAlignment:
-          narrow ? CrossAxisAlignment.center : CrossAxisAlignment.start,
-      mainAxisSize: MainAxisSize.min,
+    return MoeImagePanel(
+      width: double.infinity,
+      height: 320,
+      radius: HavenColors.radiusCard,
+      overlay: _buildHeroOverlay(narrow),
+    );
+  }
+
+  Widget _buildHeroOverlay(bool narrow) {
+    return Stack(
+      fit: StackFit.expand,
       children: <Widget>[
-        HavenEyebrow('Welcome to the Sapphic Haven'),
-        const SizedBox(height: 12),
-        Text(
-          '只有全然的接纳与共振',
-          textAlign: narrow ? TextAlign.center : TextAlign.start,
-          style: HavenColors.heroTitle,
-        ),
-        const SizedBox(height: 12),
-        Text(
-          '这里没有男性的凝视，也没有世俗的评判。记录你的情绪、探索身体的愉悦、'
-          '寻找同频的姐妹。想要什么、想被怎样对待，都可以写下来 —— '
-          '身体的感受不需要理由，也不需要向谁解释。',
-          textAlign: narrow ? TextAlign.center : TextAlign.start,
-          style: HavenColors.body,
-        ),
-        const SizedBox(height: 22),
-        Wrap(
-          spacing: 12,
-          runSpacing: 10,
-          alignment: narrow ? WrapAlignment.center : WrapAlignment.start,
-          children: <Widget>[
-            HavenButton(
-              label: '写下私语',
-              onPressed: () => widget.onGo(1),
+        const DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: <Color>[
+                Color(0x000D0A10),
+                Color(0x8C0D0A10),
+                Color(0xD90D0A10),
+                Color(0xFF0D0A10),
+              ],
+              stops: <double>[0.12, 0.42, 0.70, 1.0],
             ),
-            HavenButton(
-              label: '调整呼吸',
-              type: HavenButtonType.ghost,
-              onPressed: () => widget.onGo(6),
-            ),
-          ],
+          ),
+        ),
+        Positioned(
+          left: 18,
+          right: 18,
+          bottom: 16,
+          child: Column(
+            crossAxisAlignment:
+                narrow ? CrossAxisAlignment.center : CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              HavenEyebrow(
+                'Welcome to the Sapphic Haven',
+                color: Colors.white.withValues(alpha: 0.72),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                '全然的接纳与共振',
+                textAlign: narrow ? TextAlign.center : TextAlign.start,
+                style: HavenColors.heroTitle.copyWith(
+                  fontSize: narrow ? 23 : 27,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                '这里没有男性的凝视，也没有世俗的评判。记录你的情绪、探索身体的愉悦、'
+                '寻找同频的姐妹。想要什么、想被怎样对待, 释放自己的性，都可以写下来 —— '
+                '身体的感受不需要理由，也不需要向谁解释。',
+                textAlign: narrow ? TextAlign.center : TextAlign.start,
+                maxLines: 4,
+                overflow: TextOverflow.ellipsis,
+                style: HavenColors.body.copyWith(
+                  fontSize: 12.5,
+                  height: 1.65,
+                  color: const Color(0xFFEDE6F2),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 10,
+                runSpacing: 8,
+                alignment:
+                    narrow ? WrapAlignment.center : WrapAlignment.start,
+                children: <Widget>[
+                  HavenButton(
+                    label: '写下私语',
+                    height: 40,
+                    onPressed: () => widget.onGo(1),
+                  ),
+                  HavenButton(
+                    label: '调整呼吸',
+                    type: HavenButtonType.ghost,
+                    height: 40,
+                    onPressed: () => widget.onGo(6),
+                  ),
+                ],
+              ),
+            ],
+          ),
         ),
       ],
-    );
-
-    const panel = MoeImagePanel(width: 152, height: 206);
-
-    return GlassCard(
-      tint: true,
-      accentLeft: true,
-      iridescent: true,
-      padding: const EdgeInsets.all(22),
-      child: narrow
-          ? Column(
-              mainAxisSize: MainAxisSize.min,
-              children: <Widget>[
-                const MoeImagePanel(width: 152, height: 206),
-                const SizedBox(height: 22),
-                text,
-              ],
-            )
-          : Row(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: <Widget>[
-                Expanded(child: text),
-                const SizedBox(width: 24),
-                panel,
-              ],
-            ),
     );
   }
 
