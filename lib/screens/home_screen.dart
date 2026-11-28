@@ -158,7 +158,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           unselectedIconColor: AppTheme.textTertiary,
           glassSettings: const LiquidGlassSettings(
             thickness:           26,
-            blur:                20,
+            blur:                6,
             refractiveIndex:     1.55,
             saturation:          0.7,
             lightIntensity:      0.55,
